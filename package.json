@@ -1,0 +1,17 @@
+{
+  "name": "erp-v3",
+  "private": true,
+  "version": "4.1.0",
+  "description": "ERP v4.1 front-end + Supabase API + automation smoke tests",
+  "scripts": {
+    "api:dev": "npm run dev --prefix server",
+    "api:install": "npm install --prefix server",
+    "test:smoke": "playwright test -c playwright.config.ts --reporter=line",
+    "test:smoke:ui": "playwright test -c playwright.config.ts --reporter=html",
+    "test:smoke:debug": "PWDEBUG=1 playwright test -c playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}
+

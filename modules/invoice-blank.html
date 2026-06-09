@@ -1,0 +1,205 @@
+<!-- ===== Invoice 空白（過渡應急 PDF，與出貨無關） ===== -->
+<div class="card" id="invBlankListCard">
+  <div class="card-header card-header-flex">
+    <span>
+      Invoice 空白
+      <button type="button" class="btn-sheet" onclick="openSheetLink('commercial_invoice_blank')" title="空白商業發票主檔">Sheet</button>
+      <span style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">過渡應急用 · 發票號 CI-日期-201 起編 · 與出貨無關</span>
+    </span>
+    <span data-help="invoiceBlankMain"></span>
+  </div>
+  <div class="card-body">
+    <div class="button-group" style="margin-bottom:12px;">
+      <input type="text" id="inv_blank_search_keyword" placeholder="關鍵字（發票號／買方）" style="min-width:240px;">
+      <select id="inv_blank_search_status">
+        <option value="">全部狀態</option>
+        <option value="ISSUED">已開立</option>
+        <option value="DRAFT">草稿</option>
+        <option value="VOID">已作廢</option>
+      </select>
+      <button class="btn-secondary" type="button" onclick="invResetBlankSearch_()">重設</button>
+      <button class="btn-secondary" type="button" onclick="invRenderBlankList_()">重新整理</button>
+      <button class="btn-primary" type="button" onclick="invOpenBlankEditor_()">新增</button>
+      <button class="btn-secondary" type="button" onclick="invCopyBlankCiBatch_(this)">複製</button>
+      <button class="btn-secondary" type="button" onclick="invPrintBlankCiPdfBatch_(this)">PDF</button>
+    </div>
+    <div class="table-wrapper" style="max-height:360px;">
+      <table class="data-table inv-ci-list-table">
+        <thead>
+          <tr>
+            <th class="col-ci-pick">
+              <input type="checkbox" id="inv_blank_select_all" title="全選可列印" onchange="invCiListToggleAll_(this, 'invBlankListBody')">
+            </th>
+            <th>發票號</th>
+            <th>買方</th>
+            <th>發票日期</th>
+            <th>狀態</th>
+            <th class="col-ci-actions">操作</th>
+          </tr>
+        </thead>
+        <tbody id="invBlankListBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="invEditorCard" style="display:none;">
+  <div class="card-header card-header-flex">
+    <span>
+      編輯 Invoice 空白
+      <button type="button" class="btn-sheet" onclick="openSheetLink('commercial_invoice_blank_line')" title="空白商業發票明細">Sheet</button>
+      <span id="invEditorHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;"></span>
+    </span>
+    <button class="btn-secondary" type="button" onclick="invCloseBlankEditor_()">返回列表</button>
+  </div>
+  <div class="card-body">
+    <input type="hidden" id="inv_shipment_id">
+    <input type="hidden" id="inv_so_id">
+    <input type="hidden" id="inv_customer_id">
+    <div class="form-grid-4">
+      <div class="form-group">
+        <label>發票日期 Invoice Date *</label>
+        <input type="date" id="inv_ci_date">
+      </div>
+      <div class="form-group">
+        <label>發票號碼 Invoice No. *</label>
+        <div style="display:flex;gap:8px;align-items:center;min-width:0;">
+          <input type="text" id="inv_ci_no" placeholder="CI-20260608-201" style="flex:1;min-width:0;">
+          <button class="btn-secondary" type="button" onclick="invSuggestCiNoClick_(this)" title="依發票日期重新產生當日下一號（201 起）" style="flex-shrink:0;white-space:nowrap;">重選</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>幣別 Currency</label>
+        <select id="inv_ci_currency">
+          <option value="USD">USD 美元</option>
+          <option value="TWD">TWD 新台幣</option>
+          <option value="CNY">CNY 人民幣</option>
+          <option value="EUR">EUR 歐元</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>狀態 Status</label>
+        <input type="text" id="inv_ci_status" readonly placeholder="草稿">
+      </div>
+      <div class="form-group">
+        <label>託運單號 Waybill No.</label>
+        <input type="text" id="inv_ci_waybill" placeholder="Tracking / AWB">
+      </div>
+      <div class="form-group">
+        <label>原產地 Country of Origin</label>
+        <input type="text" id="inv_ci_origin" value="Taiwan">
+      </div>
+      <div class="form-group">
+        <label>貿易條件 Incoterms</label>
+        <select id="inv_ci_incoterms">
+          <option value="">請選擇</option>
+          <option value="EXW">EXW 工廠交貨</option>
+          <option value="FCA">FCA 貨交承運人</option>
+          <option value="FAS">FAS 船邊交貨</option>
+          <option value="FOB">FOB 船上交貨</option>
+          <option value="CFR">CFR 成本加運費</option>
+          <option value="CIF">CIF 成本加保費運費</option>
+          <option value="CPT">CPT 運費付至</option>
+          <option value="CIP">CIP 運費保費付至</option>
+          <option value="DAP">DAP 目的地交貨</option>
+          <option value="DPU">DPU 卸貨地交貨</option>
+          <option value="DDP">DDP 完稅後交貨</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>付款條件 Payment Terms</label>
+        <select id="inv_ci_payment_terms">
+          <option value="">請選擇</option>
+          <option value="T/T in advance">T/T in advance 電匯預付</option>
+          <option value="T/T 30 days">T/T 30 days 電匯30天</option>
+          <option value="T/T 60 days">T/T 60 days 電匯60天</option>
+          <option value="L/C at sight">L/C at sight 即期信用狀</option>
+          <option value="L/C 30 days">L/C 30 days 遠期信用狀30天</option>
+          <option value="L/C 60 days">L/C 60 days 遠期信用狀60天</option>
+          <option value="D/P at sight">D/P at sight 付款交單即期</option>
+          <option value="D/A 30 days">D/A 30 days 承兌交單30天</option>
+          <option value="Net 30">Net 30 淨30天</option>
+          <option value="Net 60">Net 60 淨60天</option>
+          <option value="CAD">CAD 貨到付款</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="font-weight:600;margin:12px 0 6px;font-size:13px;">買方／收件人 Consignee / Buyer</div>
+    <div class="form-grid-4">
+      <div class="form-group">
+        <label>姓名／公司 Name / Company</label>
+        <input type="text" id="inv_ci_buyer_name">
+      </div>
+      <div class="form-group">
+        <label>Consignee ID No.（收件人證號）</label>
+        <input type="text" id="inv_ci_buyer_id_no" placeholder="大陸清關等">
+      </div>
+      <div class="form-group">
+        <label>統一社會信用代碼 (USCI)</label>
+        <input type="text" id="inv_ci_buyer_usci" placeholder="18 位代碼">
+      </div>
+      <div class="form-group">
+        <label>電話 Phone</label>
+        <input type="text" id="inv_ci_buyer_phone">
+      </div>
+      <div class="form-group">
+        <label>國家 Country</label>
+        <input type="text" id="inv_ci_buyer_country">
+      </div>
+      <div class="form-group form-group-span-3">
+        <label>地址 Address</label>
+        <input type="text" id="inv_ci_buyer_address">
+      </div>
+      <div class="form-group" style="grid-column:span 4;">
+        <label>備註 Remarks</label>
+        <input type="text" id="inv_ci_remark">
+      </div>
+    </div>
+
+    <div style="font-weight:600;margin:8px 0 6px;font-size:13px;">明細 Line Items</div>
+    <div class="button-group" id="invStandaloneLineTools" style="margin-bottom:6px;">
+      <button class="btn-secondary" type="button" onclick="invAddBlankCiLine_()">新增明細</button>
+      <button class="btn-secondary" type="button" onclick="invSaveStandaloneDraft_(false)">本機暫存</button>
+      <button class="btn-secondary" type="button" onclick="invClearStandaloneDraft_(false)">清除暫存</button>
+    </div>
+    <div class="table-wrapper" style="max-height:220px;">
+      <table class="data-table inv-ci-lines-table">
+        <thead>
+          <tr>
+            <th>項次 No.</th>
+            <th>品名描述 Description</th>
+            <th>數量 Qty</th>
+            <th>單價 Unit Price</th>
+            <th>總計 Total</th>
+            <th id="invCiLinesOpHead">操作</th>
+          </tr>
+        </thead>
+        <tbody id="invCiLinesBody"></tbody>
+      </table>
+    </div>
+
+    <div class="form-grid-4" style="margin-top:8px;">
+      <div class="form-group">
+        <label>小計 Subtotal</label>
+        <input type="number" id="inv_ci_subtotal" readonly step="0.01">
+      </div>
+      <div class="form-group">
+        <label>合計 Total</label>
+        <input type="number" id="inv_ci_total" readonly step="0.01">
+      </div>
+      <div class="form-group">
+        <label>簽章日期 Signature Date</label>
+        <input type="date" id="inv_ci_signature_date">
+      </div>
+    </div>
+
+    <div class="button-group" style="margin-top:12px;">
+      <button class="btn-primary" id="inv_ci_save_btn" type="button" onclick="invSaveCommercialInvoice(this)">儲存至雲端</button>
+      <button class="btn-secondary" id="inv_ci_void_btn" type="button" onclick="invVoidCommercialInvoice_(this)" style="display:none;">作廢</button>
+      <button class="btn-secondary" id="inv_ci_refresh_btn" type="button" onclick="invRefreshCiPreview_()" style="display:none;">重算明細</button>
+      <button class="btn-secondary" id="inv_ci_pdf_btn" type="button" onclick="downloadCommercialInvoicePdf('2')">列印 PDF</button>
+      <button class="btn-secondary" id="inv_ci_pdf_v2_btn" type="button" onclick="downloadCommercialInvoicePdf('1')">PDF V2</button>
+    </div>
+  </div>
+</div>

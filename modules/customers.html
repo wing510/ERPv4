@@ -1,0 +1,274 @@
+<!-- ===== 編輯卡片 ===== -->
+<div class="card">
+
+  <div class="card-header card-header-flex">
+    <span>
+      Customers 客戶
+      <span class="cust-type-toggle" style="display:inline-flex;align-items:center;gap:12px;margin-left:14px;font-size:13px;font-weight:500;color:#334155;vertical-align:middle;">
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin:0;">
+          <input type="radio" name="c_customer_type" id="c_customer_type_company" value="COMPANY" checked onchange="custSyncCountryPanels_()"> 公司
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin:0;">
+          <input type="radio" name="c_customer_type" id="c_customer_type_person" value="PERSON" onchange="custSyncCountryPanels_()"> 個人
+        </label>
+      </span>
+      <button type="button" class="btn-sheet" onclick="openSheetLink('customer')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
+    </span>
+    <span data-help="customerEdit"></span>
+  </div>
+
+  <div class="card-body">
+
+    <div class="form-grid-4">
+
+      <div class="form-group">
+        <label>客戶ID *</label>
+        <input type="text" id="c_id" placeholder="自動產生ID">
+      </div>
+
+      <div class="form-group">
+        <label>客戶名稱 *</label>
+        <input type="text" id="c_name">
+      </div>
+
+      <div class="form-group">
+        <label>分類 *</label>
+        <select id="c_category">
+          <option value="">請選擇</option>
+          <option value="經銷">經銷</option>
+          <option value="門市">門市</option>
+          <option value="零售">零售</option>
+          <option value="KOL">KOL</option>
+          <option value="公關">公關</option>
+          <option value="企業">企業</option>
+          <option value="電商">電商</option>
+          <option value="其他">其他</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>聯絡人</label>
+        <input type="text" id="c_contact">
+      </div>
+
+      <div class="form-group">
+        <label>電話</label>
+        <input type="text" id="c_phone">
+      </div>
+
+      <div class="form-group">
+        <label>Email</label>
+        <input type="text" id="c_email">
+      </div>
+
+      <div class="form-group" style="grid-column:span 2;">
+        <label>地址</label>
+        <input type="text" id="c_address">
+      </div>
+
+      <div class="form-group">
+        <label>國家</label>
+        <select id="c_country" onchange="custSyncCountryPanels_()">
+          <option value="">請選擇</option>
+          <option value="台灣">台灣</option>
+          <option value="中國">中國</option>
+          <option value="日本">日本</option>
+          <option value="韓國">韓國</option>
+          <option value="新加坡">新加坡</option>
+          <option value="馬來西亞">馬來西亞</option>
+          <option value="越南">越南</option>
+          <option value="印尼">印尼</option>
+          <option value="泰國">泰國</option>
+          <option value="美國">美國</option>
+          <option value="加拿大">加拿大</option>
+          <option value="英國">英國</option>
+          <option value="德國">德國</option>
+          <option value="澳洲">澳洲</option>
+          <option value="其他">其他</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>狀態</label>
+        <div class="erp-status-select-row">
+          <select id="c_status">
+            <option value="ACTIVE">ACTIVE（使用中）</option>
+            <option value="INACTIVE">INACTIVE（停用）</option>
+          </select>
+          <span id="c_status_lamp" class="status-lamp status-lamp--solo status-lamp--active" role="img" title="ACTIVE（使用中）" aria-label="ACTIVE（使用中）"><span class="status-lamp-dot" aria-hidden="true"></span></span>
+        </div>
+      </div>
+
+      <div class="form-group form-group-span-2">
+        <label>備註</label>
+        <input type="text" id="c_remark">
+      </div>
+
+      <div id="c_tw_invoice_row" style="display:none;grid-column:1/-1;">
+        <div class="form-grid-4" style="margin:0;">
+          <div class="form-group">
+            <label>統一編號</label>
+            <input type="text" id="c_tax_id" placeholder="B2B 用；B2C 可空白">
+          </div>
+          <div class="form-group">
+            <label>發票抬頭</label>
+            <input type="text" id="c_invoice_title" placeholder="空白時用客戶名稱">
+          </div>
+          <div class="form-group">
+            <label>發票 Email</label>
+            <input type="text" id="c_invoice_email" placeholder="電子發票寄送">
+          </div>
+          <div class="form-group">
+            <label>預設發票類型</label>
+            <select id="c_invoice_type_default">
+              <option value="B2B">B2B（三聯式）</option>
+              <option value="B2C">B2C（二聯式）</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="c_ci_export_section" style="display:none;grid-column:1/-1;">
+      <div class="form-group" style="margin-top:8px;">
+        <div style="font-weight:600;font-size:13px;color:#334155;">Commercial Invoice（出口英文）</div>
+      </div>
+      <div class="form-grid-4" style="margin:0;">
+      <div class="form-group" style="grid-column:span 2;">
+        <label>Invoice Name (English)</label>
+        <input type="text" id="c_invoice_name_en" placeholder="Buyer company name in English">
+      </div>
+      <div class="form-group">
+        <label id="c_consignee_id_no_label">Consignee ID No.（收件人證號）</label>
+        <input type="text" id="c_consignee_id_no">
+      </div>
+      <div class="form-group">
+        <label id="c_consignee_usci_label">統一社會信用代碼 (USCI)</label>
+        <input type="text" id="c_consignee_usci">
+      </div>
+      <div class="form-group full-width">
+        <label>Invoice Address (English)</label>
+        <input type="text" id="c_invoice_address_en">
+      </div>
+      </div>
+      </div>
+
+      <div id="c_recipient_section" style="grid-column:1/-1;margin-top:4px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span style="font-weight:600;font-size:13px;color:#334155;">收件人（可多筆）</span>
+          <button type="button" class="btn-sheet" onclick="openSheetLink('customer_recipient')" title="在資料庫後台開啟 customer_recipient 表">Sheet</button>
+        </div>
+        <p id="c_recipient_hint" style="font-size:12px;color:#64748b;margin:0 0 8px;">請先建立或載入客戶後，再新增收件人。</p>
+        <div id="c_recipient_panel" style="display:none;">
+          <div class="table-wrapper" style="max-height:180px;margin-bottom:10px;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>中文姓名</th>
+                  <th>英文姓名</th>
+                  <th>地址</th>
+                  <th>電話</th>
+                  <th>備註</th>
+                  <th style="width:120px;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="cRecipientBody"></tbody>
+            </table>
+          </div>
+          <div class="form-grid-4" style="margin:0;">
+            <input type="hidden" id="cr_id">
+            <div class="form-group">
+              <label>中文姓名 *</label>
+              <input type="text" id="cr_name" placeholder="中文姓名">
+            </div>
+            <div class="form-group">
+              <label>英文姓名</label>
+              <input type="text" id="cr_name_en" placeholder="English name">
+            </div>
+            <div class="form-group">
+              <label>電話</label>
+              <input type="text" id="cr_phone" placeholder="電話">
+            </div>
+            <div class="form-group form-group-span-2">
+              <label>地址 *</label>
+              <input type="text" id="cr_address" placeholder="地址">
+            </div>
+            <div class="form-group form-group-span-2">
+              <label>備註</label>
+              <input type="text" id="cr_remark" placeholder="選填">
+            </div>
+          </div>
+          <div class="button-group" style="margin-top:8px;">
+            <button type="button" class="btn-secondary" id="cr_save_btn" onclick="custSaveRecipient_(this)">新增收件人</button>
+            <button type="button" class="btn-secondary" onclick="custClearRecipientForm_()">清除收件人表單</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="button-group">
+      <button class="btn-primary" id="c_create_btn" onclick="createCustomer(this)">建立</button>
+      <button class="btn-secondary" id="c_update_btn" onclick="updateCustomer(this)">更新</button>
+      <button class="btn-secondary" onclick="clearCustomerForm()">清除</button>
+      <button class="btn-secondary" onclick="openLogs('customer', document.getElementById('c_id')?.value || '', 'master')">Log</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== 列表 ===== -->
+<div class="card">
+
+  <div class="card-header card-header-flex">
+    <span>
+      客戶列表
+      <button type="button" class="btn-sheet" onclick="openSheetLink('customer')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
+    </span>
+    <span data-help="customerList"></span>
+  </div>
+
+  <div class="card-body">
+
+    <div class="search-toolbar">
+      <input type="text" id="search_customer_keyword" placeholder="關鍵字（ID／名稱／分類／聯絡／電話／Email／備註）" style="min-width:360px;" title="比對客戶ID、名稱、分類、聯絡人、電話、Email、備註">
+      <select id="search_customer_category">
+        <option value="">全部分類</option>
+        <option value="經銷">經銷</option>
+        <option value="門市">門市</option>
+        <option value="零售">零售</option>
+        <option value="KOL">KOL</option>
+        <option value="公關">公關</option>
+        <option value="企業">企業</option>
+        <option value="電商">電商</option>
+        <option value="其他">其他</option>
+      </select>
+      <select id="search_customer_status">
+        <option value="">全部狀態</option>
+        <option value="ACTIVE">ACTIVE（使用中）</option>
+        <option value="INACTIVE">INACTIVE（停用）</option>
+      </select>
+      <button class="btn-secondary" onclick="resetCustomerSearch()">重設</button>
+    </div>
+
+    <br>
+
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th onclick="sortCustomers('customer_id')">ID <span id="sort-customerId"></span></th>
+            <th onclick="sortCustomers('customer_name')">名稱 <span id="sort-customerName"></span></th>
+            <th onclick="sortCustomers('category')">分類 <span id="sort-category"></span></th>
+            <th onclick="sortCustomers('contact_person')">聯絡人 <span id="sort-contactPerson"></span></th>
+            <th onclick="sortCustomers('phone')">電話 <span id="sort-phone"></span></th>
+            <th onclick="sortCustomers('country')">國家 <span id="sort-country"></span></th>
+            <th class="col-status" onclick="sortCustomers('status')">狀態 <span id="sort-status"></span></th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="customerTableBody"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>

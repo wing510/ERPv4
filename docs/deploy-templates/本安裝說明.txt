@@ -1,0 +1,17 @@
+鼎立 ERP v4.1 — 正式版部署包
+
+【內容】
+  server\     Node API（公司主機安裝）
+  web\        前端靜態檔（IIS 網站目錄）
+  設成Windows服務-說明.txt
+
+【快速安裝】
+  1. 解壓到例如 D:\ERP\
+  2. copy D:\ERP\server\.env.example D:\ERP\server\.env，編輯填入 Supabase 等機密（ERP_ENV_NAME=PROD）
+  3. PowerShell：cd D:\ERP\server → npm install → npm start
+     成功：http://127.0.0.1:1314/health 顯示 ok:true, env:PROD
+  4. web 資料夾整包複製到 IIS 網站根目錄
+  5. 編輯 web\js\core\config.js 的 API_BASE_PROD 為公司 API 網址
+  6. 設成 Windows 服務：見「設成Windows服務-說明.txt」
+
+【資料庫】Supabase 雲端 ERP_DB_PROD正式，不在本機安裝。

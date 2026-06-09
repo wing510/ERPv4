@@ -1,0 +1,37 @@
+鼎立 ERP — Node API 設成 Windows 服務（文字版）
+
+【什麼是 Windows 服務？】
+  背景常駐、開機自動啟動，不必一直開 PowerShell 黑窗。
+  「截圖版」= 每步配一張螢幕截圖的圖文教學；本檔為文字版。
+
+【工具】NSSM https://nssm.cc/download （win64\nssm.exe）
+
+步驟 1：手動確認可跑
+  cd D:\ERP\server
+  npm install
+  npm start
+  瀏覽器 http://127.0.0.1:1314/health → ok:true
+  Ctrl+C 停止
+
+步驟 2：查 node 路徑
+  where.exe node
+  例：C:\Program Files\nodejs\node.exe
+
+步驟 3：管理員 PowerShell 安裝服務
+  nssm install ERP-API
+  Path: C:\Program Files\nodejs\node.exe
+  Startup directory: D:\ERP\server
+  Arguments: src\index.js
+
+步驟 4：啟動
+  nssm start ERP-API
+  或 services.msc → ERP-API → 啟動類型改「自動」
+
+步驟 5：驗收
+  http://127.0.0.1:1314/health → env:PROD
+
+常用：nssm stop ERP-API | nssm restart ERP-API | nssm remove ERP-API confirm
+
+【IIS 前端（選用）】
+  IIS 管理員 → 新增網站 → 實體路徑指向 web\
+  Google OAuth 須加入此外網址為已授權來源

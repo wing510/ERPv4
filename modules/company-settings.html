@@ -1,0 +1,93 @@
+<!-- ===== Company Profile 公司資料 ===== -->
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>
+      Company Profile 公司資料
+      <button type="button" class="btn-sheet" onclick="openSheetLink('erp_company_profile')" title="公司資料（erp_company_profile）">Sheet</button>
+    </span>
+  </div>
+  <div class="card-body">
+    <div class="form-grid-4">
+      <div class="form-group" style="grid-column:span 2;">
+        <label>公司 中文</label>
+        <input type="text" id="cp_company_name_zh" placeholder="鼎立生技股份有限公司">
+      </div>
+      <div class="form-group" style="grid-column:span 2;">
+        <label>公司 English *</label>
+        <input type="text" id="cp_company_name_en" placeholder="DINGLI BIOTECH CO., LTD.">
+      </div>
+
+      <div class="form-group" style="grid-column:span 2;">
+        <label>地址 中文</label>
+        <input type="text" id="cp_address_zh">
+      </div>
+      <div class="form-group" style="grid-column:span 2;">
+        <label>地址 English *</label>
+        <input type="text" id="cp_address_en">
+      </div>
+
+      <div class="form-group">
+        <label>城市 中文</label>
+        <input type="text" id="cp_city_zh" placeholder="新北市">
+      </div>
+      <div class="form-group">
+        <label>城市 English</label>
+        <input type="text" id="cp_city_en" placeholder="New Taipei City">
+      </div>
+      <div class="form-group">
+        <label>國家 中文</label>
+        <input type="text" id="cp_country_zh" value="台灣">
+      </div>
+      <div class="form-group">
+        <label>國家 English</label>
+        <input type="text" id="cp_country_en" value="Taiwan">
+      </div>
+
+      <div class="form-group">
+        <label>郵遞區號 Postal Code</label>
+        <input type="text" id="cp_postal_code">
+      </div>
+      <div class="form-group">
+        <label>統編／稅號 Tax ID</label>
+        <input type="text" id="cp_tax_id">
+      </div>
+      <div class="form-group">
+        <label>電話 Phone</label>
+        <input type="text" id="cp_phone">
+      </div>
+      <div class="form-group">
+        <label>電子郵件 Email</label>
+        <input type="text" id="cp_email">
+      </div>
+      <div class="form-group">
+        <label>預設幣別 Default Currency</label>
+        <select id="cp_default_currency">
+          <option value="USD">USD</option>
+          <option value="TWD">TWD</option>
+          <option value="CNY">CNY</option>
+          <option value="EUR">EUR</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>預設原產地 Default Country of Origin</label>
+        <input type="text" id="cp_default_origin" value="Taiwan">
+      </div>
+      <div class="form-group">
+        <label>預設貿易條件 Default Incoterms</label>
+        <input type="text" id="cp_default_incoterms" placeholder="FOB">
+      </div>
+      <div class="form-group" style="grid-column:span 2;">
+        <label>預設聲明 Default Declaration</label>
+        <input type="text" id="cp_declaration_text" value="I declare that the information is true and correct.">
+      </div>
+      <div class="form-group form-group-span-2">
+        <label>備註 Remark</label>
+        <input type="text" id="cp_remark">
+      </div>
+    </div>
+    <div class="button-group">
+      <button class="btn-primary" type="button" onclick="saveCompanyProfile(this)">儲存</button>
+      <button class="btn-secondary" type="button" onclick="loadCompanyProfileForm()">重新載入</button>
+    </div>
+  </div>
+</div>
