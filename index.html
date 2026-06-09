@@ -1905,7 +1905,7 @@ body.erp-locked .sidebar-backdrop{
 <script src="js/core/inventory-data.js?v=20260524e"></script>
 <script src="js/core/sheet-links.js?v=20260606d"></script>
 <script>
-  /* 本機開發：Live Server / localhost 自動打 Node API（Supabase）；GitHub Pages 不受影響 */
+  /* 本機開發：Live Server / localhost 強制 Node API；GitHub Pages 見 config.js（/ERPv4/ 亦走 DEV） */
   (function () {
     try {
       var host = String(location && location.hostname || "");
@@ -1919,7 +1919,7 @@ body.erp-locked .sidebar-backdrop{
     } catch (_e) {}
   })();
 </script>
-<script src="js/core/config.js?v=20260606a"></script>
+<script src="js/core/config.js?v=20260609a"></script>
 <script src="js/core/ux-guards.js?v=20260425a"></script>
 <script src="js/core/migration-stub.js?v=20260606a"></script>
 <script src="js/core/service.js?v=20260605c"></script>

@@ -9,12 +9,11 @@
     // 方案 B（建議）：同時記錄 DEV/PROD 兩個後端
     // - 你只要填好 API_BASE_PROD / API_BASE_DEV
     // - 前端會依網址自動選擇（或用 ?env=DEV|PROD 強制）
-    API_BASE_PROD:
-      "https://script.google.com/macros/s/AKfycbwSTk9UCvNs62nOvOpjKjN4fJdKx6ty43twqvYI7NXMd8GhoF4mdj3XmjbyyKCMuoob/exec", // v4.1 step8：部署 Node 後改為 https://你的-api/exec
-    API_BASE_DEV:
-      "http://127.0.0.1:1314/exec", // prev: http://127.0.0.1:8787/exec
-    // 相容舊版：若你仍想手動指定單一 API_BASE，可在 window.__ERP_CONFIG__ 直接覆寫 API_BASE
-    API_BASE: "", // prev: https://script.google.com/macros/s/AKfycbzSdWP40h38ps95laROnFNbaBm79a0o54Q6fOcWy6YRpUeaRGV1-RDOMwNFzXuR1UEb/exec
+    // 正式 Node API（公司主機上線後填入，例 http://erp:1314/exec）；留空則 PROD 暫用 DEV
+    API_BASE_PROD: "",
+    API_BASE_DEV: "http://127.0.0.1:1314/exec",
+    // 可手動覆寫單一 API_BASE：window.__ERP_CONFIG__ = { API_BASE: "https://你的-api/exec" };
+    API_BASE: "",
     // 可選：保護 dev_* 動作（後端 Script Properties 的 DEV_GUARD_TOKEN）
     // - 只建議放在 DEV 前端（或本機），正式版不要設定
     DEV_GUARD_TOKEN: "",
@@ -71,11 +70,17 @@
         host2 = String(location && location.hostname || "");
         path2 = String(location && location.pathname || "");
       }catch(_eL){}
-      var looksDev = /(^|\.)dev(\.|$)|test|staging/i.test(host2) || /\/dev(\/|$)/i.test(path2) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin2);
+      var looksDev =
+        /(^|\.)dev(\.|$)|test|staging/i.test(host2) ||
+        /\/dev(\/|$)/i.test(path2) ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin2) ||
+        (/\/ERPv4(\/|$)/i.test(path2) && /\.github\.io$/i.test(host2));
 
       var pickEnv = envQ === "DEV" || envQ === "PROD" ? envQ : (looksDev ? "DEV" : "PROD");
       var prod = String(merged.API_BASE_PROD || "").trim();
       var dev = String(merged.API_BASE_DEV || "").trim();
+      // 不再使用 GAS；PROD 未設定時改連 DEV（本機 Node）
+      if (prod && /script\.google\.com/i.test(prod)) prod = "";
       merged.API_BASE = (pickEnv === "DEV" ? dev : prod) || dev || prod || "";
     }
   }catch(_ePick){
