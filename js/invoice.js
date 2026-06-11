@@ -401,6 +401,17 @@ function invEnrichPdfPayloadForPrint_(payload, opts){
   return { ...payload, buyer };
 }
 
+function invParseDescParenEnZh_(desc){
+  const s = String(desc || "").trim();
+  if(!s) return null;
+  const m = s.match(/^(.+?)\s*[\(（]\s*([^\(\)（）]+?)\s*[\)）]\s*$/u);
+  if(!m) return null;
+  const en = m[1].trim();
+  const zh = m[2].trim();
+  if(!en || !zh || en === zh) return null;
+  return { en, zh };
+}
+
 function invResolveLineDescPdfParts_(ln){
   const p = ln?.product_id ? invFindProduct_(ln.product_id) : null;
   const enProd = String(p?.product_name_en || "").trim();
@@ -410,11 +421,19 @@ function invResolveLineDescPdfParts_(ln){
   }
   const desc = String(ln?.description_en || "").trim();
   if(!desc) return { en: "", zh: "" };
+  const parenParts = invParseDescParenEnZh_(desc);
+  if(parenParts) return parenParts;
   const m = desc.match(/^(.+?)\s+([\u4e00-\u9fff\u3400-\u4dbf][\u4e00-\u9fff\u3400-\u4dbf\s]*)$/u);
   if(m) return { en: m[1].trim(), zh: m[2].trim() };
   if(invTextHasCjk_(desc) && /[a-zA-Z]/.test(desc)){
     const m2 = desc.match(/^([^\u4e00-\u9fff\u3400-\u4dbf]+)\s*(.+)$/u);
-    if(m2) return { en: m2[1].trim(), zh: m2[2].trim() };
+    if(m2){
+      let en = m2[1].trim();
+      let zh = m2[2].trim();
+      en = en.replace(/[\(（]+$/u, "").trim();
+      zh = zh.replace(/^[\)）]+/u, "").replace(/[\)）]+$/u, "").trim();
+      return { en, zh };
+    }
   }
   if(invTextHasCjk_(desc)) return { en: "", zh: desc };
   return { en: desc, zh: "" };
