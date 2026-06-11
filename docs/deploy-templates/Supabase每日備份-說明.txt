@@ -1,0 +1,41 @@
+鼎立 ERP v4.1 — Supabase 每日自動備份（pg_dump）
+
+【適用】ERP_DB_PROD正式（建議）；DEV 可選
+
+【原理】
+  每天排程執行 pg_dump → 產生 .dump 檔 → 存本機資料夾
+  （可將 OutDir 設在 OneDrive 同步資料夾，即自動上傳雲端）
+
+【步驟 1】安裝 pg_dump（主版本須與 Supabase 相同）
+  EDB 下載 PostgreSQL Binaries → Win x86-64 → 選與 Supabase 同版（例 17）
+  解壓到 D:\pgsql\17\，確認：D:\pgsql\17\bin\pg_dump.exe --version
+  若出現 server 17.x / pg_dump 16.x 不相容 → 改裝 17
+
+【步驟 2】取得連線資訊（Windows 建議 Session pooler）
+  Supabase → 你的 PROD 專案 → Project Settings → Database
+  → Connection string → Session pooler
+  - Host：例 aws-0-ap-northeast-1.pooler.supabase.com（以 Dashboard 為準）
+  - User：postgres.專案ref（不是單純 postgres）
+  - Database password：重設後記下（勿寫進 zip）
+  若用 db.xxx.supabase.co 出現 Name or service not known → 改 pooler
+
+【一鍵安裝】（建議，含設定＋測試＋排程）
+  1. 完成 pg_dump 步驟 1
+  2. 右鍵以系統管理員執行 D:\ERP\安裝備份.bat
+  3. 輸入 Session pooler 的 Host、Database password
+  4. 成功：產生 docs\ERPv4.1_Supabase-backup.config.ps1、測試 .dump、排程 ERP-Supabase-Backup-PROD
+
+【手動重跑備份】
+  cd D:\ERP\docs
+  .\ERPv4.1_Supabase-backup.ps1
+
+【改設定】
+  再執行一次 安裝備份.bat，或直接編輯 docs\ERPv4.1_Supabase-backup.config.ps1
+
+【保留策略】（腳本內建）
+  預設 KeepDays=0，不自動刪除；若要自動清舊檔，設定檔改 KeepDays（例 30 = 保留 30 天）
+
+【還原】（需 postgres 客戶端 pg_restore，請在測試庫先練習）
+  pg_restore -h ... -U postgres -d postgres --clean --if-exists 備份.dump
+
+【勿 commit】含 DbPassword 的 ERPv4.1_Supabase-backup.config.ps1

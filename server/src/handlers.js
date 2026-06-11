@@ -55,6 +55,11 @@ const {
   isSuperAdminUserId_,
   verifySuperAdminPassword_
 } = require("./auth-config");
+const {
+  triggerSupabaseBackup,
+  listSupabaseBackups,
+  triggerSupabaseRestore
+} = require("./supabase-backup");
 
 /** 可見管理員：erp_user，Users + 公司設定，密碼可於 Users 重設 */
 const DB_ADMIN_ID = "admin";
@@ -102,12 +107,7 @@ async function resolveSupabaseTableOid_(pgTable) {
   const name = String(pgTable || "").trim();
   if (!name) return null;
 
-  const map = await loadSupabaseTableOidMap_();
-  if (map && map[name] != null) {
-    const n = Number(map[name]);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
+  // 每次即時查 OID（pg_restore 後表 ID 會變，快取舊值會導致 Dashboard 404）
   try {
     const sb = getSupabase();
     const { data, error } = await sb.rpc("erp_pg_table_oid", { p_table: name });
@@ -116,6 +116,12 @@ async function resolveSupabaseTableOid_(pgTable) {
       if (Number.isFinite(n) && n > 0) return n;
     }
   } catch (_e) {}
+
+  const map = await loadSupabaseTableOidMap_();
+  if (map && map[name] != null) {
+    const n = Number(map[name]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
 
   return null;
 }
@@ -182,6 +188,59 @@ function canSetUserPassword_(session, targetUserId) {
   if (isSuperAdminUserId_(actorId)) return true;
   if (actorRole === "CEO" || actorRole === "GA" || actorRole === "ADMIN") return true;
   return actorId.toLowerCase() === target.toLowerCase();
+}
+
+function canManageCompanySettings_(session) {
+  const actorRole = String(session?.role || "").trim().toUpperCase();
+  return actorRole === "CEO" || actorRole === "GA" || actorRole === "ADMIN";
+}
+
+async function updateCompanyProfileRoute(p) {
+  const gate = requireSession(p);
+  if (gate.err) return gate.err;
+  if (!canManageCompanySettings_(gate.session)) {
+    return fail("僅 CEO／GA／ADMIN 可修改公司資料", "ERR_PERMISSION_DENIED");
+  }
+  return updateCompanyProfile(p);
+}
+
+async function triggerSupabaseBackupRoute(p) {
+  const gate = requireSession(p);
+  if (gate.err) return gate.err;
+  if (!canManageCompanySettings_(gate.session)) {
+    return fail("僅 CEO／GA／ADMIN 可執行備份", "ERR_PERMISSION_DENIED");
+  }
+  const actor = String(gate.session.user_id || "").trim();
+  return triggerSupabaseBackup(actor);
+}
+
+async function listSupabaseBackupsRoute(p) {
+  const gate = requireSession(p);
+  if (gate.err) return gate.err;
+  if (!canManageCompanySettings_(gate.session)) {
+    return fail("僅 CEO／GA／ADMIN 可檢視備份紀錄", "ERR_PERMISSION_DENIED");
+  }
+  const limit = Number(p.limit || 10) || 10;
+  return listSupabaseBackups(limit);
+}
+
+function clearErpTableOidCache_() {
+  ERP_TABLE_OID_MAP_CACHE_ = null;
+  ERP_TABLE_OID_MAP_AT_ = 0;
+}
+
+async function triggerSupabaseRestoreRoute(p) {
+  const gate = requireSession(p);
+  if (gate.err) return gate.err;
+  if (!canManageCompanySettings_(gate.session)) {
+    return fail("僅 CEO／GA／ADMIN 可執行還原", "ERR_PERMISSION_DENIED");
+  }
+  const actor = String(gate.session.user_id || "").trim();
+  const fileName = String(p.file_name || "").trim();
+  const confirmToken = String(p.confirm_token || "").trim();
+  const result = await triggerSupabaseRestore(actor, fileName, confirmToken);
+  if (result && result.success) clearErpTableOidCache_();
+  return result;
 }
 
 function requireSession(p) {
@@ -817,7 +876,8 @@ const EXACT_LIST_ROUTES = {
   list_einvoice_line_by_shipment: listEinvoiceLineByShipmentRoute,
   list_commercial_invoice_by_shipment: listCommercialInvoiceByShipmentRoute,
   list_commercial_invoice_by_ci: listCommercialInvoiceByCiRoute,
-  list_commercial_invoice_blank_by_ci: listCommercialInvoiceByCiRoute
+  list_commercial_invoice_blank_by_ci: listCommercialInvoiceByCiRoute,
+  list_supabase_backups: listSupabaseBackupsRoute
 };
 
 async function handleListAction(action, p) {
@@ -848,7 +908,9 @@ const ROUTES = Object.assign(
     cancel_shipment_bundle: cancelShipmentBundle,
     register_einvoice_bundle: registerEinvoiceBundle,
     get_company_profile: getCompanyProfile,
-    update_company_profile: updateCompanyProfile,
+    update_company_profile: updateCompanyProfileRoute,
+    trigger_supabase_backup: triggerSupabaseBackupRoute,
+    trigger_supabase_restore: triggerSupabaseRestoreRoute,
     save_commercial_invoice_bundle: saveCommercialInvoiceBundle,
     save_standalone_commercial_invoice_bundle: saveStandaloneCommercialInvoiceBundle,
     void_commercial_invoice_bundle: voidCommercialInvoiceBundle,
@@ -904,6 +966,8 @@ async function dispatch(action, params) {
         a.endsWith("_cmd") ||
         a === "save_import_document" ||
         a === "get_company_profile" ||
+        a === "trigger_supabase_backup" ||
+        a === "trigger_supabase_restore" ||
         a === "set_user_password" ||
         a === "env_info" ||
         a === "supabase_table_editor_url");

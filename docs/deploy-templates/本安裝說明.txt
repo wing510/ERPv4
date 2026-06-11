@@ -3,7 +3,10 @@
 【內容】
   server\     Node API（公司主機安裝）
   web\        前端靜態檔（IIS 網站目錄）
+  docs\       Supabase 每日備份腳本（2 支）
   設成Windows服務-說明.txt
+  Supabase每日備份-說明.txt
+  安裝備份.bat              一鍵設定備份（建議）
 
 【快速安裝】
   1. 解壓到例如 D:\ERP\
@@ -13,5 +16,12 @@
   4. web 資料夾整包複製到 IIS 網站根目錄
   5. 編輯 web\js\core\config.js 的 API_BASE_PROD 為公司 API 網址
   6. 設成 Windows 服務：見「設成Windows服務-說明.txt」
+  7. 正式庫每日備份（一鍵）：
+     先安裝 pg_dump 17 到 D:\pgsql\17\（見 Supabase每日備份-說明.txt 步驟 1）
+     右鍵「以系統管理員身分執行」安裝備份.bat
+     依提示貼上 Session pooler 的 Host、Database password（DbUser 可從 server\.env 自動帶入）
+     成功：D:\ERP-Backup\supabase 有 .dump，排程 ERP-Supabase-Backup-PROD 每天 00:00
+     詳見 Supabase每日備份-說明.txt
 
 【資料庫】Supabase 雲端 ERP_DB_PROD正式，不在本機安裝。
+【勿打包】含 DbPassword 的 ERPv4.1_Supabase-backup.config.ps1 僅在公司主機現場建立。

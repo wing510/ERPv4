@@ -55,6 +55,17 @@ $tplDir = Join-Path $PSScriptRoot "deploy-templates"
 if (-not (Test-Path $tplDir)) { throw "deploy-templates folder not found" }
 Copy-Item -Path (Join-Path $tplDir "*") -Destination $bundleDir -Force
 
+$docsDst = Join-Path $bundleDir "docs"
+New-Item -ItemType Directory -Path $docsDst -Force | Out-Null
+foreach ($docFile in @(
+  "ERPv4.1_Supabase-backup.ps1",
+  "ERPv4.1_Supabase-backup-setup.ps1"
+)) {
+  $src = Join-Path $PSScriptRoot $docFile
+  if (-not (Test-Path -LiteralPath $src)) { throw ("docs file not found: " + $docFile) }
+  Copy-Item -LiteralPath $src -Destination (Join-Path $docsDst $docFile) -Force
+}
+
 if (Test-Path $OutZip) { Remove-Item $OutZip -Force }
 Compress-Archive -Path $bundleDir -DestinationPath $OutZip -CompressionLevel Optimal
 Remove-Item $stagingRoot -Recurse -Force

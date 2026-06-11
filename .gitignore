@@ -32,5 +32,6 @@ credentials*.json
 client_secret*.json
 docs/client_secret*.json
 docs/ERPv4.1_smoke-config.json
+docs/ERPv4.1_Supabase-backup.config.ps1
 *.zip
 ERP-v4.1-PROD-deploy_*.zip
