@@ -85,8 +85,7 @@ function escAttr_(s){
 }
 
 const USER_MODULE_OPTIONS_ = [
-  // 注意：Dashboard / Trace 為預設權限；Logs 需明確勾選（有限模組帳號）
-  ["company_settings", "Company 公司設定"],
+  // 注意：Dashboard / Trace / Company 公司設定 為預設權限；Logs 需明確勾選（有限模組帳號）
   ["products", "Products 產品"],
   ["suppliers", "Suppliers 供應商"],
   ["customers", "Customers 客戶"],
@@ -105,7 +104,6 @@ const USER_MODULE_OPTIONS_ = [
 ];
 
 const USER_MODULE_GROUPS_ = [
-  { key: "SYS", label: "系統", modules: ["company_settings"] },
   { key: "MASTER", label: "MASTER DATA 主檔", modules: ["products","suppliers","customers","warehouses"] },
   { key: "INBOUND", label: "INBOUND 進貨", modules: ["purchase","import","receive"] },
   { key: "INV", label: "INVENTORY 庫存", modules: ["lots","movements","warehouse_stock"] },

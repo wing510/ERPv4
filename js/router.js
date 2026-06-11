@@ -37,17 +37,12 @@ function erpIsPrivilegedAdminRole_(){
 function erpIsModuleAllowed_(moduleKey){
   var k = String(moduleKey || "").trim();
   if(!k) return true;
-  // 預設所有人都能看
-  if(k === "dashboard" || k === "trace") return true;
+  // 預設所有人都能看（公司設定：人人可檢視，修改權限見 company-settings.js）
+  if(k === "dashboard" || k === "trace" || k === "company_settings") return true;
   var set = erpAllowedModuleSet_();
   // Users：CEO/GA/ADMIN，或 allowed_modules 含 users
   if(k === "users"){
     if(set && set.users) return true;
-    return erpIsPrivilegedAdminRole_();
-  }
-  // 公司設定：CEO/GA/ADMIN 一律可進（與說明一致）；其他人須勾選 company_settings
-  if(k === "company_settings"){
-    if(set && set.company_settings) return true;
     return erpIsPrivilegedAdminRole_();
   }
   // Logs：CEO/GA/ADMIN 一律可進；其他人須勾選 logs

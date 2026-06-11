@@ -589,7 +589,7 @@ const HelpConfig = {
     • 出貨開立 CI／空白 CI 時會帶入此處資料<br>
     <strong>規則：</strong><br>
     • English 公司名稱、English 地址為 CI 必填（儲存時會檢查）<br>
-    • 僅 CEO／GA／ADMIN 可修改；其他人僅能檢視<br>
+    • 所有登入者皆可檢視；僅 CEO／GA／ADMIN 可修改<br>
     • 變更紀錄可到 Logs 查<br>
     <strong>常見提示：</strong><br>
     • 請填 English 公司名稱／English 地址<br>
