@@ -17,10 +17,14 @@
   5. 編輯 web\js\core\config.js 的 API_BASE_PROD 為公司 API 網址
   6. 設成 Windows 服務：見「設成Windows服務-說明.txt」
   7. 正式庫每日備份（一鍵）：
-     先安裝 pg_dump 17 到 D:\pgsql\17\（見 Supabase每日備份-說明.txt 步驟 1）
+     先安裝 pg_dump 17 到 D:\pgsql\17\（見 Supabase每日備份-說明.txt 第四節）
      右鍵「以系統管理員身分執行」安裝備份.bat
      依提示貼上 Session pooler 的 Host、Database password（DbUser 可從 server\.env 自動帶入）
      成功：D:\ERP-Backup\supabase 有 .dump，排程 ERP-Supabase-Backup-PROD 每天 00:00
+  8. ERP 網頁備份／還原（公司設定，選用但建議）：
+     在 server\.env 填入 BACKUP_DB_HOST／USER／PASSWORD、BACKUP_OUT_DIR、PG_DUMP_PATH
+     （與步驟 7 相同連線；詳見 Supabase每日備份-說明.txt 第七節）
+     重啟 Node API 後，CEO／GA／ADMIN 可用「立即備份」與列表「還原」
      詳見 Supabase每日備份-說明.txt
 
 【資料庫】Supabase 雲端 ERP_DB_PROD正式，不在本機安裝。

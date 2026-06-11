@@ -1,41 +1,188 @@
-鼎立 ERP v4.1 — Supabase 每日自動備份（pg_dump）
+鼎立 ERP v4.1 — Supabase 自動備份說明（IT／系統管理員）
+更新：含 ERP 公司設定「Supabase 資料庫備份」與一鍵還原
 
-【適用】ERP_DB_PROD正式（建議）；DEV 可選
+═══════════════════════════════════════════════════════════════
+一、這套備份在做什麼？
+═══════════════════════════════════════════════════════════════
+  Supabase 雲端 DB → pg_dump → 本機 .dump 檔 → （可選）雲端同步資料夾
 
-【原理】
-  每天排程執行 pg_dump → 產生 .dump 檔 → 存本機資料夾
-  （可將 OutDir 設在 OneDrive 同步資料夾，即自動上傳雲端）
+  • 備份的是資料庫，不是 ERP 程式（Node、網頁要另外管理）。
+  • 每天 00:00 自動執行；電腦關機時，開機後會儘快補跑。
+  • 預設 KeepDays=0，不刪舊檔，備份會累加（請留意硬碟／雲端空間）。
 
-【步驟 1】安裝 pg_dump（主版本須與 Supabase 相同）
-  EDB 下載 PostgreSQL Binaries → Win x86-64 → 選與 Supabase 同版（例 17）
-  解壓到 D:\pgsql\17\，確認：D:\pgsql\17\bin\pg_dump.exe --version
-  若出現 server 17.x / pg_dump 16.x 不相容 → 改裝 17
+═══════════════════════════════════════════════════════════════
+二、DEV 與 PROD 要分開
+═══════════════════════════════════════════════════════════════
+  開發機                    公司主機（正式）
+  ─────────────────────────────────────────
+  資料庫   ERP_DB_DEV       ERP_DB_PROD
+  是否必設 可選              必須
+  排程名稱 ERP-Supabase-Backup-DEV   ERP-Supabase-Backup-PROD
 
-【步驟 2】取得連線資訊（Windows 建議 Session pooler）
-  Supabase → 你的 PROD 專案 → Project Settings → Database
-  → Connection string → Session pooler
-  - Host：例 aws-0-ap-northeast-1.pooler.supabase.com（以 Dashboard 為準）
-  - User：postgres.專案ref（不是單純 postgres）
-  - Database password：重設後記下（勿寫進 zip）
-  若用 db.xxx.supabase.co 出現 Name or service not known → 改 pooler
+  開發機備份成功 ≠ 正式資料有備份。
 
-【一鍵安裝】（建議，含設定＋測試＋排程）
-  1. 完成 pg_dump 步驟 1
-  2. 右鍵以系統管理員執行 D:\ERP\安裝備份.bat
-  3. 輸入 Session pooler 的 Host、Database password
-  4. 成功：產生 docs\ERPv4.1_Supabase-backup.config.ps1、測試 .dump、排程 ERP-Supabase-Backup-PROD
+═══════════════════════════════════════════════════════════════
+三、相關檔案
+═══════════════════════════════════════════════════════════════
+  D:\ERP\安裝備份.bat
+    → 一鍵安裝（寫設定、測試備份、建排程）【建議】
 
-【手動重跑備份】
+  docs\ERPv4.1_Supabase-backup-setup.ps1
+    → 安裝主程式（安裝備份.bat 會呼叫）
+
+  docs\ERPv4.1_Supabase-backup.ps1
+    → 每日備份主程式（排程會呼叫）
+
+  docs\ERPv4.1_Supabase-backup.config.ps1
+    → 排程用設定檔（含密碼，一鍵安裝後自動產生）
+
+  server\.env
+    → ERP「立即備份／列表／還原」用 BACKUP_DB_*（見第七節）
+
+  公司設定 → Supabase 資料庫備份（ERP 網頁）
+    → CEO／GA／ADMIN 手動備份、看列表、一鍵還原
+
+  勿打包、勿 commit：
+    ERPv4.1_Supabase-backup.config.ps1、server\.env
+
+═══════════════════════════════════════════════════════════════
+四、安裝前準備
+═══════════════════════════════════════════════════════════════
+【4-1】安裝 pg_dump／pg_restore（只需做一次）
+  1. EDB 下載 PostgreSQL Binaries（Windows x86-64），版本須與 Supabase 一致（目前 17）
+  2. 解壓到 D:\pgsql\17\
+  3. 確認：
+     D:\pgsql\17\bin\pg_dump.exe --version
+     D:\pgsql\17\bin\pg_restore.exe --version
+  若 server 17.x / pg_dump 16.x 不相容 → 改裝 17
+
+【4-2】向 Supabase 取得連線資訊
+  路徑：Project Settings → Database → Connection string → Session pooler
+
+  Host     例 aws-0-ap-northeast-1.pooler.supabase.com（以 Dashboard 為準）
+  User     postgres.專案ref（不是單純 postgres）
+  Password Database password（不是 SUPABASE_SECRET_KEY）
+
+  Windows 請用 Session pooler；勿用 Direct 的 db.xxx.supabase.co（常連線失敗）。
+
+═══════════════════════════════════════════════════════════════
+五、一鍵安裝（公司主機 PROD）
+═══════════════════════════════════════════════════════════════
+  1. ERP 已解壓至 D:\ERP\，且 server\.env 已填 SUPABASE_URL
+  2. pg_dump 17 已安裝
+  3. 右鍵 D:\ERP\安裝備份.bat → 以系統管理員身分執行
+  4. 依提示輸入 DbHost、DbUser（可 Enter 帶入 postgres.專案ref）、DbPassword、OutDir
+     OutDir 預設：D:\ERP-Backup\supabase
+
+  成功判斷：
+  • 畫面 Setup complete
+  • D:\ERP-Backup\supabase 有 erp_supabase_YYYYMMDD-HHMM.dump
+  • 檔案通常 > 100 KB
+  • 工作排程器有 ERP-Supabase-Backup-PROD
+
+═══════════════════════════════════════════════════════════════
+六、開發機 DEV 一鍵安裝
+═══════════════════════════════════════════════════════════════
+  cd D:\ERP\docs
+  .\ERPv4.1_Supabase-backup-setup.ps1 -Env DEV
+  （需系統管理員，才會建立排程 ERP-Supabase-Backup-DEV）
+
+═══════════════════════════════════════════════════════════════
+七、ERP 網頁備份（server/.env）
+═══════════════════════════════════════════════════════════════
+  排程與 ERP「立即備份」可共用同一 OutDir。請在 server\.env 加入：
+
+  BACKUP_DB_HOST=（與 config.ps1 相同 Session pooler Host）
+  BACKUP_DB_USER=postgres.專案ref
+  BACKUP_DB_PASSWORD=（Database password）
+  BACKUP_OUT_DIR=D:\ERP-Backup\supabase
+  PG_DUMP_PATH=D:\pgsql\17\bin\pg_dump.exe
+
+  修改後重啟 Node API。CEO／GA／ADMIN 於「公司設定」可：
+  • 立即備份（檔名含 manual）
+  • 查看最近 10 筆
+  • 一鍵還原（輸入 RESTORE 確認）
+
+═══════════════════════════════════════════════════════════════
+八、備份檔命名
+═══════════════════════════════════════════════════════════════
+  自動：erp_supabase_YYYYMMDD-HHMM.dump
+  手動：erp_supabase_manual_YYYYMMDD-HHMM.dump
+
+  例：erp_supabase_20260610-0000.dump = 2026/6/10 00:00 排程產生
+
+═══════════════════════════════════════════════════════════════
+九、日常操作
+═══════════════════════════════════════════════════════════════
+【排程／命令列手動備份】
   cd D:\ERP\docs
   .\ERPv4.1_Supabase-backup.ps1
 
-【改設定】
-  再執行一次 安裝備份.bat，或直接編輯 docs\ERPv4.1_Supabase-backup.config.ps1
+【ERP 網頁手動備份】
+  公司設定 → Supabase 資料庫備份 → 立即備份
 
-【保留策略】（腳本內建）
-  預設 KeepDays=0，不自動刪除；若要自動清舊檔，設定檔改 KeepDays（例 30 = 保留 30 天）
+【修改設定】
+  • 簡單：再執行一次 安裝備份.bat
+  • 進階：編輯 docs\ERPv4.1_Supabase-backup.config.ps1 與 server\.env
 
-【還原】（需 postgres 客戶端 pg_restore，請在測試庫先練習）
-  pg_restore -h ... -U postgres -d postgres --clean --if-exists 備份.dump
+【備份存到 Google 雲端硬碟】
+  OutDir 設成 Google 雲端硬碟電腦版的本機同步路徑（不能填 Google 網址）。
 
-【勿 commit】含 DbPassword 的 ERPv4.1_Supabase-backup.config.ps1
+═══════════════════════════════════════════════════════════════
+十、保留策略
+═══════════════════════════════════════════════════════════════
+  KeepDays=0（預設）  不刪除，每天累加
+  KeepDays=30         自動刪除超過 30 天的舊檔
+  於 config.ps1 修改 KeepDays。
+
+═══════════════════════════════════════════════════════════════
+十一、還原（請先在 DEV／測試庫練習）
+═══════════════════════════════════════════════════════════════
+  還原會覆寫目標資料庫的 ERP 資料，正式庫請極度謹慎。
+
+【建議方式 A — ERP 一鍵還原】（CEO／GA／ADMIN）
+  公司設定 → Supabase 資料庫備份 → 選檔 → 還原 → 輸入 RESTORE
+  • 僅還原 public schema（ERP 約 32 張業務表）
+  • 不還原 Supabase 登入、storage 等系統 schema
+  • 還原後 Ctrl+F5；必要時重啟 Node API
+
+【方式 B — 命令列】（IT 進階）
+  務必加 -n public，避免全庫還原出現數百個系統 schema 錯誤：
+
+  $env:PGPASSWORD = "目標庫密碼"
+  D:\pgsql\17\bin\pg_restore.exe -h pooler主機 -p 5432 -U postgres.專案ref -d postgres `
+    -n public --clean --if-exists --no-owner --no-acl `
+    "D:\ERP-Backup\supabase\erp_supabase_20260610-0000.dump"
+  Remove-Item Env:PGPASSWORD
+
+  建議：還原到 DEV 或測試專案 → 確認資料 → 才考慮正式還原。
+
+═══════════════════════════════════════════════════════════════
+十二、疑難排解
+═══════════════════════════════════════════════════════════════
+  現象                    原因              處理
+  ─────────────────────────────────────────────────────────
+  Config not found        尚未一鍵安裝      執行 安裝備份.bat
+  備份未設定（ERP）       .env 未填         填 BACKUP_DB_* 重啟 Node
+  pg_dump not found       未安裝            D:\pgsql\17\ 或設 PG_DUMP_PATH
+  0 KB 或檔案太小         連線／密碼錯      核對 pooler、User、Password
+  Name or service not known 用 Direct 連線  改 Session pooler
+  server 17 / pg_dump 16  版本不符          改裝 PostgreSQL 17
+  排程沒產檔              未用管理員安裝    重跑 安裝備份.bat（管理員）
+  還原後表編輯 404        表 OID 變了       重啟 Node API 或重跑 v4.1.08 RPC
+
+═══════════════════════════════════════════════════════════════
+十三、安全注意
+═══════════════════════════════════════════════════════════════
+  1. config.ps1、server\.env 含資料庫密碼 → 勿 email、勿放 zip、勿 commit Git
+  2. .dump 含完整業務資料 → 權限與正式庫同等敏感
+  3. Database password 與 SUPABASE_SECRET_KEY 是不同東西，備份用前者
+
+═══════════════════════════════════════════════════════════════
+十四、每週檢查清單
+═══════════════════════════════════════════════════════════════
+  □ 最新 .dump 日期是否為近期？
+  □ 檔案大小是否正常（非 0 KB）？
+  □ 硬碟／雲端空間是否足夠？
+  □ （正式）排程 ERP-Supabase-Backup-PROD 是否在跑？
+  □ ERP 公司設定備份列表是否正常顯示？

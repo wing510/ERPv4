@@ -598,18 +598,15 @@ const HelpConfig = {
 
   supabaseBackup: `
     <strong>用途：</strong><br>
-    • 將 Supabase 雲端資料庫整庫匯出為 .dump 檔，存於公司主機本機<br>
-    • 「立即備份」為手動；每日 00:00 由主機排程自動備份（檔名無 manual 者為自動）<br>
-    • 列表每列「還原」：僅還原 public schema（ERP 業務表），需輸入 RESTORE 二次確認<br>
+    • 匯出 Supabase 資料庫為 .dump，存於主機（預設 D:\\ERP-Backup\\supabase）<br>
+    • 「立即備份」＝手動；每日 00:00 排程＝自動（檔名無 manual）<br>
+    <strong>還原：</strong><br>
+    • 列表「還原」→ 輸入 RESTORE；僅還原 public（ERP 業務表）<br>
+    • 還原前建議先備份；PROD 請極度謹慎<br>
     <strong>規則：</strong><br>
-    • 僅 CEO／GA／ADMIN 可看見此區塊、執行備份與還原<br>
-    • 需主機已安裝 pg_dump／pg_restore，且 server/.env 已設定 BACKUP_DB_*（Session pooler 連線）<br>
-    • 還原會覆寫現有 ERP 資料，務必先備份；PROD 請極度謹慎<br>
-    <strong>常見提示：</strong><br>
-    • 備份未設定：請 IT 填寫 server/.env 的 BACKUP_DB_HOST／USER／PASSWORD 後重啟 API<br>
-    • 找不到 pg_dump：請安裝 PostgreSQL 17 二進位<br>
-    • 還原後請 Ctrl+F5；Supabase 表編輯連結若失效請重啟 Node API<br>
-    • 列表顯示最近 10 筆；方式「手動」= ERP 按鈕，「自動」= 排程
+    • 僅 CEO／GA／ADMIN 可看見與操作<br>
+    • 需 IT 先安裝 pg_dump 並設定 server/.env 的 BACKUP_DB_*<br>
+    • 完整安裝步驟見主機 Supabase每日備份-說明.txt（zip 根目錄）
   `,
 };
 
