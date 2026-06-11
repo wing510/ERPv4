@@ -16,11 +16,8 @@ function cpCanManageBackup_(){
 
 function cpApplyFormPermissions_(){
   const canEdit = cpCanEdit_();
-  const hint = document.getElementById("cpReadOnlyHint");
   const editActions = document.getElementById("companyProfileEditActions");
   const grid = document.getElementById("companyProfileFormGrid");
-
-  if(hint) hint.style.display = canEdit ? "none" : "";
 
   if(editActions){
     editActions.style.display = canEdit ? "" : "none";
