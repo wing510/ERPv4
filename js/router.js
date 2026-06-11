@@ -25,6 +25,15 @@ function erpAllowedModuleSet_(){
   }
 }
 
+function erpIsPrivilegedAdminRole_(){
+  try{
+    var r = (typeof getCurrentUserRole === "function" ? String(getCurrentUserRole() || "") : "").trim().toUpperCase();
+    return r === "CEO" || r === "GA" || r === "ADMIN" || r === "GENERAL_AFFAIRS";
+  }catch(_e){
+    return false;
+  }
+}
+
 function erpIsModuleAllowed_(moduleKey){
   var k = String(moduleKey || "").trim();
   if(!k) return true;
@@ -34,25 +43,18 @@ function erpIsModuleAllowed_(moduleKey){
   // Users：CEO/GA/ADMIN，或 allowed_modules 含 users
   if(k === "users"){
     if(set && set.users) return true;
-    try{
-      var r = (typeof getCurrentUserRole === "function" ? String(getCurrentUserRole() || "") : "").trim().toUpperCase();
-      return r === "CEO" || r === "GA" || r === "ADMIN";
-    }catch(_e){
-      return false;
-    }
+    return erpIsPrivilegedAdminRole_();
   }
-  // Logs：全開 session 依角色；有限模組清單者須明確勾選 logs
+  // 公司設定：CEO/GA/ADMIN 一律可進（與說明一致）；其他人須勾選 company_settings
+  if(k === "company_settings"){
+    if(set && set.company_settings) return true;
+    return erpIsPrivilegedAdminRole_();
+  }
+  // Logs：CEO/GA/ADMIN 一律可進；其他人須勾選 logs
   if(k === "logs"){
-    if(set){
-      if(set.logs) return true;
-      return false;
-    }
-    try{
-      var r2 = (typeof getCurrentUserRole === "function" ? String(getCurrentUserRole() || "") : "").trim().toUpperCase();
-      return r2 === "CEO" || r2 === "GA" || r2 === "ADMIN";
-    }catch(_e2){
-      return false;
-    }
+    if(erpIsPrivilegedAdminRole_()) return true;
+    if(set && set.logs) return true;
+    return false;
   }
   if(!set) return true; // 全開
   if(k === "invoice" && set.shipping) return true; // 有出貨權限即可開 CI
