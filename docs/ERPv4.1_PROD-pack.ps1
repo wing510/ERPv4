@@ -34,7 +34,8 @@ $serverSrc = Join-Path $RepoRoot "server"
 $serverDst = Join-Path $bundleDir "server"
 if (-not (Test-Path $serverSrc)) { throw "server folder not found" }
 
-$serverExclude = @("node_modules", ".env", ".env.local", ".env.production")
+# sql：由開發者在 Supabase 維護，不隨公司主機部署包發送
+$serverExclude = @("node_modules", "sql", ".env", ".env.local", ".env.production")
 Get-ChildItem -Path $serverSrc -Force | Where-Object {
   $serverExclude -notcontains $_.Name
 } | ForEach-Object {

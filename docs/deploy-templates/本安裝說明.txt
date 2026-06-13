@@ -27,5 +27,5 @@
      重啟 Node API 後，CEO／GA／ADMIN 可用「立即備份」與列表「還原」
      詳見 Supabase每日備份-說明.txt
 
-【資料庫】Supabase 雲端 ERP_DB_PROD正式，不在本機安裝。
+【資料庫】Supabase 雲端 ERP_DB_PROD正式，不在本機安裝；建表 SQL 由開發者更新，不含在本 zip。
 【勿打包】含 DbPassword 的 ERPv4.1_Supabase-backup.config.ps1 僅在公司主機現場建立。
