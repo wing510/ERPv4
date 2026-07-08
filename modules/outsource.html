@@ -52,7 +52,7 @@
         <input type="date" id="proc_planned_date">
       </div>
 
-      <div class="form-group form-group-span-3">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="proc_remark">
       </div>
@@ -82,20 +82,18 @@
 <!-- ===== 投料（Inputs） ===== -->
 <div class="card">
   <div class="card-header card-header-flex">
-    <span>投料（僅限 QA已放行 批次）</span>
+    <span>
+      Issue 投料
+      <span style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">僅限 QA已放行批次；可分批送加工；過帳扣庫</span>
+    </span>
     <span data-help="outsourceInputs"></span>
   </div>
   <div class="card-body">
     <div class="form-grid-4">
-      <div class="form-group">
+      <div class="form-group form-group-span-3">
         <label>Lot *</label>
-        <input type="text" id="proc_input_lot_display" readonly placeholder="請在下方按「選擇 Lot」帶入">
+        <input type="text" id="proc_input_lot_display" readonly placeholder="請先載入加工單，再按「選擇 Lot」帶入">
         <input type="hidden" id="proc_input_lot">
-      </div>
-
-      <div class="form-group">
-        <label>可用量</label>
-        <input type="text" id="proc_input_available" readonly>
       </div>
 
       <div class="form-group">
@@ -107,7 +105,7 @@
         <input type="hidden" id="proc_input_unit" value="">
       </div>
 
-      <div class="form-group full-width">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="proc_input_remark">
       </div>
@@ -125,7 +123,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>項次</th>
+            <th>#</th>
             <th>Lot</th>
             <th>產品（規格）</th>
             <th>倉別</th>
@@ -151,7 +149,7 @@
   <div class="proc-lot-modal-dialog">
     <h3 style="margin:0 0 12px;font-size:18px;color:#1e293b;">選擇 Lot（僅 ACTIVE + QA已放行 + 可用量>0）</h3>
     <div class="search-toolbar" style="margin-bottom:10px;">
-      <input type="text" id="proc_lot_picker_keyword" placeholder="搜尋 Lot ID / 產品名稱 / 倉別" style="min-width:280px;">
+      <input type="text" id="proc_lot_picker_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <select id="proc_lot_picker_viewmode">
         <option value="flat">flat（一般清單）</option>
         <option value="group_source">group_source（依來源分組）</option>
@@ -179,7 +177,10 @@
 <!-- ===== 產出（Outputs） ===== -->
 <div class="card">
   <div class="card-header card-header-flex">
-    <span>回收（可分批；每次產生新 Lot，預設 PENDING）</span>
+    <span>
+      Receive 回收
+      <span style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">可分批；每次產生新批次；須填加工廠 Lot；預設待 QA</span>
+    </span>
     <span data-help="outsourceOutputs"></span>
   </div>
   <div class="card-body">
@@ -187,6 +188,11 @@
       <div class="form-group">
         <label>產出產品 *</label>
         <select id="proc_output_product" onchange="onSelectProcOutputProduct()"></select>
+      </div>
+
+      <div class="form-group">
+        <label>預計可收（參考）</label>
+        <input type="text" id="proc_output_qty_hint" readonly placeholder="選產品後帶入">
       </div>
 
       <div class="form-group">
@@ -204,11 +210,21 @@
       </div>
 
       <div class="form-group">
+        <label>加工廠 Lot *</label>
+        <input type="text" id="proc_output_factory_lot" placeholder="標籤批號（回收入庫必填）">
+      </div>
+
+      <div class="form-group">
+        <label>加工廠 EXP</label>
+        <input type="date" id="proc_output_factory_exp">
+      </div>
+
+      <div class="form-group">
         <label>回收入庫倉庫</label>
         <select id="proc_output_warehouse"></select>
       </div>
 
-      <div class="form-group full-width">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="proc_output_remark">
       </div>
@@ -217,10 +233,7 @@
     <div class="button-group">
       <button class="btn-primary" id="proc_add_output_btn" onclick="addProcOutputDraft()">新增產出</button>
       <button class="btn-secondary" id="proc_update_out_remark_btn" onclick="updateSelectedProcOutputRemark(this)">更新本筆備註</button>
-    </div>
-
-    <div style="margin-top:10px;color:#475569;font-size:13px;">
-      <label style="display:flex;align-items:center;gap:8px;">
+      <label style="display:inline-flex;align-items:center;gap:8px;margin:0;color:#475569;font-size:13px;font-weight:500;white-space:nowrap;">
         <input type="checkbox" id="proc_close_allow_loss">
         本次回收後結案（允許耗損）
       </label>
@@ -231,8 +244,10 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>項次</th>
+            <th>#</th>
             <th>產出產品（規格）</th>
+            <th>加工廠 Lot</th>
+            <th>加工廠 EXP</th>
             <th>回收數量</th>
             <th>狀態</th>
             <th>操作</th>
@@ -257,7 +272,7 @@
   </div>
   <div class="card-body">
     <div class="search-toolbar" style="margin-bottom:12px;">
-      <input type="text" id="proc_search_keyword" placeholder="關鍵字（加工單ID／類型／來源／加工廠）" style="min-width:280px;" title="比對加工單ID、加工類型、來源類別、加工廠ID／名稱">
+      <input type="text" id="proc_search_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <select id="proc_search_status">
         <option value="">全部狀態</option>
         <option value="OPEN">OPEN（開單中）</option>
@@ -276,7 +291,6 @@
             <th>加工廠</th>
             <th>狀態</th>
             <th>建立時間</th>
-            <th>操作</th>
           </tr>
         </thead>
         <tbody id="procTableBody"></tbody>
@@ -289,7 +303,7 @@
 <div class="card">
   <div class="card-header card-header-flex">
     <span>
-      已載入加工單明細（投料 / 產出 / 關聯）
+      已載入加工單明細（投料／產出／關聯）
       <button type="button" class="btn-sheet" onclick="openSheetLink('process_order')" title="加工單主檔（process_order）">Sheet</button>
     </span>
     <span data-help="outsourceList"></span>

@@ -1,8 +1,8 @@
 {
   "name": "erp-api-supabase",
   "private": true,
-  "version": "4.1.0",
-  "description": "ERP v4.1 API (Supabase + Node)",
+  "version": "4.2.0",
+  "description": "ERP v4.2 API (Supabase + Node)",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

@@ -1,0 +1,87 @@
+---
+description: ERP 原子交易與回滾安全規則（高風險必做）
+alwaysApply: false
+globs: server/**
+---
+
+# ERP Transaction Safety
+
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
+任何跨表且不可部分成功的操作，必須分析 Transaction Boundary。
+
+## 強制適用
+
+- POST
+- VOID
+- CANCEL
+- Shipment
+- Receipt
+- Inventory movement
+- AR / AP
+- Payment
+- Refund
+- Write-off
+- Credit
+- Settlement
+- Rebate
+- Cumulative
+- Return
+- Allocation
+- Approval with financial effect
+
+## 原則
+
+若流程：
+
+`A -> B -> C -> D`
+
+任何一步失敗都不允許保留前一步結果時，A/B/C/D 必須位於同一 DB transaction。
+
+## 禁止
+
+- Node 多次 API 呼叫模擬 transaction
+- RPC A 成功後再由 Node 呼叫 RPC B
+- catch error 後人工補 rollback 作為主要策略
+- RPC missing 時 silent fallback legacy（除非符合 00 的「人工核准過渡方案」並記錄 Compatibility/Parity/Test/Removal Plan）
+- 部分成功後只顯示「失敗」
+
+## 必須覆蓋的失敗情境（至少想過/測過）
+
+- DB exception
+- timeout
+- network disconnect
+- process crash
+- unique violation
+- foreign key violation
+- deadlock
+- retry
+- partial success
+
+## Mutation 前置原則
+
+所有可完成的 blocker validation 應在 mutation 前完成：
+
+- entity exists
+- permission
+- status
+- period lock
+- downstream dependency
+- payment existence
+- AR/AP existence
+- lot/item relation
+
+## Transaction Output
+
+實作前必須列出：
+
+- Transaction start
+- Locked rows
+- Validation phase
+- Mutation phase
+- Audit phase
+- Commit point
+- Rollback behavior
+
+若無法證明 partial failure 安全：**NO-GO**
+

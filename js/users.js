@@ -40,6 +40,22 @@ function isBuiltinAdminUser_(userId){
   return String(userId || "").trim().toLowerCase() === "admin";
 }
 
+/** 列表固定順序：CEO → admin → 其餘依 user_id */
+function userListSortRank_(u){
+  const uid = String(u && u.user_id || "").trim().toLowerCase();
+  const role = String(u && u.role || "").trim().toUpperCase();
+  if(role === "CEO" || uid === "ceo") return 0;
+  if(uid === "admin") return 1;
+  return 2;
+}
+
+function userCompareForList_(a, b){
+  const ra = userListSortRank_(a);
+  const rb = userListSortRank_(b);
+  if(ra !== rb) return ra - rb;
+  return String(a && a.user_id || "").localeCompare(String(b && b.user_id || ""), undefined, { sensitivity: "base" });
+}
+
 function canManageUserPassword_(){
   try{
     if(isSuperAdminSession_()) return true;
@@ -99,8 +115,14 @@ const USER_MODULE_OPTIONS_ = [
   ["outsource", "Outsource 委外加工單"],
   ["sales", "Sales Orders 銷售單"],
   ["shipping", "Shipment 出貨管理"],
+  ["commercial_promo", "Promo 促銷方案(寄賣)"],
+  ["commercial_dealer", "Dealer 經銷方案"],
+  ["commercial_dealer_customer", "Dealer 方案客戶"],
+  ["consignment", "Case／Settlement／Return 寄賣"],
   ["invoice", "Invoice 商業發票"],
-  ["invoice_blank", "Invoice 空白"]
+  ["invoice_blank", "Invoice 空白"],
+  ["ar", "AR 應收／收款"],
+  ["dealer_rebate", "Monthly Stat 月結統計"]
 ];
 
 const USER_MODULE_GROUPS_ = [
@@ -108,7 +130,10 @@ const USER_MODULE_GROUPS_ = [
   { key: "INBOUND", label: "INBOUND 進貨", modules: ["purchase","import","receive"] },
   { key: "INV", label: "INVENTORY 庫存", modules: ["lots","movements","warehouse_stock"] },
   { key: "PROC", label: "PROCESS 加工", modules: ["outsource"] },
-  { key: "SALES", label: "SALES 銷售", modules: ["sales","shipping","invoice","invoice_blank"] }
+  { key: "SALES", label: "SALES 銷售", modules: ["sales","shipping"] },
+  { key: "COMM", label: "COMMERCIAL 商業方案", modules: ["commercial_promo", "commercial_dealer", "commercial_dealer_customer"] },
+  { key: "CONSIGN", label: "CONSIGNMENT 寄賣", modules: ["consignment"] },
+  { key: "FIN", label: "FINANCE 財務", modules: ["ar", "dealer_rebate", "invoice", "invoice_blank"] }
 ];
 
 function canEditAllowedModules_(){
@@ -198,7 +223,22 @@ function renderUserModuleOptions_(){
   const line5 = [
     cbHtml("u_grp_SALES", 'data-group="SALES"', "SALES 銷售"),
     cbHtml("u_mod_sales", 'data-mod="sales"', "Sales 銷售單"),
-    cbHtml("u_mod_shipping", 'data-mod="shipping"', "Shipment 出貨"),
+    cbHtml("u_mod_shipping", 'data-mod="shipping"', "Shipment 出貨")
+  ].join("");
+  const line5Comm = [
+    cbHtml("u_grp_COMM", 'data-group="COMM"', "COMMERCIAL 商業方案"),
+    cbHtml("u_mod_commercial_promo", 'data-mod="commercial_promo"', "Promo 促銷方案(寄賣)"),
+    cbHtml("u_mod_commercial_dealer", 'data-mod="commercial_dealer"', "Dealer 經銷方案"),
+    cbHtml("u_mod_commercial_dealer_customer", 'data-mod="commercial_dealer_customer"', "Dealer 方案客戶")
+  ].join("");
+  const line5Consign = [
+    cbHtml("u_grp_CONSIGN", 'data-group="CONSIGN"', "CONSIGNMENT 寄賣"),
+    cbHtml("u_mod_consignment", 'data-mod="consignment"', "Case／Settlement／Return 寄賣")
+  ].join("");
+  const line6 = [
+    cbHtml("u_grp_FIN", 'data-group="FIN"', "FINANCE 財務"),
+    cbHtml("u_mod_ar", 'data-mod="ar"', "AR 應收／收款"),
+    cbHtml("u_mod_dealer_rebate", 'data-mod="dealer_rebate"', "Monthly Stat 月結統計"),
     cbHtml("u_mod_invoice", 'data-mod="invoice"', "Invoice 商業發票"),
     cbHtml("u_mod_invoice_blank", 'data-mod="invoice_blank"', "Invoice 空白")
   ].join("");
@@ -208,7 +248,10 @@ function renderUserModuleOptions_(){
     `<div style="flex:0 0 100%;max-width:100%;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;line-height:1.05;">${line2}</div>`,
     `<div style="flex:0 0 100%;max-width:100%;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;line-height:1.05;">${line3}</div>`,
     `<div style="flex:0 0 100%;max-width:100%;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;line-height:1.05;">${line4}</div>`,
-    `<div style="flex:0 0 100%;max-width:100%;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;line-height:1.05;">${line5}</div>`
+    `<div style="flex:0 0 100%;max-width:100%;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;line-height:1.05;">${line5}</div>`,
+    `<div style="flex:0 0 100%;max-width:100%;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;line-height:1.05;">${line5Comm}</div>`,
+    `<div style="flex:0 0 100%;max-width:100%;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;line-height:1.05;">${line5Consign}</div>`,
+    `<div style="flex:0 0 100%;max-width:100%;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;line-height:1.05;">${line6}</div>`
   ].join("");
 
   // 綁定事件：群組勾選 → 勾全部；單一勾選 → 回填群組狀態
@@ -294,6 +337,7 @@ async function usersInit(){
     ["u_search_role", "change"],
     ["u_search_status", "change"]
   ], () => renderUsers());
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("u_search_status");
   await renderUsers();
   if(typeof bindStatusSelectLamp_ === "function") bindStatusSelectLamp_("u_status");
   if(typeof erpLockStatusSelect_ === "function") erpLockStatusSelect_("u_status");
@@ -374,8 +418,8 @@ async function createUser(triggerEl){
     role,
     status,
     remark,
-    created_at: nowIso16(),
-    updated_at: nowIso16()
+    created_at: nowIsoTaipei(),
+    updated_at: nowIsoTaipei()
   };
   if(allowed_modules != null) payload.allowed_modules = allowed_modules;
   await createRecord("user", payload);
@@ -411,6 +455,14 @@ function userSnapshotFromForm_(){
 async function loadUser(userId){
   const nextId = String(userId || "").trim();
   if(!nextId) return;
+  const curIdEarly = String(document.getElementById("u_id")?.value || "").trim();
+  if(
+    userEditing &&
+    typeof erpTryToggleCloseMasterListRow_ === "function" &&
+    erpTryToggleCloseMasterListRow_(curIdEarly, nextId, "user_edit_card", resetUserForm, "uTableBody")
+  ){
+    return;
+  }
   if(userLoadInFlight_){
     userPendingLoadId_ = nextId;
     showToast(`載入中：已排隊 ${nextId}（完成後自動載入）`, "warn", 6000);
@@ -433,7 +485,7 @@ async function loadUser(userId){
   }catch(_e0){}
   userLoadInFlight_ = true;
   try{
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("user_edit_card");
     const u = await getOne("user","user_id",nextId);
     if(!u) return;
     userEditing = true;
@@ -456,7 +508,7 @@ async function loadUser(userId){
     document.getElementById("u_remark").value = u.remark || "";
     syncUserPasswordVisibility_();
     syncBuiltinAdminFieldLocks_();
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("user_edit_card");
     try{
       if(window.erpDirty_){
         window.erpDirty_.bind("user", userSnapshotFromForm_);
@@ -464,6 +516,7 @@ async function loadUser(userId){
       }
     }catch(_eS){}
     setUserButtons_();
+    if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("uTableBody", "data-row-id", nextId);
   } finally {
     userLoadInFlight_ = false;
     try{
@@ -545,7 +598,7 @@ async function updateUser(triggerEl){
     role,
     status,
     remark,
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   };
   if(allowed_modules != null) patch.allowed_modules = allowed_modules;
   await updateRecord("user","user_id",user_id, patch);
@@ -558,14 +611,16 @@ async function updateUser(triggerEl){
 }
 
 function resetUserListSearch(){
-  userClear_(["u_search_keyword","u_search_role","u_search_status"]);
+  userClear_(["u_search_keyword","u_search_role"]);
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("u_search_status");
   renderUsers();
+  if(typeof resetMasterListView_ === "function") resetMasterListView_("user_edit_card", resetUserForm);
 }
 
 async function renderUsers(){
   const tbody = document.getElementById("uTableBody");
   if(!tbody) return;
-  setTbodyLoading_(tbody, 6);
+  setTbodyLoading_(tbody, 5);
   const list = await getAll("user").catch(()=>[]);
   const kw = (document.getElementById("u_search_keyword")?.value || "").trim().toLowerCase();
   const qRole = (document.getElementById("u_search_role")?.value || "").trim().toUpperCase();
@@ -585,12 +640,12 @@ async function renderUsers(){
     ].map(x => String(x || "").toLowerCase()).join(" ");
     return hay.includes(kw);
   });
-  const sorted = [...filtered].sort((a,b)=>(b.updated_at||"").localeCompare(a.updated_at||""));
+  const sorted = [...filtered].sort(userCompareForList_);
   tbody.innerHTML = "";
   if(!sorted.length){
     const emptyMsg = kw || qRole || qSt
-      ? '<tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px;">沒有符合條件的使用者。</td></tr>'
-      : '<tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px;">尚無使用者。請在上方表單建立。</td></tr>';
+      ? '<tr><td colspan="5" style="text-align:center;color:#64748b;padding:24px;">沒有符合條件的使用者。</td></tr>'
+      : '<tr><td colspan="5" style="text-align:center;color:#64748b;padding:24px;">尚無使用者。請在上方表單建立。</td></tr>';
     tbody.innerHTML = emptyMsg;
     return;
   }
@@ -598,14 +653,17 @@ async function renderUsers(){
     const badge = termStatusLampHtml(u.status);
     const roleCode = String(u.role || "").trim();
     const email = String(u.email || "").trim();
+    const uid = String(u.user_id || "");
+    const safeUid = uid.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("u_id")?.value || "").trim().toUpperCase();
+    const open = selId === uid.trim().toUpperCase();
     tbody.innerHTML += `
-      <tr>
-        <td>${u.user_id || ""}</td>
-        <td>${u.user_name || ""}</td>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${uid.replace(/"/g, "&quot;")}" onclick="loadUser('${safeUid}')">
+        <td title="${escAttr_(uid)}">${escHtml_(typeof erpDisplayOperatorName_ === "function" ? erpDisplayOperatorName_(uid) : uid)}</td>
+        <td>${escHtml_(u.user_name || "")}</td>
         <td${email ? ` title="${escAttr_(email)}"` : ""}>${escHtml_(email || "—")}</td>
         <td${roleCode ? ` title="${escAttr_(roleCode)}"` : ""}>${escHtml_(userRoleLabelZh_(u.role))}</td>
         <td class="col-status">${badge}</td>
-        <td><button class="btn-edit" onclick="loadUser('${u.user_id}')">Load</button></td>
       </tr>
     `;
   });

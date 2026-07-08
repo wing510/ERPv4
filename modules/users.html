@@ -1,8 +1,55 @@
-<!-- ===== Users 使用者 ===== -->
 <div class="card">
   <div class="card-header card-header-flex">
     <span>
       Users 使用者
+      <button type="button" class="btn-sheet" onclick="openSheetLink('user')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
+    </span>
+    <span data-help="usersList"></span>
+  </div>
+  <div class="card-body">
+    <div class="search-toolbar search-toolbar-master" style="margin-bottom:12px;">
+      <input type="text" id="u_search_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
+      <select id="u_search_role">
+        <option value="">全部角色</option>
+        <option value="CEO">CEO</option>
+        <option value="FN">財務（FN）</option>
+        <option value="GA">總務（GA）</option>
+        <option value="OP">作業（OP）</option>
+        <option value="QA">品保（QA）</option>
+        <option value="SL">業務（SL）</option>
+        <option value="AS">助理（AS）</option>
+        <option value="WH">倉管（WH）</option>
+      </select>
+      <select id="u_search_status">
+        <option value="">全部狀態</option>
+        <option value="ACTIVE" selected>ACTIVE（使用中）</option>
+        <option value="INACTIVE">INACTIVE（停用）</option>
+      </select>
+      <button type="button" class="btn-secondary" onclick="resetUserListSearch()">重設</button>
+      <button type="button" class="btn-primary" onclick="newMasterFromList_('user_edit_card', resetUserForm)">新增</button>
+    </div>
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table master-list-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>名稱</th>
+            <th>Email</th>
+            <th>角色</th>
+            <th class="col-status">狀態</th>
+          </tr>
+        </thead>
+        <tbody id="uTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Users 使用者 ===== -->
+<div class="card master-edit-card master-edit-collapsed" id="user_edit_card">
+  <div class="card-header card-header-flex">
+    <span>
+      使用者明細
       <button type="button" class="btn-sheet" onclick="openSheetLink('user')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
     </span>
     <span data-help="usersMain"></span>
@@ -44,7 +91,7 @@
         <label>狀態</label>
         <div class="erp-status-select-row">
           <select id="u_status">
-            <option value="ACTIVE">ACTIVE（使用中）</option>
+            <option value="ACTIVE" selected>ACTIVE（使用中）</option>
             <option value="INACTIVE">INACTIVE（停用）</option>
           </select>
           <span id="u_status_lamp" class="status-lamp status-lamp--solo status-lamp--active" role="img" title="ACTIVE（使用中）" aria-label="ACTIVE（使用中）"><span class="status-lamp-dot" aria-hidden="true"></span></span>
@@ -69,7 +116,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
           <div style="display:flex;align-items:center;gap:10px;">
             <button type="button" class="btn-secondary" id="u_allowed_modules_toggle" style="height:30px;padding:0 10px;display:none;">設定</button>
-            <label style="margin:0;">可用模組（未勾選任何模組＝預設只能使用「Dashboard 儀表板、Lot Traceability 批次追溯」）</label>
+            <label style="margin:0;">可用模組（未勾選＝僅 Dashboard、批次追溯、公司設定）</label>
           </div>
         </div>
         <div id="u_allowed_modules_wrap" style="display:none;margin-top:8px;">
@@ -86,51 +133,3 @@
     </div>
   </div>
 </div>
-
-<div class="card">
-  <div class="card-header card-header-flex">
-    <span>
-      使用者列表
-      <button type="button" class="btn-sheet" onclick="openSheetLink('user')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
-    </span>
-    <span data-help="usersList"></span>
-  </div>
-  <div class="card-body">
-    <div class="search-toolbar" style="margin-bottom:12px;">
-      <input type="text" id="u_search_keyword" placeholder="關鍵字（User ID／姓名／Email／角色／備註）" style="min-width:360px;" title="比對 User ID、姓名、Email、角色、備註">
-      <select id="u_search_role">
-        <option value="">全部角色</option>
-        <option value="CEO">CEO</option>
-        <option value="FN">財務（FN）</option>
-        <option value="GA">總務（GA）</option>
-        <option value="OP">作業（OP）</option>
-        <option value="QA">品保（QA）</option>
-        <option value="SL">業務（SL）</option>
-        <option value="AS">助理（AS）</option>
-        <option value="WH">倉管（WH）</option>
-      </select>
-      <select id="u_search_status">
-        <option value="">全部狀態</option>
-        <option value="ACTIVE">ACTIVE（使用中）</option>
-        <option value="INACTIVE">INACTIVE（停用）</option>
-      </select>
-      <button type="button" class="btn-secondary" onclick="resetUserListSearch()">重設</button>
-    </div>
-    <div class="table-wrapper table-wrapper-master">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>User ID</th>
-            <th>姓名</th>
-            <th>Email</th>
-            <th>角色</th>
-            <th class="col-status">狀態</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="uTableBody"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-

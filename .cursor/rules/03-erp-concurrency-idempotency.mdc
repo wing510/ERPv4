@@ -1,0 +1,86 @@
+---
+description: ERP 競態與冪等安全規則（高風險必做）
+alwaysApply: false
+globs: server/**
+---
+
+# ERP Concurrency and Idempotency
+
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
+任何修改 quantity、amount、balance、status、allocation、credit、cumulative 的功能，必須分析 concurrency 與 retry。
+
+## 必測競態
+
+- double click
+- two browser tabs
+- two users
+- same customer
+- same SO
+- same SO item
+- same lot
+- same AR/AP
+- same payment
+- same settlement
+- same shipment
+- retry after timeout
+
+## 聚合規則
+
+同一 request 中：
+
+- 相同 SO item 多列 -> 先 SUM
+- 相同 Lot 多列 -> 先 SUM
+- 相同 AR 多 allocation -> 先聚合
+- 相同 source 多 adjustment -> 先檢查唯一性
+
+不得逐列檢查舊值後再累加。
+
+## Lock 規則
+
+必要時使用：
+
+- SELECT ... FOR UPDATE
+- optimistic version
+- updated_at check
+- advisory lock
+- UNIQUE constraint
+
+多 row lock 必須固定順序：
+
+`ORDER BY stable_key`
+
+避免 deadlock。
+
+## 競態（Concurrency）
+- 必須說明並行風險（雙擊、兩人、兩分頁、timeout retry）
+- 必須定義鎖策略與鎖序（固定 ORDER BY）
+
+## 冪等（Idempotency）
+- 重要 command 必須定義：
+  - idempotency key
+  - transaction id
+  - source type
+  - source id
+  - request hash when necessary
+
+## 規則
+- 核心流程禁止「silent fallback」；缺關鍵資料必須 fail-closed
+- 只靠 UI disable button 不算防重
+- 禁止 SELECT then INSERT 當唯一防重
+- 禁止 remark 字串當 idempotency key
+- 禁止 client-generated actor 當安全依據
+
+## Retry Contract
+
+相同 request 重送：
+
+- 不得重複 mutation
+- 應回原成功結果或明確已完成結果
+
+相同 idempotency key + 不同 payload：
+
+- 必須拒絕或明確報錯
+
+無法證明 retry safe：**NO-GO**
+

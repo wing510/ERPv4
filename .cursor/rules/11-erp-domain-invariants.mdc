@@ -1,0 +1,66 @@
+---
+description: ERP 專案級不變條件（精簡版：治理不變 + 衝突/未知輸出模板）
+alwaysApply: true
+---
+
+# ERP Domain Invariants（精簡版）
+
+本檔只保存「長期穩定的治理不變」，避免把短期商業細節寫死成永遠規則。
+
+若需要完整條文與當下定案細節，請參考 `docs/ERP_Domain_Invariants.md`（可版本化更新）。
+
+**優先序（避免與專案既有規則衝突）**：
+- 唯一真相仍以現行程式（`js/`、`server/src/`、`server/sql/`）為準。
+- 寫說明／規格時：以現行程式為準（避免沿用過時文件）；若要「改規則/改口徑」才需要走下述衝突模板等待人工決策。
+
+---
+
+## 1) 核心治理不變（不得破壞）
+
+- **Source of Truth 唯一**：同一核心資料只能有一個權威真相；其餘必須標示為 cache / snapshot / derived / audit record。
+- **Fail-Closed**：核心流程找不到必要資料、權限不明、狀態不合法、下游依賴未滿足時，不得 silent fallback / silent continue。
+- **原子交易**：跨表且不可部分成功的操作必須在單一 DB transaction（或等價 RPC）完成；不得靠 Node 多步驟模擬交易。
+- **競態與冪等**：重要 mutation 必須定義並行安全與重送行為；冪等鍵不得依賴不穩定的文字 reason，優先用 `source_type/source_id` + UNIQUE。
+- **POST/VOID 對稱**：POST 必須同步設計 VOID/CANCEL/REVERSAL；VOID 反向原 POST，使用原始 amount/qty/snapshot，保留稽核歷史。
+- **權限與 actor**：UI 不是安全邊界；actor 必須來自 server session/可信 auth context，禁止信任 client 自填 created_by/updated_by/voided_by。
+- **相容性**：除非需求明確要求，不得自行改 UI/API contract/workflow/error behavior/report meaning；差異必須先列清單並取得核准。
+
+---
+
+## 2) 規則衝突處理（強制輸出）
+
+### A. 需求與「文件規則」衝突
+不得自行選擇或偷偷改規則，必須輸出以下欄位後等待人工決策：
+
+- DOCUMENTED_RULE
+- REQUIREMENT
+- CONFLICT
+- RISK
+- OPTIONS
+- RECOMMENDATION
+
+### B. 文件規則與「程式現況」不一致
+不得默默以現況為正確答案，必須輸出：
+
+- DOCUMENTED_RULE
+- CURRENT_BEHAVIOR
+- DIFFERENCE
+- RISK
+- RECOMMENDATION
+
+### C. 無法判斷正式規則（禁止猜）
+遇到兩套邏輯、文件與程式不同、Node 與 SQL 不同等，必須輸出：
+
+- UNKNOWN_BUSINESS_RULE
+- Current behavior A
+- Current behavior B
+- Affected modules
+- Financial/data risk
+- Required decision
+
+---
+
+## 3) 使用方式（高風險變更必做）
+
+當變更被判定為 `00-erp-master-governance.mdc` 的 Task Level A（或需要比照 A 的 B 級重構）時，必須在影響分析與實作前，逐條檢查本檔「核心治理不變」是否被觸犯，並在測試 Gate 補上對應測項。
+

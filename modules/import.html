@@ -41,7 +41,7 @@
         <label>文件連結</label>
         <input type="text" id="import_document_link" placeholder="URL 或檔案連結">
       </div>
-      <div class="form-group full-width">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="import_remark" placeholder="例如：報關注意事項">
       </div>
@@ -111,7 +111,7 @@
         </div>
         <input type="hidden" id="import_item_declared_unit" value="">
       </div>
-      <div class="form-group full-width">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="import_item_remark">
       </div>
@@ -138,7 +138,7 @@
         </colgroup>
         <thead>
           <tr>
-            <th>項次</th>
+            <th>#</th>
             <th>產品（規格）</th>
             <th>稅則號別</th>
             <th>Inv No</th>
@@ -172,7 +172,7 @@
   </div>
   <div class="card-body">
     <div class="search-toolbar">
-      <input type="text" id="search_import_keyword" placeholder="關鍵字（報單ID／報單號／報關／供應商）" style="min-width:300px;" title="比對報單ID、報單號、報關單號、供應商ID／名稱（查驗案號請至上方主檔查看）">
+      <input type="text" id="search_import_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <select id="search_import_status">
         <option value="">全部狀態</option>
         <option value="OPEN">OPEN（未收貨）</option>

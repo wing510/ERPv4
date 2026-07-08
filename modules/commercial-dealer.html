@@ -1,0 +1,137 @@
+<!-- ===== Dealer 經銷方案 ===== -->
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>
+      Dealer 經銷方案
+      <button type="button" class="btn-sheet" onclick="openSheetLink('commercial_dealer_scheme')" title="經銷方案（commercial_dealer_scheme）">Sheet</button>
+      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('commercial_dealer_scheme_tier')" title="級距明細（commercial_dealer_scheme_tier）">Sheet</button>
+    </span>
+    <span data-help="commercialDealerList"></span>
+  </div>
+  <div class="card-body">
+    <div class="search-toolbar search-toolbar-master">
+      <input type="text" id="search_cd_dealer_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
+      <select id="search_cd_dealer_status">
+        <option value="">全部狀態</option>
+        <option value="ACTIVE" selected>生效</option>
+        <option value="DRAFT">草稿</option>
+        <option value="ENDED">結束</option>
+      </select>
+      <select id="search_cd_dealer_type">
+        <option value="">全部類型</option>
+        <option value="MONTHLY_REBATE">月結回饋</option>
+        <option value="CUMULATIVE_AMOUNT">經銷等級</option>
+      </select>
+      <button type="button" class="btn-secondary" onclick="cdDealerResetSearch_()">重設</button>
+      <button type="button" class="btn-primary" onclick="newMasterFromList_('cd_dealer_edit_card', cdDealerClearForm_)">新增</button>
+    </div>
+
+    <br>
+
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table master-list-table">
+        <thead>
+          <tr>
+            <th class="col-master-idname" onclick="cdDealerSort_('scheme_id')"><span class="master-th-id-desk">ID</span><span class="master-th-idname-mob">ID/名稱</span></th>
+            <th class="col-master-name-desk" onclick="cdDealerSort_('scheme_name')">名稱</th>
+            <th onclick="cdDealerSort_('stat_source')">統計來源</th>
+            <th onclick="cdDealerSort_('scheme_type')">類型</th>
+            <th onclick="cdDealerSort_('status')">狀態</th>
+            <th onclick="cdDealerSort_('date_from')">有效期</th>
+            <th onclick="cdDealerSort_('tier_count')">級距數</th>
+          </tr>
+        </thead>
+        <tbody id="cd_dealer_list_tbody">
+          <tr><td colspan="7" class="text-muted">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 方案明細 ===== -->
+<div class="card master-edit-card master-edit-collapsed" id="cd_dealer_edit_card">
+  <div class="card-header card-header-flex">
+    <span>
+      方案明細
+      <button type="button" class="btn-sheet" onclick="openSheetLink('commercial_dealer_scheme')" title="經銷方案（commercial_dealer_scheme）">Sheet</button>
+      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('commercial_dealer_scheme_tier')" title="級距明細（commercial_dealer_scheme_tier）">Sheet</button>
+      <span id="cdDealerStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">月結回饋級距</span>
+    </span>
+    <span data-help="commercialDealer"></span>
+  </div>
+  <div class="card-body">
+    <div class="form-grid-4" style="margin-bottom:8px;">
+      <div class="form-group">
+        <label>方案ID</label>
+        <input type="text" id="cd_dealer_id">
+      </div>
+      <div class="form-group">
+        <label>類型 *</label>
+        <select id="cd_dealer_scheme_type" onchange="cdDealerOnSchemeTypeChange_()">
+          <option value="" selected>請選擇</option>
+          <option value="MONTHLY_REBATE">月結回饋（依月請款淨額給回饋％）</option>
+          <option value="CUMULATIVE_AMOUNT">經銷等級（依累積金額給經銷價）</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>名稱 *</label>
+        <input type="text" id="cd_dealer_name">
+      </div>
+      <div class="form-group">
+        <label>狀態 *</label>
+        <select id="cd_dealer_status">
+          <option value="ACTIVE">生效</option>
+          <option value="DRAFT">草稿</option>
+          <option value="ENDED">結束</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label>有效期起 *</label>
+        <input type="date" id="cd_dealer_date_from">
+      </div>
+      <div class="form-group">
+        <label>有效期迄 *</label>
+        <input type="date" id="cd_dealer_date_to">
+      </div>
+      <div class="form-group">
+        <label>統計來源</label>
+        <select id="cd_dealer_stat_source">
+          <option value="CONSIGNMENT">寄賣</option>
+          <option value="GENERAL">一般銷售</option>
+          <option value="ALL">寄賣＋一般（合併）</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>備註</label>
+        <input type="text" id="cd_dealer_remark">
+      </div>
+    </div>
+
+    <div id="cd_dealer_tier_title" style="font-weight:600;font-size:13px;color:#334155;margin-bottom:6px;">級距明細（月結請款淨額 → 回饋％）</div>
+    <div class="table-wrap" style="margin-bottom:12px;">
+      <table class="data-table">
+        <thead>
+          <tr id="cd_dealer_tier_head_row">
+            <th class="cd-tier-col-label" style="display:none;">等級</th>
+            <th class="cd-tier-col-from">金額下限（含）</th>
+            <th class="cd-tier-col-to">金額上限（含）</th>
+            <th class="cd-tier-col-pct">回饋％</th>
+            <th class="cd-tier-col-rate" style="display:none;">經銷價（折）</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="cd_dealer_tiers_tbody"></tbody>
+      </table>
+    </div>
+    <div class="button-group" style="margin-top:4px;">
+      <button type="button" class="btn-secondary btn-sm" onclick="cdDealerAddTier_()">新增級距</button>
+      <button class="btn-primary" id="cd_dealer_create_btn" type="button" onclick="cdDealerSave_(false)">建立</button>
+      <button class="btn-secondary" id="cd_dealer_update_btn" type="button" onclick="cdDealerSave_(true)">更新</button>
+      <button type="button" class="btn-secondary btn-sm" onclick="cdDealerLoadDefaultTiers_()">載入預設級距</button>
+      <button class="btn-secondary" type="button" onclick="cdDealerClearForm_()">清除</button>
+    </div>
+  </div>
+</div>

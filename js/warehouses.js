@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Warehouses（API 版）
  */
 
@@ -39,7 +39,8 @@ async function warehousesInit(){
     ["search_wh_category", "change"],
     ["search_wh_status", "change"]
   ], () => searchWarehouses());
-  await renderWarehouses();
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("search_wh_status");
+  await searchWarehouses();
   if(typeof bindStatusSelectLamp_ === "function") bindStatusSelectLamp_("wh_status");
   if(typeof erpLockStatusSelect_ === "function") erpLockStatusSelect_("wh_status");
 }
@@ -107,7 +108,7 @@ async function createWarehouse(triggerEl){
         status,
         remark,
         created_by: getCurrentUser(),
-        created_at: nowIso16(),
+        created_at: nowIsoTaipei(),
         updated_by: "",
         updated_at: ""
       });
@@ -145,6 +146,14 @@ function warehouseSnapshotFromForm_(){
 async function loadWarehouse(id){
   const nextId = String(id || "").trim();
   if(!nextId) return;
+  const curIdEarly = String(document.getElementById("wh_id")?.value || "").trim();
+  if(
+    whEditing &&
+    typeof erpTryToggleCloseMasterListRow_ === "function" &&
+    erpTryToggleCloseMasterListRow_(curIdEarly, nextId, "warehouse_edit_card", clearWarehouseForm, "whTableBody")
+  ){
+    return;
+  }
   if(whLoadInFlight_){
     whPendingLoadId_ = nextId;
     showToast(`載入中：已排隊 ${nextId}（完成後自動載入）`, "warn", 6000);
@@ -185,7 +194,7 @@ async function loadWarehouse(id){
     if(addrEl) addrEl.value = row.address || "";
     const rmEl = document.getElementById("wh_remark");
     if(rmEl) rmEl.value = row.remark || "";
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("warehouse_edit_card");
     try{
       if(window.erpDirty_){
         window.erpDirty_.bind("warehouse", warehouseSnapshotFromForm_);
@@ -193,6 +202,7 @@ async function loadWarehouse(id){
       }
     }catch(_eS){}
     setWarehouseButtons_();
+    if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("whTableBody", "data-row-id", nextId);
   } finally {
     whLoadInFlight_ = false;
     try{
@@ -254,7 +264,7 @@ async function updateWarehouse(triggerEl){
         status,
         remark,
         updated_by: getCurrentUser(),
-        updated_at: nowIso16()
+        updated_at: nowIsoTaipei()
       });
     }catch(err){
       // callAPI 會自己 toast（含 Permission denied）；這裡避免未捕捉 Promise 造成 Console 紅字
@@ -274,10 +284,12 @@ async function renderWarehouses(list=null){
   if(!tbody) return;
   let rows = list;
   if(rows == null){
-    setTbodyLoading_(tbody, 4);
+    setTbodyLoading_(tbody, 5);
     rows = await getAll("warehouse").catch(()=>[]);
   }
-  const sorted = [...(rows || [])].sort((a,b)=>String(b.updated_at||"").localeCompare(String(a.updated_at||"")));
+  const sorted = typeof erpSortRowsNewestFirst_ === "function"
+    ? erpSortRowsNewestFirst_(rows, ["updated_at", "created_at"], "warehouse_id")
+    : [...(rows || [])].sort((a,b)=>String(b.updated_at||"").localeCompare(String(a.updated_at||"")));
   tbody.innerHTML = "";
   if(sorted.length === 0){
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#64748b;padding:24px;">尚無倉庫。請先在上方建立倉庫（例如 MAIN）。</td></tr>';
@@ -286,20 +298,26 @@ async function renderWarehouses(list=null){
   sorted.forEach(w=>{
     const catLabel = (typeof termShortZh_ === "function" ? termShortZh_(w.category) : (termLabel(w.category) || w.category || ""));
     const badge = termStatusLampHtml(w.status);
+    const wid = String(w.warehouse_id || "");
+    const safeWid = wid.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("wh_id")?.value || "").trim().toUpperCase();
+    const open = selId === wid.trim().toUpperCase();
+    const addr = typeof masterListEsc_ === "function"
+      ? masterListEsc_(w.address || "")
+      : String(w.address || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
     tbody.innerHTML += `
-      <tr>
-        <td>${w.warehouse_id || ""}</td>
-        <td>${w.warehouse_name || ""}</td>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${wid.replace(/"/g, "&quot;")}" onclick="loadWarehouse('${safeWid}')">
+        ${typeof masterListIdNameCells_ === "function" ? masterListIdNameCells_(w.warehouse_id || "", w.warehouse_name || "") : `<td>${w.warehouse_id || ""}</td><td>${w.warehouse_name || ""}</td>`}
         <td>${catLabel || (w.category || "")}</td>
+        <td class="col-wh-address-desk">${addr || "—"}</td>
         <td class="col-status">${badge}</td>
-        <td><button class="btn-edit" onclick="loadWarehouse('${String(w.warehouse_id||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">Load</button></td>
       </tr>
     `;
   });
 }
 
 async function searchWarehouses(){
-  setTbodyLoading_("whTableBody", 4);
+  setTbodyLoading_("whTableBody", 5);
   const kw = (document.getElementById("search_wh_keyword")?.value || "").trim().toLowerCase();
   const cat = (document.getElementById("search_wh_category")?.value || "").trim().toUpperCase();
   const status = (document.getElementById("search_wh_status")?.value || "").trim().toUpperCase();
@@ -311,13 +329,16 @@ async function searchWarehouses(){
     if(!kw) return true;
     return String(w.warehouse_id||"").toLowerCase().includes(kw) ||
       String(w.warehouse_name||"").toLowerCase().includes(kw) ||
+      String(w.address||"").toLowerCase().includes(kw) ||
       String(w.remark||"").toLowerCase().includes(kw);
   });
   renderWarehouses(result);
 }
 
 async function resetWarehouseSearch(){
-  whClear_(["search_wh_keyword","search_wh_category","search_wh_status"]);
-  await renderWarehouses();
+  whClear_(["search_wh_keyword","search_wh_category"]);
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("search_wh_status");
+  await searchWarehouses();
+  if(typeof resetMasterListView_ === "function") resetMasterListView_("warehouse_edit_card", clearWarehouseForm);
 }
 

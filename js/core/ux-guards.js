@@ -379,6 +379,27 @@
     if (k === "confirm.proc.cancel_order") {
       return "確定取消此加工單？系統會建立回沖庫存異動。";
     }
+    if (k === "confirm.proc.add_output_allow_loss") {
+      return (
+        "預估仍有耗損：" +
+        String(p.lossText || "") +
+        "\n\n若「3) 回收加工品」後要結案，請勾選「本次回收後結案（允許耗損）」。\n未勾選則回收後加工單維持 OPEN，可再補回收。\n\n仍要新增這筆產出？"
+      );
+    }
+    if (k === "confirm.proc.receive_without_allow_loss") {
+      return (
+        "預估仍有耗損：" +
+        String(p.lossText || "") +
+        "\n\n未勾選「允許耗損」，回收後加工單將維持 OPEN（不結案）。\n\n確定執行回收？"
+      );
+    }
+    if (k === "confirm.proc.receive_allow_loss_close") {
+      return (
+        "預估仍有耗損：" +
+        String(p.lossText || "") +
+        "\n\n已勾選「允許耗損」，回收後將結案（POSTED）。\n\n確定執行回收？"
+      );
+    }
     if (k === "confirm.master.load") return masterLoadMessageByKey_(p.key);
     return String(p.fallback || "");
   }

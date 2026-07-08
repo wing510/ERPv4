@@ -1,0 +1,56 @@
+---
+description: ERP UI API 操作相容性規則（高風險必做；詳見 00 路由）
+alwaysApply: false
+globs: server/**
+---
+
+# ERP UI and API Compatibility
+
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
+安全重構不得自行改亂使用者操作。
+
+## 除非需求明確要求，禁止自行修改
+- UI layout
+- button
+- field
+- workflow
+- page sequence
+- API request contract
+- API response contract
+- error behavior
+- report meaning
+
+## Refactor Rule
+
+- Node -> RPC
+- Legacy -> Transaction
+- JS pricing -> DB pricing
+
+原則上必須保持：
+
+- Same User Operation
+- Same Business Result
+- Same API Contract
+
+## Routing Safety
+
+若新流程只支援部分類型（例如 NORMAL -> new RPC、CONSIGNMENT -> legacy）：
+
+- 必須明確 routing
+- 禁止全部切換後才發現 unsupported flow
+
+## Error Mapping
+
+- DB error code 不得直接裸露給使用者
+- Node/API 必須轉換成使用者看得懂的訊息
+
+例：
+
+`ERR_AR_HAS_PAYMENT` -> `已有收款紀錄，無法作廢`
+
+## Parity
+Parity 規則以 `06-erp-business-rule-parity.mdc` 為唯一母規則；本檔只要求「列差異、分類、未核准不得改」。
+
+UI/API regression 未確認：**NO-GO**
+

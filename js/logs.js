@@ -29,7 +29,7 @@ function logsClear_(ids){
  */
 const LOG_TAB_TABLES = {
   all: null,
-  master: ["product","supplier","customer","customer_recipient","user","erp_company_profile"],
+  master: ["product","supplier","customer","customer_recipient","warehouse","user","erp_user","erp_company_profile"],
   inbound: [
     "purchase_order","purchase_order_item",
     "import_document","import_item","import_receipt","import_receipt_item",
@@ -38,41 +38,108 @@ const LOG_TAB_TABLES = {
   inventory: ["lot","inventory_movement","lot_relation","lot_balance"],
   process: ["process_order","process_order_input","process_order_output"],
   sales: ["sales_order","sales_order_item"],
-  shipment: ["shipment","shipment_item","commercial_invoice","commercial_invoice_line","commercial_invoice_blank","commercial_invoice_blank_line"]
+  shipment: ["shipment","shipment_item","commercial_invoice","commercial_invoice_line","commercial_invoice_blank","commercial_invoice_blank_line"],
+  finance: ["ar_receivable","ar_payment","consignment_case","consignment_case_pool_item","consignment_case_settlement","consignment_case_settlement_item","consignment_case_return","consignment_case_return_item"]
 };
 
-/** 資料表名稱：英文（中文）供下拉與列表顯示 */
-const LOG_TABLE_LABELS = {
-  product: "product（產品）",
-  supplier: "supplier（供應商）",
-  customer: "customer（客戶）",
-  customer_recipient: "customer_recipient（客戶收件人）",
-  user: "user（使用者）",
-  erp_company_profile: "erp_company_profile（公司設定）",
-  purchase_order: "purchase_order（採購單）",
-  purchase_order_item: "purchase_order_item（採購明細）",
-  import_document: "import_document（進口報單）",
-  import_item: "import_item（報單品項）",
-  import_receipt: "import_receipt（進口收貨）",
-  import_receipt_item: "import_receipt_item（進口收貨明細）",
-  goods_receipt: "goods_receipt（收貨入庫）",
-  goods_receipt_item: "goods_receipt_item（收貨明細）",
-  lot: "lot（批次）",
-  inventory_movement: "inventory_movement（庫存異動）",
-  lot_relation: "lot_relation（批次關聯）",
-  process_order: "process_order（加工單）",
-  process_order_input: "process_order_input（加工投料）",
-  process_order_output: "process_order_output（加工產出）",
-  sales_order: "sales_order（銷售單）",
-  sales_order_item: "sales_order_item（銷售明細）",
-  shipment: "shipment（出貨單）",
-  shipment_item: "shipment_item（出貨明細）",
-  commercial_invoice: "commercial_invoice（商業發票）",
-  commercial_invoice_line: "commercial_invoice_line（商業發票明細）",
-  commercial_invoice_blank: "commercial_invoice_blank（空白商業發票）",
-  commercial_invoice_blank_line: "commercial_invoice_blank_line（空白商業發票明細）",
-  lot_balance: "lot_balance（庫存快照）",
-  logs: "logs（操作紀錄）"
+/** 資料表中文名；列表只顯示中文，滑鼠移過顯示原始英文表名 */
+const LOG_TABLE_ZH_ = {
+  product: "產品",
+  supplier: "供應商",
+  customer: "客戶",
+  customer_recipient: "客戶收件人",
+  warehouse: "倉庫",
+  user: "使用者",
+  erp_user: "使用者",
+  erp_company_profile: "公司設定",
+  purchase_order: "採購單",
+  purchase_order_item: "採購明細",
+  import_document: "進口報單",
+  import_item: "報單品項",
+  import_receipt: "進口收貨",
+  import_receipt_item: "進口收貨明細",
+  goods_receipt: "收貨入庫",
+  goods_receipt_item: "收貨明細",
+  lot: "批次",
+  inventory_movement: "庫存異動",
+  lot_relation: "批次關聯",
+  process_order: "加工單",
+  process_order_input: "加工投料",
+  process_order_output: "加工產出",
+  sales_order: "銷售單",
+  sales_order_item: "銷售明細",
+  shipment: "出貨單",
+  shipment_item: "出貨明細",
+  commercial_invoice: "商業發票",
+  commercial_invoice_line: "商業發票明細",
+  commercial_invoice_blank: "空白商業發票",
+  commercial_invoice_blank_line: "空白商業發票明細",
+  ar_receivable: "應收帳款",
+  ar_payment: "收款紀錄",
+  consignment_track: "寄賣追蹤（舊 v4.2）",
+  consignment_settlement: "寄賣結算（舊 v4.2）",
+  consignment_settlement_item: "寄賣結算明細（舊 v4.2）",
+  consignment_return: "寄賣未售退回（舊 v4.2）",
+  consignment_return_item: "寄賣退回明細（舊 v4.2）",
+  consignment_case: "寄賣案件",
+  consignment_case_pool_item: "寄賣案件品項池",
+  consignment_case_settlement: "寄賣案件結算",
+  consignment_case_settlement_item: "寄賣案件結算明細",
+  consignment_case_return: "寄賣案件收回",
+  consignment_case_return_item: "寄賣案件收回明細",
+  lot_balance: "庫存快照",
+  logs: "操作紀錄"
+};
+
+/** 操作類型中文；列表只顯示中文，滑鼠移過顯示原始 action_type */
+const LOG_ACTION_LABELS = {
+  CREATE: "建立",
+  UPDATE: "更新",
+  DELETE: "刪除",
+  BUNDLE_CANCEL_PURCHASE_ORDER: "取消採購單",
+  BUNDLE_CANCEL_SALES_ORDER: "取消銷售單",
+  BUNDLE_POST_SHIPMENT: "出貨過帳",
+  BUNDLE_CANCEL_SHIPMENT: "取消出貨",
+  BUNDLE_CREATE_CONSIGNMENT_TRACK: "建立寄賣追蹤",
+  BUNDLE_POST_CONSIGNMENT_SETTLEMENT: "寄賣結算過帳",
+  BUNDLE_POST_CONSIGNMENT_RETURN: "寄賣未售退回",
+  BUNDLE_CREATE_CONSIGNMENT_CASE: "建立寄賣案件",
+  BUNDLE_POST_CONSIGNMENT_CASE_SETTLEMENT: "寄賣案件結算過帳",
+  BUNDLE_CANCEL_CONSIGNMENT_CASE_SETTLEMENT: "寄賣案件結算作廢",
+  BUNDLE_VOID_AR_FROM_CASE_SETTLEMENT_CANCEL: "作廢寄賣結算應收",
+  BUNDLE_POST_CONSIGNMENT_CASE_RETURN: "寄賣案件收回過帳",
+  BUNDLE_CANCEL_CONSIGNMENT_CASE_RETURN: "寄賣案件收回作廢",
+  BUNDLE_ADD_CASE_POOL_FROM_SHIPMENT: "出貨加入案件品項池",
+  BUNDLE_REMOVE_CASE_POOL_FROM_SHIPMENT_CANCEL: "出貨作廢移除案件品項池",
+  BUNDLE_CREATE_AR_FROM_SHIPMENT: "出貨產生應收",
+  BUNDLE_CREATE_AR_FROM_SETTLEMENT: "寄賣結算產生應收",
+  BUNDLE_REGISTER_AR_PAYMENT: "登記應收收款",
+  BUNDLE_UPDATE_AR_PAYMENT: "修改應收收款",
+  BUNDLE_ADJUST_AR_AMOUNT: "調整應收金額",
+  BUNDLE_SETTLE_AR: "應收結清",
+  BUNDLE_FORCE_CLOSE_AR: "應收手動沖銷結案",
+  CREATE_PROCESS_ORDER: "建立加工單",
+  BUNDLE_ISSUE_PROCESS_ORDER: "加工送料",
+  BUNDLE_RECEIVE_PROCESS_OUTPUT: "加工收料",
+  BUNDLE_RETRACT_PROCESS_ISSUE: "撤回加工送料",
+  BUNDLE_VOID_PROCESS_OUTPUT: "作廢加工產出",
+  BUNDLE_VOID_COMMERCIAL_DEALER_REBATE: "作廢經銷月結回饋",
+  BUNDLE_POST_COMMERCIAL_DEALER_REBATE: "產生經銷月結回饋",
+  BUNDLE_CANCEL_PROCESS_ORDER: "取消加工單",
+  POST_GOODS_RECEIPT: "收貨入庫過帳",
+  CANCEL_GOODS_RECEIPT: "取消收貨入庫",
+  POST_IMPORT_RECEIPT: "進口收貨過帳",
+  CANCEL_IMPORT_RECEIPT: "取消進口收貨",
+  SAVE_IMPORT_DOCUMENT: "儲存進口報單",
+  CANCEL_IMPORT_DOCUMENT: "取消進口報單",
+  SAVE_COMMERCIAL_INVOICE: "儲存商業發票",
+  SAVE_COMMERCIAL_INVOICE_BLANK: "儲存空白商業發票",
+  VOID_COMMERCIAL_INVOICE: "作廢商業發票",
+  VOID_COMMERCIAL_INVOICE_BLANK: "作廢空白商業發票",
+  UPDATE_COMPANY_PROFILE: "更新公司設定",
+  REGISTER_EINVOICE: "登記電子發票",
+  POST_TRANSFER: "批次調撥",
+  REBUILD_LOT_BALANCE: "重建庫存快照"
 };
 
 function logsDaysFromRange_(rangeVal) {
@@ -82,15 +149,31 @@ function logsDaysFromRange_(rangeVal) {
   return isNaN(n) ? 90 : n;
 }
 
-function getLogTableLabel_(tableName){
+function getLogTableZh_(tableName){
   const t = String(tableName || "").trim();
-  return LOG_TABLE_LABELS[t] || t;
+  return LOG_TABLE_ZH_[t] || t;
+}
+
+function getLogTableLabel_(tableName){
+  return getLogTableZh_(tableName);
+}
+
+function getLogActionZh_(actionType){
+  const a = String(actionType || "").trim();
+  if(!a) return "";
+  return LOG_ACTION_LABELS[a] || a;
+}
+
+function logsOperatorLabel_(createdBy){
+  if(typeof erpDisplayOperatorName_ === "function") return erpDisplayOperatorName_(createdBy);
+  return String(createdBy || "").trim();
 }
 
 /** 相容舊分頁鍵 purchase→inbound */
 function normalizeLogsTab_(tab){
   const k = String(tab || "all");
   if(k === "purchase") return "inbound";
+  if(k === "ar" || k === "finance") return "finance";
   return k;
 }
 
@@ -135,6 +218,7 @@ function parseIsoNoTzParts_(raw){
 }
 
 function parseIsoNoTzAsLocalDate_(raw){
+  if (typeof erpParseLocalDateTime_ === "function") return erpParseLocalDateTime_(raw);
   const parts = parseIsoNoTzParts_(raw);
   if(!parts) return null;
   const yyyy = Number(parts.yyyy);
@@ -146,24 +230,7 @@ function parseIsoNoTzAsLocalDate_(raw){
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function formatLocalTime(dateStr){
-  if(!dateStr) return "";
-  const raw = String(dateStr || "").trim();
-  const parts = parseIsoNoTzParts_(raw);
-  if(parts){
-    return `${parts.yyyy}-${parts.mm}-${parts.dd} ${parts.hh}:${parts.mi}`;
-  }
-  const d = new Date(raw);
-  if(isNaN(d)) return raw;
-
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth()+1).padStart(2,"0");
-  const dd = String(d.getDate()).padStart(2,"0");
-  const hh = String(d.getHours()).padStart(2,"0");
-  const mi = String(d.getMinutes()).padStart(2,"0");
-
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}
+/* formatLocalTime：見 js/core/utils.js（全站共用，Asia/Taipei） */
 
 /* ===== 分頁 ===== */
 function setLogsTab(tab){
@@ -180,7 +247,8 @@ function updateLogsTabUI(){
     inventory: "logs_tab_inventory",
     process: "logs_tab_process",
     sales: "logs_tab_sales",
-    shipment: "logs_tab_shipment"
+    shipment: "logs_tab_shipment",
+    finance: "logs_tab_finance"
   };
 
   Object.entries(mapping).forEach(([key, id]) => {
@@ -193,6 +261,7 @@ function updateLogsTabUI(){
 
 /* ===== 日期處理 ===== */
 function parseLogDate(createdAt){
+  if (typeof erpParseLocalDateTime_ === "function") return erpParseLocalDateTime_(createdAt);
   if(!createdAt) return null;
   const raw = String(createdAt || "").trim();
   const local = parseIsoNoTzAsLocalDate_(raw);
@@ -239,7 +308,7 @@ async function loadLogs(){
     return;
   }
   logsLoadInFlight_ = true;
-  setTbodyLoading_("logsTableBody", 7);
+  setTbodyLoading_("logsTableBody", 4);
   try{
     const pending = window.__pendingOpenLogs;
     const rangeEl = document.getElementById("logs_filter_range");
@@ -329,9 +398,12 @@ function applyLogsFilter(){
     const text = [
       l.log_id,
       l.table_name,
+      getLogTableZh_(l.table_name),
       l.reference_id,
       l.action_type,
+      getLogActionZh_(l.action_type),
       l.created_by,
+      logsOperatorLabel_(l.created_by),
       l.old_value,
       l.new_value
     ].join(" ").toLowerCase();
@@ -358,14 +430,23 @@ function renderLogs(list){
     const encoded = encodeURIComponent(JSON.stringify(l));
 
     const tr = document.createElement("tr");
+    const tbl = String(l.table_name || "");
     const act = String(l.action_type || "");
+    const tblZh = getLogTableZh_(tbl);
+    const actZh = getLogActionZh_(act);
     tr.innerHTML = `
-      <td>${l.log_id || ""}</td>
-      <td>${escapeHtml(getLogTableLabel_(l.table_name))}</td>
-      <td>${escapeHtml(l.reference_id || "")}</td>
-      <td title="${escapeHtml(act)}">${escapeHtml(act)}</td>
-      <td>${escapeHtml(l.created_by || "")}</td>
-      <td>${formatLocalTime(l.created_at)}</td>
+      <td class="logs-stack-cell">
+        <div class="logs-stack-sub">${escapeHtml(l.log_id || "")}</div>
+        <div class="logs-stack-main" title="${escapeHtml(tbl)}">${escapeHtml(tblZh)}</div>
+      </td>
+      <td class="logs-stack-cell">
+        <div class="logs-stack-sub">${escapeHtml(l.reference_id || "")}</div>
+        <div class="logs-stack-main" title="${escapeHtml(act)}">${escapeHtml(actZh)}</div>
+      </td>
+      <td class="logs-stack-cell">
+        <div class="logs-stack-main">${escapeHtml(logsOperatorLabel_(l.created_by))}</div>
+        <div class="logs-stack-sub">${escapeHtml(formatLocalTime(l.created_at))}</div>
+      </td>
       <td>
         <span class="logs-view-link"
           onclick="showLogDetail('${encoded}')">
@@ -402,6 +483,8 @@ function applyPendingOpenLogs_() {
     const tid = String(pending.tableName || "");
     if(tid.startsWith("shipment") || tid.startsWith("commercial_invoice")) setLogsTab("shipment");
     else setLogsTab("sales");
+  }else if(ptab === "ar" || ptab === "finance"){
+    setLogsTab("finance");
   }else{
     setLogsTab(ptab);
   }
@@ -479,10 +562,10 @@ function showLogDetail(encoded){
       </div>
       <table class="data-table" style="margin-bottom:12px;">
         <tbody>
-          <tr><td style="width:120px;font-weight:600;">資料表</td><td>${escapeHtml(getLogTableLabel_(log.table_name))}</td></tr>
+          <tr><td style="width:120px;font-weight:600;">資料表</td><td><span title="${escapeHtml(String(log.table_name || ""))}">${escapeHtml(getLogTableZh_(log.table_name))}</span></td></tr>
           <tr><td style="font-weight:600;">參考 ID</td><td>${escapeHtml(log.reference_id || "")}</td></tr>
-          <tr><td style="font-weight:600;">操作類型</td><td>${escapeHtml(log.action_type || "")}</td></tr>
-          <tr><td style="font-weight:600;">操作人</td><td>${escapeHtml(log.created_by || "")}</td></tr>
+          <tr><td style="font-weight:600;">操作類型</td><td><span title="${escapeHtml(String(log.action_type || ""))}">${escapeHtml(getLogActionZh_(log.action_type))}</span></td></tr>
+          <tr><td style="font-weight:600;">操作人</td><td>${escapeHtml(logsOperatorLabel_(log.created_by))}</td></tr>
           <tr><td style="font-weight:600;">時間</td><td>${escapeHtml(formatLocalTime(log.created_at))}</td></tr>
         </tbody>
       </table>

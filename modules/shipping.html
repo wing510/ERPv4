@@ -11,7 +11,7 @@
   </div>
 
   <div class="card-body">
-    <div class="form-grid-4">
+    <div class="form-grid-4" id="ship_header_form_grid">
       <div class="form-group">
         <label>出貨單ID *</label>
         <input type="text" id="ship_id" placeholder="自動產生ID">
@@ -21,6 +21,11 @@
         <label>銷售單 *</label>
         <select id="ship_so_id" onchange="onSelectShipSO()"></select>
         <input type="hidden" id="ship_customer_id">
+      </div>
+
+      <div class="form-group" id="ship_consignment_case_row" style="display:none;grid-column:span 2;">
+        <label>寄賣案 *</label>
+        <select id="ship_consignment_case_id"></select>
       </div>
 
       <div class="form-group">
@@ -36,7 +41,7 @@
 
       <div class="form-group">
         <label>訂購人</label>
-        <input type="text" id="ship_orderer_display" readonly placeholder="依銷售單客戶帶入" style="background:#f8fafc;">
+        <input type="text" id="ship_orderer_display" readonly placeholder="依銷售單客戶帶入">
       </div>
 
       <div class="form-group">
@@ -117,6 +122,60 @@
   cursor: pointer;
   vertical-align: middle;
 }
+/* 出貨單列表：無出口 CI 時隱藏操作欄 */
+.ship-list-table.ship-list-hide-actions .ship-col-act,
+.ship-list-table.ship-list-hide-actions .ship-col-actions{
+  display:none;
+}
+/* 出貨：已作廢列／明細（灰字，與列表一致） */
+.ship-list-table tr.erp-list-row-void td,
+.ship-list-table tr.erp-list-row-void .logs-stack-main,
+.ship-list-table tr.erp-list-row-void .logs-stack-sub,
+.ship-list-table tr.erp-list-row-void .ship-list-id,
+#shipItemsBody tr.ship-item-row-void td{
+  color:#94a3b8;
+}
+.ship-list-table tr.erp-list-row-void .logs-stack-main.ship-status-void,
+#shipItemsBody tr.ship-item-row-void td.ship-line-status-void{
+  color:#64748b;
+  font-weight:600;
+}
+#ship_promo_ship_hint{
+  margin-top:-4px;
+  font-size:12px;
+  color:#64748b;
+  line-height:1.45;
+  white-space:pre-line;
+  min-width:0;
+  max-width:100%;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+/* 出貨主檔／明細表單：手機一欄一行（覆蓋 inline grid-column） */
+@media (max-width:768px){
+  #ship_header_form_grid.form-grid-4,
+  #ship_item_form_grid.form-grid-4{
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:14px;
+    width:100%;
+    max-width:100%;
+  }
+  #ship_header_form_grid .form-group,
+  #ship_item_form_grid .form-group{
+    grid-column:1 / -1 !important;
+    min-width:0;
+    max-width:100%;
+  }
+  #ship_header_form_grid input,
+  #ship_header_form_grid select,
+  #ship_item_form_grid input,
+  #ship_item_form_grid select,
+  #ship_header_form_grid .erp-input-with-suffix,
+  #ship_item_form_grid .erp-input-with-suffix{
+    max-width:100%;
+    box-sizing:border-box;
+  }
+}
 </style>
 <!-- ===== 出貨明細（指定批次） ===== -->
 <div class="card">
@@ -128,13 +187,13 @@
     <span data-help="shippingItems"></span>
   </div>
   <div class="card-body">
-    <div class="form-grid-4">
-      <div class="form-group">
+    <div class="form-grid-4" id="ship_item_form_grid">
+      <div class="form-group form-group-span-2">
         <label>銷售品項 *</label>
         <select id="ship_so_item_id" onchange="onSelectShipSOItem()"></select>
       </div>
 
-      <div class="form-group" style="grid-column:span 3;">
+      <div class="form-group form-group-span-2">
         <label>Lot *</label>
         <input type="text" id="ship_lot_display" readonly placeholder="請在下方按「選擇 Lot」帶入">
         <input type="hidden" id="ship_lot_id">
@@ -143,16 +202,18 @@
       <div class="form-group">
         <label>出貨數量 *</label>
         <div class="erp-input-with-suffix">
-          <input type="number" id="ship_qty" min="0" step="0.01">
+          <input type="number" id="ship_qty" min="0" step="0.01" oninput="shipOnShipQtyInput_()">
           <span id="ship_qty_unit_suffix" class="erp-input-suffix"></span>
         </div>
         <input type="hidden" id="ship_line_unit" value="">
       </div>
 
-      <div class="form-group" style="grid-column:span 3;">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="ship_item_remark">
       </div>
+
+      <div id="ship_promo_ship_hint" class="form-group full-width" style="display:none;"></div>
     </div>
 
     <div class="button-group">
@@ -171,8 +232,8 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>項次</th>
-            <th>Lot/產品（規格）</th>
+            <th>#</th>
+            <th>Lot／產品（規格）</th>
             <th>倉別</th>
             <th>訂購</th>
             <th>已出</th>
@@ -202,7 +263,7 @@
       <button type="button" class="ship-lot-picker-x" onclick="closeShipLotPicker()" title="關閉" aria-label="關閉">×</button>
     </div>
     <div class="ship-lot-picker-toolbar">
-      <input type="text" id="ship_lot_picker_keyword" placeholder="搜尋 Lot ID / 產品名稱 / 倉別" style="min-width:280px;">
+      <input type="text" id="ship_lot_picker_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <div class="ship-lot-picker-controls">
         <select id="ship_lot_picker_viewmode">
           <option value="flat">flat（一般清單）</option>
@@ -244,7 +305,7 @@
   </div>
   <div class="card-body">
     <div class="search-toolbar" style="margin-bottom:12px;">
-      <input type="text" id="ship_search_keyword" placeholder="關鍵字（出貨單／客戶／銷售單）" style="min-width:260px;" title="比對出貨單ID、客戶ID／名稱、銷售單ID">
+      <input type="text" id="ship_search_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <select id="ship_search_status">
         <option value="">全部狀態</option>
         <option value="POSTED">POSTED（已過帳）</option>
@@ -255,18 +316,25 @@
     </div>
 
     <div class="table-wrapper">
-      <table class="data-table">
+      <table class="data-table ship-list-table" id="ship_list_table">
+        <colgroup>
+          <col class="ship-col-id">
+          <col class="ship-col-customer">
+          <col class="ship-col-sp">
+          <col class="ship-col-date">
+          <col class="ship-col-st">
+          <col class="ship-col-ci">
+          <col class="ship-col-act">
+        </colgroup>
         <thead>
           <tr>
-            <th>出貨單ID</th>
-            <th>銷售單</th>
+            <th>出貨／銷售</th>
             <th>客戶</th>
             <th>銷售</th>
-            <th>出貨</th>
-            <th>出貨日期</th>
+            <th>出貨日期／人員</th>
             <th>狀態</th>
             <th>CI</th>
-            <th>操作</th>
+            <th class="ship-col-actions">操作</th>
           </tr>
         </thead>
         <tbody id="shipTableBody"></tbody>

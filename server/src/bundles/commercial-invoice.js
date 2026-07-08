@@ -56,6 +56,18 @@ async function updateCompanyProfile(p) {
       p.declaration_text || "I declare that the information is true and correct."
     ).trim(),
     remark: String(p.remark || "").trim(),
+    ar_overdue_days_normal:
+      p.ar_overdue_days_normal != null && p.ar_overdue_days_normal !== ""
+        ? Math.max(0, Math.floor(Number(p.ar_overdue_days_normal)))
+        : 14,
+    ar_overdue_days_consignment:
+      p.ar_overdue_days_consignment != null && p.ar_overdue_days_consignment !== ""
+        ? Math.max(0, Math.floor(Number(p.ar_overdue_days_consignment)))
+        : 30,
+    ar_reminder_days_before_overdue:
+      p.ar_reminder_days_before_overdue != null && p.ar_reminder_days_before_overdue !== ""
+        ? Math.max(0, Math.floor(Number(p.ar_reminder_days_before_overdue)))
+        : 5,
     updated_by: actor,
     updated_at: nowIso()
   };

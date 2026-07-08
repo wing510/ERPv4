@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Outsource / Process Orders（API 版）
  * - 分階段：建立(OPEN) → 送加工(PROCESS_OUT) → 回收(PROCESS_IN) → 完成(POSTED)
  * - 支援分批回收；取消加工單可回沖 movements
@@ -455,7 +455,7 @@ async function voidProcessInput(processInputId){
         ref_id: procId,
         remark: "",
         created_by: getCurrentUser(),
-        created_at: nowIso16(),
+        created_at: nowIsoTaipei(),
         updated_by: "",
         updated_at: "",
         system_remark: `REVERSAL(PROCESS_OUT) of ${m.movement_id || ""} (${procId})`,
@@ -558,7 +558,7 @@ async function voidProcessOutput(processOutputId){
       process_output_id: outId,
       idempotency_key: procBuildIdempotencyKey_("PROC_VOID_OUT", [procId, outId, lotId, qty]),
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     }, { method: "POST" });
 
     clearProcOutputEditor_();
@@ -575,12 +575,21 @@ async function voidProcessOutput(processOutputId){
   }
 }
 
+function procSyncInputLotDisplayFields_(lot){
+  if(!lot){
+    procSetV_("proc_input_lot_display", "");
+    return;
+  }
+  const av = procGetAvailable(lot.lot_id);
+  procSetV_("proc_input_lot_display", formatProcLotOptionLabel_(lot, av));
+}
+
 function formatProcLotOptionLabel_(lot, available){
   const lotId = String(lot?.lot_id || "");
-  const productId = String(lot?.product_id || "");
+  const productText = formatProcProductDisplay_(lot?.product_id || "");
   const whText = procWarehouseLabelByLot_(lot) || "";
   const avText = (typeof invFormatAvailableText_ === "function") ? invFormatAvailableText_(available) : String(available ?? "--");
-  return `${lotId} (${productId}) 可用:${avText}` + (whText ? ` | ${whText}` : "");
+  return [lotId, productText, whText, `可用:${avText}`].filter(Boolean).join(" │ ");
 }
 
 function formatProcSourceText_(lot){
@@ -672,6 +681,16 @@ function getProcEligibleLots_(){
 }
 
 function openProcLotPicker(){
+  if(procLoadInFlight){
+    return showToast("加工單載入中，請稍候…","error");
+  }
+  if(!procEditing){
+    return showToast("請先建立或載入加工單","error");
+  }
+  const st = String(procLoadedStatus_ || "").toUpperCase();
+  if(st === "POSTED" || st === "CANCELLED"){
+    return showToast(`此加工單已結束（${st}），不可選擇 Lot 投料`,"error");
+  }
   const modal = document.getElementById("procLotPickerModal");
   if(!modal) return;
   modal.style.display = "flex";
@@ -931,7 +950,7 @@ function initProcDropdowns(){
   const whSel = document.getElementById("proc_output_warehouse");
   if(whSel){
     whSel.innerHTML =
-      `<option value="">（自動：跟第一筆投料倉別）</option>` +
+      `<option value="">請選擇</option>` +
       (procWarehouses || []).map(w => {
         const id = String(w.warehouse_id || "").trim();
         if(!id) return "";
@@ -952,27 +971,6 @@ function initProcDropdowns(){
         return `<option value="${p.product_id}" data-unit="${p.unit || ""}">${label}</option>`;
       }).join("");
   }
-}
-
-function procDeriveDefaultReceiveWarehouseId_(inputs){
-  const rows = Array.isArray(inputs) ? inputs : [];
-  const lotId = String(rows[0]?.lot_id || "").trim();
-  if(!lotId) return "";
-  const lot = (procLots || []).find(l => String(l.lot_id || "") === lotId) || null;
-  const wid = String(lot?.warehouse_id || "").trim().toUpperCase();
-  return wid || "";
-}
-
-function procApplyDefaultReceiveWarehouse_(inputs){
-  const el = document.getElementById("proc_output_warehouse");
-  if(!el) return;
-  // 使用者若已手動選擇就不覆蓋
-  if(String(el.value || "").trim()) return;
-  const wid = procDeriveDefaultReceiveWarehouseId_(inputs);
-  if(!wid) return;
-  // 若下拉沒有該值（例如倉庫停用或尚未載入），就保持空白（仍走自動）
-  const has = Array.from(el.options || []).some(o => String(o.value || "").toUpperCase() === wid);
-  if(has) el.value = wid;
 }
 
 function resetProcessForm(){
@@ -999,15 +997,17 @@ function resetProcessForm(){
     "proc_remark",
     "proc_input_lot",
     "proc_input_lot_display",
-    "proc_input_available",
     "proc_input_qty",
     "proc_input_unit",
     "proc_input_remark",
     "proc_output_product",
     "proc_output_qty",
+    "proc_output_qty_hint",
     "proc_output_unit",
     "proc_output_remark",
-    "proc_output_warehouse"
+    "proc_output_warehouse",
+    "proc_output_factory_lot",
+    "proc_output_factory_exp"
   ]);
   const planned = document.getElementById("proc_planned_date");
   const remark = document.getElementById("proc_remark");
@@ -1051,13 +1051,14 @@ function onSelectProcInputLot(){
   const lotId = document.getElementById("proc_input_lot")?.value || "";
   const lot = (procLots || []).find(l => String(l.lot_id || "") === String(lotId || ""));
   if(!lot){
-    procClear_(["proc_input_unit", "proc_input_available", "proc_input_qty", "proc_input_remark"]);
+    procSyncInputLotDisplayFields_(null);
+    procClear_(["proc_input_unit", "proc_input_qty", "proc_input_remark"]);
     syncErpQtyUnitSuffix_("proc_input_unit", "proc_input_unit_suffix");
     return;
   }
+  procSyncInputLotDisplayFields_(lot);
   procSetV_("proc_input_unit", lot.unit || "");
   syncErpQtyUnitSuffix_("proc_input_unit", "proc_input_unit_suffix");
-  procSetV_("proc_input_available", String(procGetAvailable(lotId)));
   // UX：Lot 切換時，清空數量/備註，避免殘留上一筆
   try{
     procClear_(["proc_input_qty", "proc_input_remark"]);
@@ -1069,14 +1070,8 @@ function onSelectProcInputLot(){
 
 function pickProcInputLot(lotId){
   const input = document.getElementById("proc_input_lot");
-  const display = document.getElementById("proc_input_lot_display");
   if(!input) return;
   input.value = lotId || "";
-  if(display){
-    const lot = (procLots || []).find(l => String(l.lot_id || "") === String(lotId || ""));
-    const av = lot ? procGetAvailable(lot.lot_id) : "";
-    display.value = lot ? formatProcLotOptionLabel_(lot, av) : (lotId || "");
-  }
   onSelectProcInputLot();
   closeProcLotPicker();
   setProcButtons_();
@@ -1090,7 +1085,8 @@ function onSelectProcOutputProduct(){
   if(!opt || !String(sel?.value || "").trim()){
     procClear_("proc_output_unit");
     syncErpQtyUnitSuffix_("proc_output_unit", "proc_output_unit_suffix");
-    procClear_(["proc_output_qty", "proc_output_remark"]);
+    procClear_(["proc_output_qty", "proc_output_qty_hint", "proc_output_remark"]);
+    updateLossHint();
     setProcButtons_();
     return;
   }
@@ -1102,6 +1098,8 @@ function onSelectProcOutputProduct(){
     procEditingOutputDraftId = "";
     procSelectedDbOutputId = "";
   }catch(_e){}
+  procUpdateExpectedReceiveHint_();
+  updateLossHint();
   setProcButtons_();
 }
 
@@ -1130,6 +1128,10 @@ function beginEditProcOutputDraft_(draftId){
   if(qtyEl) qtyEl.value = String(it.receive_qty ?? "");
   const outRm = document.getElementById("proc_output_remark");
   if(outRm) outRm.value = String(it.remark || "");
+  const outFl = document.getElementById("proc_output_factory_lot");
+  if(outFl) outFl.value = String(it.factory_lot || "");
+  const outExp = document.getElementById("proc_output_factory_exp");
+  if(outExp) outExp.value = String(it.expiry_date || "");
   procOutputs = procOutputs.filter(x => !(x._mode === "DRAFT" && x.draft_id === draftId));
   renderProcOutputs();
   updateLossHint();
@@ -1140,9 +1142,18 @@ function addProcOutputDraft(){
   const outQty = num(document.getElementById("proc_output_qty")?.value || 0);
   const outUnit = document.getElementById("proc_output_unit")?.value || "";
   const outRemark = (document.getElementById("proc_output_remark")?.value || "").trim();
+  const outFactoryLot = String(document.getElementById("proc_output_factory_lot")?.value || "").trim().toUpperCase();
+  const outFactoryExp = String(document.getElementById("proc_output_factory_exp")?.value || "").trim();
   if(!outProduct) return showToast("請選擇產出產品","error");
+  if(!outFactoryLot) return showToast("請填加工廠 Lot","error");
   if(!outQty || outQty <= 0) return showToast("回收數量需大於 0","error");
   if(!outUnit) return showToast("產出單位缺失","error");
+
+  const lossSnap = procCalcReceiveLossSnapshot_({
+    extraDrafts: [{ product_id: outProduct, receive_qty: outQty, unit: outUnit }],
+    includeFormEditing: false
+  });
+  if(!procConfirmAllowLossIfNeeded_(lossSnap, "add")) return;
 
   procOutputs.push({
     _mode: "DRAFT",
@@ -1150,10 +1161,12 @@ function addProcOutputDraft(){
     product_id: outProduct,
     receive_qty: outQty,
     unit: outUnit,
+    factory_lot: outFactoryLot,
+    expiry_date: outFactoryExp,
     remark: outRemark
   });
 
-  procClear_(["proc_output_product", "proc_output_qty", "proc_output_unit", "proc_output_remark"]);
+  procClear_(["proc_output_product", "proc_output_qty", "proc_output_qty_hint", "proc_output_unit", "proc_output_remark", "proc_output_factory_lot", "proc_output_factory_exp"]);
   syncErpQtyUnitSuffix_("proc_output_unit", "proc_output_unit_suffix");
   procEditingOutputDraftId = "";
   renderProcOutputs();
@@ -1185,7 +1198,7 @@ async function updateSelectedProcInputRemark(){
       process_input_id: inId,
       remark: remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     }, { method: "POST" });
     invalidateProcCaches_();
     await loadProcMasterData();
@@ -1215,7 +1228,7 @@ async function updateSelectedProcOutputRemark(){
       process_output_id: outId,
       remark: remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     }, { method: "POST" });
 
     // 同步更新該產出 lot 的備註（避免兩邊不同步）
@@ -1226,7 +1239,7 @@ async function updateSelectedProcOutputRemark(){
       await updateRecord("lot","lot_id",lotId,{
         remark,
         updated_by: getCurrentUser(),
-        updated_at: nowIso16()
+        updated_at: nowIsoTaipei()
       });
     }
 
@@ -1278,10 +1291,14 @@ function renderProcOutputs(){
       : (isDb ? `selectProcOutputDbRow_('${String(it.process_output_id || "").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')` : "");
     const ou = String(it.unit || "").trim();
     const outQtyCell = ou ? `${it.receive_qty} ${ou.replace(/</g, "")}` : String(it.receive_qty);
+    const factoryLotCell = escapeHtml_(String(it.factory_lot || (isDb ? (procLotFactoryLotById_(it.lot_id) || "") : "") || "—"));
+    const expiryCell = escapeHtml_(String(it.expiry_date || (isDb ? (procLotExpiryById_(it.lot_id) || "") : "") || "—"));
     tbody.innerHTML += `
       <tr style="cursor:pointer;" onclick="${rowOnclick}">
         <td>${idx+1}</td>
         <td>${formatProcProductDisplay_(it.product_id)}</td>
+        <td>${factoryLotCell}</td>
+        <td>${expiryCell}</td>
         <td>${outQtyCell}</td>
         <td>
           ${statusText}
@@ -1304,6 +1321,10 @@ function selectProcOutputDbRow_(processOutputId){
   onSelectProcOutputProduct();
   if(qtyEl) qtyEl.value = String(row.receive_qty ?? "");
   if(rmEl) rmEl.value = String(row.remark || "");
+  const outFl = document.getElementById("proc_output_factory_lot");
+  if(outFl) outFl.value = String(procLotFactoryLotById_(row.lot_id) || "");
+  const outExp = document.getElementById("proc_output_factory_exp");
+  if(outExp) outExp.value = String(procLotExpiryById_(row.lot_id) || "");
   showToast("已帶入回收明細（僅供查看；作廢請用右側按鈕）");
 }
 
@@ -1339,7 +1360,6 @@ function addProcInputDraft(){
   procClear_([
     "proc_input_lot",
     "proc_input_lot_display",
-    "proc_input_available",
     "proc_input_qty",
     "proc_input_unit",
     "proc_input_remark"
@@ -1417,71 +1437,223 @@ function selectProcInputDbRow_(processInputId){
   showToast("已帶入投料明細（僅供查看；回沖請用右側按鈕）");
 }
 
-function updateLossHint(){
-  const hint = document.getElementById("proc_loss_hint");
-  if(!hint) return;
-  const draftOutputsOnly = (procOutputs || []).filter(it => it && it._mode === "DRAFT");
-  const draftOut = draftOutputsOnly.reduce((sum, it) => sum + num(it.receive_qty), 0);
-  const editingOut = num(document.getElementById("proc_output_qty")?.value || 0);
-  const outQty = draftOut + editingOut;
+function procFormatLossText_(loss, baseUnit){
+  const rounded = (Math.round(loss * 10000) / 10000);
+  const text = String(rounded).replace(/\.0+$/,"").replace(/(\.\d*[1-9])0+$/,"$1");
+  return `${text} ${baseUnit || ""}`.trim();
+}
+
+function procFormatQtyText_(qty){
+  const rounded = (Math.round(num(qty) * 10000) / 10000);
+  return String(rounded).replace(/\.0+$/,"").replace(/(\.\d*[1-9])0+$/,"$1");
+}
+
+function procConvertFromBase_(product, baseQty, targetUnit){
+  const q = Number(baseQty);
+  if(!Number.isFinite(q)) return null;
+  const p = product || {};
+  const cfg = typeof getProductUomConfig === "function" ? getProductUomConfig(p) : null;
+  const baseUnit = normalizeUnit(cfg?.base_unit || p.unit || "");
+  const tgt = normalizeUnit(targetUnit || p.unit || "");
+  if(!baseUnit || !tgt) return null;
+  if(tgt === baseUnit) return q;
+  const rate = Number((cfg?.map || {})[tgt] || 0);
+  if(!(rate > 0)) return null;
+  return q / rate;
+}
+
+function procCalcExpectedReceive_(productId){
+  const pid = String(productId || "").trim();
+  if(!pid){
+    return { canCalc: false, reason: "", qty: 0, unit: "", text: "" };
+  }
+  const snap = procCalcReceiveLossSnapshot_({ includeFormEditing: false });
+  if(!snap.canCalc){
+    const reason = snap.reason || "無法計算";
+    return { canCalc: false, reason, qty: 0, unit: "", text: reason };
+  }
+  const remainingBase = Math.max(0, snap.issuedBase - snap.receivedBase);
+  const product = (procProducts || []).find(p => String(p.product_id || "") === pid);
+  if(!product){
+    return { canCalc: false, reason: "找不到產品", qty: 0, unit: "", text: "—" };
+  }
+  const unit = String(document.getElementById("proc_output_unit")?.value || product.unit || "").trim();
+  const qty = procConvertFromBase_(product, remainingBase, unit);
+  if(qty == null){
+    return { canCalc: false, reason: "單位無法換算", qty: 0, unit, text: "單位無法換算" };
+  }
+  const rounded = Math.round(qty * 10000) / 10000;
+  const qtyText = procFormatQtyText_(rounded);
+  return {
+    canCalc: true,
+    reason: "",
+    qty: rounded,
+    unit,
+    text: unit ? `${qtyText} ${unit}` : qtyText
+  };
+}
+
+function procUpdateExpectedReceiveHint_(){
+  const productId = String(document.getElementById("proc_output_product")?.value || "").trim();
+  const hintEl = document.getElementById("proc_output_qty_hint");
+  const exp = procCalcExpectedReceive_(productId);
+  if(hintEl) hintEl.value = productId ? (exp.text || "—") : "";
+}
+
+function procToBaseQty_(productId, qty, unit, baseUnits, convertBlock){
+  const pid = String(productId || "");
+  const p = (procProducts || []).find(x => String(x.product_id || "") === pid);
+  if(!p){
+    if(convertBlock) convertBlock.push(`產品不存在：${pid || "（空白）"}`);
+    return null;
+  }
+  const converted = convertToBase(p, num(qty), unit);
+  const cfg = typeof getProductUomConfig === "function" ? getProductUomConfig(p) : null;
+  const base = normalizeUnit(cfg?.base_unit || p.unit || "");
+  if(base && baseUnits) baseUnits.add(base);
+  if(converted == null && convertBlock){
+    convertBlock.push(`${pid} 單位 ${String(unit || "（空白）")} 無法轉為基準單位`);
+  }
+  return converted;
+}
+
+/**
+ * 估算投料 vs 回收（含草稿）後的耗損。
+ * @param {{ extraDrafts?: Array, includeFormEditing?: boolean, skipDraftOutputs?: boolean }} opts
+ */
+function procCalcReceiveLossSnapshot_(opts){
+  opts = opts || {};
+  const extraDrafts = Array.isArray(opts.extraDrafts) ? opts.extraDrafts : [];
+  const includeFormEditing = opts.includeFormEditing !== false;
+  const skipDraftOutputs = !!opts.skipDraftOutputs;
+
   const inputsForCalc = procInputs.length ? procInputs : (procLoadedInputsForHint || []);
   const outputsForCalcExisting = (procLoadedOutputsForHint || []).filter(x => String(x.status || "").toUpperCase() !== "CANCELLED");
-  if(inputsForCalc.length === 0){
-    procSetV_("proc_loss_hint", outQty > 0 ? "尚無投料，無法計算" : "");
-    return;
-  }
-  if(outQty <= 0){
-    procClear_("proc_loss_hint");
-    return;
+  const draftOutputsOnly = skipDraftOutputs
+    ? []
+    : (procOutputs || []).filter(it => it && it._mode === "DRAFT");
+
+  if(!inputsForCalc.length){
+    return { canCalc: false, reason: "尚無投料", loss: 0, baseUnit: "", lossText: "" };
   }
 
   const baseUnits = new Set();
+  const convertBlock = [];
   let canConvert = true;
-
-  function toBase_(productId, qty, unit){
-    const pid = String(productId || "");
-    const p = (procProducts || []).find(x => String(x.product_id || "") === pid);
-    if(!p) return null;
-    const converted = convertToBase(p, qty, unit);
-    // convertToBase 的基準單位來源：uom_config / 舊 @UOM / product.unit
-    const cfg = typeof getProductUomConfig === "function" ? getProductUomConfig(p) : null;
-    const base = normalizeUnit(cfg?.base_unit || p.unit || "");
-    if(base) baseUnits.add(base);
-    return converted;
-  }
 
   const inBaseTotal = inputsForCalc.reduce((sum, it) => {
     const q = it.issue_qty != null ? it.issue_qty : (it.qty != null ? it.qty : it.issue_qty);
-    const v = toBase_(it.product_id, num(q), it.unit);
+    const v = procToBaseQty_(it.product_id, q, it.unit, baseUnits, convertBlock);
     if(v == null) canConvert = false;
     return sum + (v || 0);
   }, 0);
 
-  // 回收：已存在（資料庫）+ 已新增草稿 + 目前正在編輯的那筆（若有選產品）
-  const { outProduct, outQty: editingQty, outUnit } = getProcOutputForm_();
   const outputsAll = [
     ...(outputsForCalcExisting || []).map(x => ({ product_id: x.product_id, qty: x.receive_qty, unit: x.unit })),
     ...draftOutputsOnly.map(x => ({ product_id: x.product_id, qty: x.receive_qty, unit: x.unit })),
-    ...(outProduct && editingQty > 0 ? [{ product_id: outProduct, qty: editingQty, unit: outUnit }] : [])
+    ...extraDrafts.map(x => ({ product_id: x.product_id, qty: x.receive_qty != null ? x.receive_qty : x.qty, unit: x.unit }))
   ];
+  if(includeFormEditing){
+    const { outProduct, outQty, outUnit } = getProcOutputForm_();
+    if(outProduct && outQty > 0){
+      outputsAll.push({ product_id: outProduct, qty: outQty, unit: outUnit });
+    }
+  }
+
   const outBaseTotal = outputsAll.reduce((sum, it) => {
-    const v = toBase_(it.product_id, num(it.qty), it.unit);
+    const v = procToBaseQty_(it.product_id, it.qty, it.unit, baseUnits, convertBlock);
     if(v == null) canConvert = false;
     return sum + (v || 0);
   }, 0);
 
-  if(!canConvert || baseUnits.size !== 1){
-    hint.value = baseUnits.size > 1
-      ? "多基準單位，無法計算"
-      : "單位不一致，無法計算";
-    return;
+  if(!canConvert){
+    return {
+      canCalc: false,
+      reason: baseUnits.size > 1 ? "多基準單位，無法計算" : "單位不一致，無法計算",
+      loss: 0,
+      baseUnit: "",
+      lossText: ""
+    };
+  }
+  if(baseUnits.size !== 1){
+    return { canCalc: false, reason: "多基準單位，無法計算", loss: 0, baseUnit: "", lossText: "" };
   }
 
   const baseUnit = Array.from(baseUnits)[0] || "";
   const loss = inBaseTotal - outBaseTotal;
-  const rounded = (Math.round(loss * 10000) / 10000);
-  const text = String(rounded).replace(/\.0+$/,"").replace(/(\.\d*[1-9])0+$/,"$1");
-  hint.value = `${text} ${baseUnit}（換算後）`;
+  const lossText = procFormatLossText_(loss, baseUnit);
+  return {
+    canCalc: true,
+    reason: "",
+    issuedBase: inBaseTotal,
+    receivedBase: outBaseTotal,
+    loss,
+    baseUnit,
+    lossText
+  };
+}
+
+function procConfirmAllowLossIfNeeded_(snap, context){
+  if(!snap || !snap.canCalc || snap.loss <= 1e-9) return true;
+  const allowLoss = !!document.getElementById("proc_close_allow_loss")?.checked;
+  const lossLine = `${snap.lossText}（換算後）`;
+
+  if(context === "add"){
+    if(allowLoss) return true;
+    const ok = window.erpConfirmActionKey_("confirm.proc.add_output_allow_loss", {
+      lossText: lossLine,
+      fallbackMessage:
+        `預估仍有耗損：${lossLine}\n\n若「3) 回收加工品」後要結案，請勾選「本次回收後結案（允許耗損）」。\n未勾選則回收後加工單維持 OPEN，可再補回收。\n\n仍要新增這筆產出？`
+    });
+    return !!ok;
+  }
+
+  if(context === "receive"){
+    if(!allowLoss){
+      const ok = window.erpConfirmActionKey_("confirm.proc.receive_without_allow_loss", {
+        lossText: lossLine,
+        fallbackMessage:
+          `預估仍有耗損：${lossLine}\n\n未勾選「允許耗損」，回收後加工單將維持 OPEN（不結案）。\n\n確定執行回收？`
+      });
+      return !!ok;
+    }
+    const ok = window.erpConfirmActionKey_("confirm.proc.receive_allow_loss_close", {
+      lossText: lossLine,
+      fallbackMessage:
+        `預估仍有耗損：${lossLine}\n\n已勾選「允許耗損」，回收後將結案（POSTED）。\n\n確定執行回收？`
+    });
+    return !!ok;
+  }
+  return true;
+}
+
+function updateLossHint(){
+  const hint = document.getElementById("proc_loss_hint");
+  if(!hint) return;
+  const { outQty } = getProcOutputForm_();
+  const snap = procCalcReceiveLossSnapshot_({ includeFormEditing: true });
+  if(!snap.canCalc){
+    if(snap.reason === "尚無投料" && (outQty > 0 || (procOutputs || []).some(x => x._mode === "DRAFT"))){
+      procSetV_("proc_loss_hint", "尚無投料，無法計算");
+      procUpdateExpectedReceiveHint_();
+      return;
+    }
+    if(outQty <= 0 && !(procOutputs || []).some(x => x._mode === "DRAFT")){
+      procClear_("proc_loss_hint");
+      procUpdateExpectedReceiveHint_();
+      return;
+    }
+    procSetV_("proc_loss_hint", snap.reason || "");
+    procUpdateExpectedReceiveHint_();
+    return;
+  }
+  if(snap.receivedBase <= 0 && outQty <= 0 && !(procOutputs || []).some(x => x._mode === "DRAFT")){
+    procClear_("proc_loss_hint");
+    procUpdateExpectedReceiveHint_();
+    return;
+  }
+  hint.value = `${snap.lossText}（換算後）`;
+  procUpdateExpectedReceiveHint_();
 }
 
 function getProcHeaderForm_(){
@@ -1500,16 +1672,35 @@ function getProcOutputForm_(){
   const outQty = num(document.getElementById("proc_output_qty")?.value || 0);
   const outUnit = document.getElementById("proc_output_unit")?.value || "";
   const outWarehouseId = (document.getElementById("proc_output_warehouse")?.value || "").trim().toUpperCase();
-  return { outProduct, outQty, outUnit, outWarehouseId };
+  const outFactoryLot = String(document.getElementById("proc_output_factory_lot")?.value || "").trim().toUpperCase();
+  const outFactoryExp = String(document.getElementById("proc_output_factory_exp")?.value || "").trim();
+  return { outProduct, outQty, outUnit, outWarehouseId, outFactoryLot, outFactoryExp };
+}
+
+function procLotFactoryLotById_(lotId){
+  const id = String(lotId || "").trim().toUpperCase();
+  if(!id) return "";
+  const lot = (procLots || []).find(l => String(l.lot_id || "").trim().toUpperCase() === id);
+  return String(lot?.factory_lot || "").trim();
+}
+
+function procLotExpiryById_(lotId){
+  const id = String(lotId || "").trim().toUpperCase();
+  if(!id) return "";
+  const lot = (procLots || []).find(l => String(l.lot_id || "").trim().toUpperCase() === id);
+  return String(lot?.expiry_date || "").trim();
 }
 
 function clearProcOutputEditor_(){
   procClear_([
     "proc_output_product",
     "proc_output_qty",
+    "proc_output_qty_hint",
     "proc_output_unit",
     "proc_output_remark",
-    "proc_output_warehouse"
+    "proc_output_warehouse",
+    "proc_output_factory_lot",
+    "proc_output_factory_exp"
   ]);
   syncErpQtyUnitSuffix_("proc_output_unit", "proc_output_unit_suffix");
   procSelectedDbOutputId = "";
@@ -1522,6 +1713,7 @@ function setProcButtons_(){
   const issueBtn = document.getElementById("proc_issue_btn");
   const receiveBtn = document.getElementById("proc_receive_btn");
   const addInBtn = document.getElementById("proc_add_input_btn");
+  const pickLotBtn = document.getElementById("proc_pick_lot_btn");
   const updInRemarkBtn = document.getElementById("proc_update_in_remark_btn");
   const addOutBtn = document.getElementById("proc_add_output_btn");
   const updOutRemarkBtn = document.getElementById("proc_update_out_remark_btn");
@@ -1579,7 +1771,19 @@ function setProcButtons_(){
       "回收加工品（建立回收批次）")));
   }
 
-  // ===== 投料：新增/更新備註 =====
+  // ===== 投料：選 Lot / 新增 / 更新備註 =====
+  if(pickLotBtn){
+    const canPick =
+      !inFlight &&
+      editing &&
+      !ended;
+    pickLotBtn.disabled = !canPick;
+    pickLotBtn.title =
+      inFlight ? "處理中…" :
+      (!editing ? "請先建立或載入加工單" :
+      (ended ? `此加工單已結束（${st}），不可選擇 Lot 投料` :
+      "選擇 Lot（僅 QA已放行 + 可用量>0）"));
+  }
   if(addInBtn){
     const lotId = String(document.getElementById("proc_input_lot")?.value || "").trim();
     const qty = Number(document.getElementById("proc_input_qty")?.value || 0);
@@ -1644,7 +1848,12 @@ function setProcButtons_(){
   }
 }
 
+let procCreateInFlight_ = false;
+
 async function createProcessOrderOnly(triggerEl){
+  if(procCreateInFlight_){
+    return showToast("建立處理中，請稍候…","error");
+  }
   if(procLoadInFlight){
     return showToast("加工單載入中，請稍候…","error");
   }
@@ -1660,6 +1869,7 @@ async function createProcessOrderOnly(triggerEl){
   if(missing.length) return showToast("缺少必填：" + missing.join("、"), "error");
 
   showSaveHint(triggerEl);
+  procCreateInFlight_ = true;
   try {
     await callAPI({
       action: "create_process_order_cmd",
@@ -1670,12 +1880,30 @@ async function createProcessOrderOnly(triggerEl){
       planned_date,
       remark,
       created_by: getCurrentUser(),
-      created_at: nowIso16()
+      created_at: nowIsoTaipei()
     }, { method: "POST" });
+    procEditing = true;
+    procLoadedStatus_ = "OPEN";
+    const idEl = document.getElementById("proc_id");
+    if(idEl) idEl.disabled = true;
     await renderProcessOrders();
     await loadProcessOrder(process_order_id);
     showToast("加工單已建立（OPEN）");
-  } finally { hideSaveHint(); }
+  } catch(err) {
+    const full = (
+      String(err && err.message != null ? err.message : err || "") +
+      " " +
+      (err && Array.isArray(err.backendErrors) ? err.backendErrors.join(" ") : "")
+    ).toLowerCase();
+    if(/process order already exists/i.test(full)){
+      try{
+        await loadProcessOrder(process_order_id);
+      }catch(_eLoad){}
+    }
+  } finally {
+    procCreateInFlight_ = false;
+    hideSaveHint();
+  }
   setProcButtons_();
 }
 
@@ -1771,7 +1999,7 @@ async function issueProcessOrder(){
       idempotency_key: procBuildIdempotencyKey_("PROC_ISSUE", [process_order_id, existedCount, payloadInputs]),
       inputs_json: JSON.stringify(payloadInputs),
       created_by: getCurrentUser(),
-      created_at: nowIso16()
+      created_at: nowIsoTaipei()
     }, { method: "POST" });
 
     invalidateProcCaches_();
@@ -1819,7 +2047,7 @@ async function retractProcessIssue(){
       action: "retract_process_issue_bundle",
       process_order_id: procId,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     }, { method: "POST" });
 
     invalidateProcCaches_();
@@ -1850,11 +2078,12 @@ async function receiveProcessOutput(){
   }
   clearProcBlockNotice_();
   const { process_order_id } = getProcHeaderForm_();
-  const { outProduct, outQty, outUnit, outWarehouseId } = getProcOutputForm_();
+  const { outProduct, outQty, outUnit, outWarehouseId, outFactoryLot, outFactoryExp } = getProcOutputForm_();
   if(!process_order_id) return showToast("請先建立或載入加工單","error");
   const pendingOutputs = (procOutputs || []).filter(x => x && x._mode === "DRAFT");
   if(pendingOutputs.length === 0){
     if(!outProduct) return showToast("請選擇產出產品","error");
+    if(!outFactoryLot) return showToast("請填加工廠 Lot","error");
     if(!outQty || outQty <= 0) return showToast("回收數量需大於 0","error");
     if(!outUnit) return showToast("產出單位缺失","error");
     pendingOutputs.push({
@@ -1863,6 +2092,8 @@ async function receiveProcessOutput(){
       product_id: outProduct,
       receive_qty: outQty,
       unit: outUnit,
+      factory_lot: outFactoryLot,
+      expiry_date: outFactoryExp,
       remark: (document.getElementById("proc_output_remark")?.value || "").trim()
     });
   }
@@ -1936,11 +2167,25 @@ async function receiveProcessOutput(){
     if(receivedTotalBase + newReceiveTotalBase > issuedTotalBase + 1e-9){
       return showToast("回收總量（換算後）不可超過已送加工總量", "error");
     }
+
+    const lossSnap = procCalcReceiveLossSnapshot_({
+      extraDrafts: pendingOutputs.map(x => ({
+        product_id: x.product_id,
+        receive_qty: x.receive_qty,
+        unit: x.unit
+      })),
+      includeFormEditing: false,
+      skipDraftOutputs: true
+    });
+    if(!procConfirmAllowLossIfNeeded_(lossSnap, "receive")) return;
+
     const baseUnit = Array.from(baseUnits)[0] || "";
     let runningReceivedBase = receivedTotalBase;
     const payloadOutputs = [];
     for(let i=0; i<pendingOutputs.length; i++){
       const out = pendingOutputs[i];
+      const factoryLot = String(out.factory_lot || "").trim().toUpperCase();
+      if(!factoryLot) return showToast("每筆回收須填加工廠 Lot", "error");
       const outProduct = (procProducts || []).find(p => String(p.product_id || "") === String(out.product_id || ""));
       const outBaseQty = outProduct ? convertToBase(outProduct, num(out.receive_qty), String(out.unit || "")) : null;
       if(outBaseQty == null){
@@ -1952,6 +2197,8 @@ async function receiveProcessOutput(){
         product_id: out.product_id,
         receive_qty: String(out.receive_qty),
         unit: out.unit,
+        factory_lot: factoryLot,
+        ...(String(out.expiry_date || "").trim() ? { expiry_date: String(out.expiry_date || "").trim() } : {}),
         remark: out.remark || "",
         loss_base_qty_after: String(Math.round(lossAfter * 10000) / 10000),
         loss_base_unit: baseUnit
@@ -1974,7 +2221,7 @@ async function receiveProcessOutput(){
       ...(outWarehouseId ? { warehouse_id: outWarehouseId } : {}),
       outputs_json: JSON.stringify(payloadOutputs),
       created_by: getCurrentUser(),
-      created_at: nowIso16()
+      created_at: nowIsoTaipei()
     }, { method: "POST" });
 
     const createdLots = Array.isArray(res?.created_lots) ? res.created_lots : [];
@@ -1987,10 +2234,13 @@ async function receiveProcessOutput(){
     const outWhEl = document.getElementById("proc_output_warehouse");
     procClear_([
       "proc_output_qty",
+      "proc_output_qty_hint",
       "proc_output_product",
       "proc_output_unit",
       "proc_output_remark",
-      "proc_output_warehouse"
+      "proc_output_warehouse",
+      "proc_output_factory_lot",
+      "proc_output_factory_exp"
     ]);
     syncErpQtyUnitSuffix_("proc_output_unit", "proc_output_unit_suffix");
     procOutputs = [];
@@ -2047,7 +2297,7 @@ async function cancelProcessOrder(triggerEl){
       process_order_id: id,
       idempotency_key: procBuildIdempotencyKey_("PROC_CANCEL", [id]),
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     }, { method: "POST" });
 
     setProcStatusHint_("加工流程：已取消");
@@ -2070,6 +2320,12 @@ async function cancelProcessOrder(triggerEl){
 async function loadProcessOrder(processOrderId, triggerEl){
   const id = String(processOrderId || "").trim().toUpperCase();
   if(!id) return;
+  const curProc = String(document.getElementById("proc_id")?.value || "").trim().toUpperCase();
+  if(procEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curProc, id)){
+    if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("outsource", curProc, id, "procTableBody")) return;
+  }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
+    erpClearTxnListRowCollapsed_("outsource");
+  }
   if(procLoadInFlight){
     procPendingLoadId_ = id;
     try{
@@ -2190,8 +2446,6 @@ async function loadProcessOrder(processOrderId, triggerEl){
   // 供損耗提示使用（草稿清空後仍可計算）
   procLoadedInputsForHint = inputs || [];
   procLoadedOutputsForHint = outputs || [];
-  // 回收入庫倉庫：預設跟第一筆投料倉別（可由使用者改選）
-  procApplyDefaultReceiveWarehouse_(inputs);
 
   // 一套明細表：載入後直接把正式明細帶到上方表格（操作會變成回沖/作廢）
   procInputs = (inputs || []).map(x => ({
@@ -2288,6 +2542,7 @@ async function loadProcessOrder(processOrderId, triggerEl){
     }
   }catch(_eNext){}
     setProcButtons_();
+    if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("procTableBody", "data-row-id", id);
   }
 }
 
@@ -2314,7 +2569,7 @@ async function updateProcessOrderHeader(triggerEl){
     // command 只允許改 planned_date/remark；source_type 仍保留在 UI，但不透過 header cmd 修改
     remark,
     updated_by: getCurrentUser(),
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   }, { method: "POST" });
 
   await renderProcessOrders();
@@ -2327,7 +2582,7 @@ async function renderProcessOrders(){
   const tbody = document.getElementById("procTableBody");
   if(!tbody) return;
 
-  setTbodyLoading_(tbody, 7);
+  setTbodyLoading_(tbody, 6);
   const list = await getAll("process_order").catch(()=>[]);
   const kw = (document.getElementById("proc_search_keyword")?.value || "").trim().toLowerCase();
   const qSt = (document.getElementById("proc_search_status")?.value || "").trim().toUpperCase();
@@ -2355,26 +2610,30 @@ async function renderProcessOrders(){
     ].map(x => String(x || "").toLowerCase()).join(" ");
     return hay.includes(kw);
   });
-  const sorted = [...filtered].sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
+  const sorted = typeof erpSortRowsNewestFirst_ === "function"
+    ? erpSortRowsNewestFirst_(filtered, ["planned_date", "created_at"], "process_order_id")
+    : [...filtered].sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
 
   tbody.innerHTML = "";
   if(!sorted.length){
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#64748b;padding:24px;">${kw || qSt ? "沒有符合條件的加工單。" : "尚無加工單。請於上方建立或載入。"}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px;">${kw || qSt ? "沒有符合條件的加工單。" : "尚無加工單。請於上方建立或載入。"}</td></tr>`;
     return;
   }
   sorted.forEach(p => {
-    const poId = String(p.process_order_id || "").replace(/'/g, "\\'");
+    const poId = String(p.process_order_id || "");
+    const safePoId = poId.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("proc_id")?.value || "").trim().toUpperCase();
+    const open = typeof erpListRowOpenInRender_ === "function"
+      ? erpListRowOpenInRender_("outsource", selId, poId.trim().toUpperCase())
+      : selId === poId.trim().toUpperCase();
     tbody.innerHTML += `
-      <tr>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${poId.replace(/"/g, "&quot;")}" onclick="loadProcessOrder('${safePoId}')">
         <td>${escapeHtml_(p.process_order_id || "")}</td>
         <td>${escapeHtml_(procProcessTypeLabel_(p.process_type))}</td>
         <td>${escapeHtml_(procMaterialTypeLabel_(p.source_type))}</td>
         <td>${escapeHtml_(procSupplierListCell_(p.supplier_id, supMap))}</td>
         <td>${escapeHtml_(procOrderStatusLabel_(p.status))}</td>
         <td>${escapeHtml_((typeof erpFormatListDateTime_ === "function" ? erpFormatListDateTime_(p.created_at) : (p.created_at || "")))}</td>
-        <td>
-          <button class="btn-edit" onclick="loadProcessOrder('${poId}', this)">Load</button>
-        </td>
       </tr>
     `;
   });

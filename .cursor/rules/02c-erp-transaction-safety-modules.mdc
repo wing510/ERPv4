@@ -1,0 +1,11 @@
+---
+description: ERP 原子交易與回滾安全（modules/ 變更時提醒；高風險才完整）
+alwaysApply: false
+globs: modules/**
+---
+
+# ERP Transaction Safety（modules reminder）
+
+當 `modules/` 變更會引發交易流程差異（POST/VOID、金額、權限提示、路由）且屬 Task Level A/B 時，仍必須符合交易安全。  
+完整規則請見 `02-erp-transaction-safety.mdc`。
+

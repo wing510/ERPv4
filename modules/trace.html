@@ -9,10 +9,10 @@
 
   <div class="card-body">
     <div style="font-size:12px;color:#64748b;margin-bottom:10px;line-height:1.6;">
-      適用情境：想知道「這批貨從哪裡來、後來出到哪張出貨/哪個客戶」。
+      適用情境：想知道「這批貨從哪裡來、後來出到哪張出貨／哪個客戶」。
     </div>
     <div class="search-toolbar" style="margin-bottom:16px;">
-      <input type="text" id="trace_lot_id" class="search-keyword-wide" placeholder="輸入 Lot ID（例如：LOT-20260413-0001）" title="輸入 Lot ID 後按「查詢」">
+      <input type="text" id="trace_lot_id" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <button class="btn-primary" id="trace_run_btn" onclick="runTrace()">查詢</button>
       <span id="traceRunHint" style="font-size:12px;color:#64748b;font-weight:600;display:none;white-space:nowrap;">查詢中…</span>
       <button class="btn-secondary" onclick="resetTrace()">重設</button>
@@ -35,7 +35,7 @@
         <label style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <span>向下追（流向）</span>
           <span style="font-size:12px;color:#64748b;font-weight:600;">篩選</span>
-          <select id="trace_down_ship_filter" class="search-status" style="width:auto;min-width:132px;" title="流向篩選（出貨/作廢）">
+          <select id="trace_down_ship_filter" class="search-status" style="width:auto;min-width:132px;" title="流向篩選（出貨／作廢）">
             <option value="ALL" selected>全部</option>
             <option value="POSTED">只看已出貨</option>
             <option value="CANCELLED">只看已作廢</option>
@@ -49,16 +49,16 @@
 
 <div class="card">
   <div class="card-header card-header-flex">
-    <span>區塊 2：查事件（一次操作/過帳）— 交易鏈（transaction_id）</span>
+    <span>區塊 2：查事件（一次操作／過帳）— 交易鏈（transaction_id）</span>
     <span data-help="traceTx"></span>
   </div>
 
   <div class="card-body">
     <div style="font-size:12px;color:#64748b;margin-bottom:10px;line-height:1.6;">
-      適用情境：想知道「這一次操作/過帳做過什麼」（可能是採購收貨、進口收貨、庫存異動、出貨、作廢回沖、補寄、再出貨…）。
+      適用情境：想知道「這一次操作／過帳做過什麼」（可能是採購收貨、進口收貨、庫存異動、出貨、作廢回沖、補寄、再出貨…）。
     </div>
     <div class="search-toolbar" style="margin-bottom:12px;">
-      <input type="text" id="trace_tx_id" class="search-keyword-wide" placeholder="輸入 TX 或單號（TX/SO/SHIP/GR/IR/PO/IMPORT/PROC/MV-...）" title="可直接輸入 TX-...；或輸入單號（如 SHIP-.../SO-...），系統會自動換成 transaction_id 再查詢">
+      <input type="text" id="trace_tx_id" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <button class="btn-primary" id="trace_tx_run_btn" onclick="runTraceTx()">查詢</button>
       <span id="traceTxRunHint" style="font-size:12px;color:#64748b;font-weight:600;display:none;white-space:nowrap;">查詢中…</span>
       <button class="btn-secondary" onclick="resetTraceTx()">清除</button>

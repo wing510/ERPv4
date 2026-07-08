@@ -73,15 +73,30 @@ function dbDerivedInventoryStatus_(lot, availableQty, movementLoadFailed) {
   return "ACTIVE";
 }
 
+function dbCanModule_(k) {
+  try {
+    return typeof erpIsModuleAllowed_ === "function" ? !!erpIsModuleAllowed_(k) : true;
+  } catch (_e) {
+    return true;
+  }
+}
+
+function dbFormatArReminderHint_(days) {
+  const n = Math.max(0, Math.floor(Number(days)));
+  if (!(n > 0)) return "提醒已關閉（公司設定）";
+  return "到期前 " + n + " 天內（公司設定）";
+}
+
+function dbSetArReminderHint_(days) {
+  const el = document.getElementById("db_ar_reminder_hint");
+  if (el) el.textContent = dbFormatArReminderHint_(days);
+}
+
 async function dashboardInit() {
   if (!window.DB) window.DB = {};
 
-  function can_(k){
-    try{
-      return (typeof erpIsModuleAllowed_ === "function") ? !!erpIsModuleAllowed_(k) : true;
-    }catch(_e){
-      return true;
-    }
+  function can_(k) {
+    return dbCanModule_(k);
   }
 
   // 重要：避免在「無庫存權限」時仍去打 lot/movement 造成 Permission denied
@@ -236,6 +251,41 @@ function renderDashboard(ctx) {
   setText("db_ship_open", String(shipOpen));
   setText("db_ship_posted", String(shipPosted));
 
+  var finCard = document.getElementById("db_finance_card");
+  var canAr = dbCanModule_("ar");
+  var canConsign = dbCanModule_("consignment");
+  if (finCard) finCard.style.display = (canAr || canConsign) ? "" : "none";
+  if (canAr) {
+    callAPI({ action: "list_ar_dashboard_summary", _ts: String(Date.now()) }, { method: "POST" })
+      .then(function (r) {
+        setText("db_consignment_open", String(r?.open_consignment_count != null ? r.open_consignment_count : "—"));
+        setText("db_ar_overdue", String(r?.overdue_ar_count != null ? r.overdue_ar_count : "—"));
+        setText("db_ar_reminder", String(r?.reminder_ar_count != null ? r.reminder_ar_count : "—"));
+        setText("db_ar_open", String(r?.open_ar_count != null ? r.open_ar_count : "—"));
+        dbSetArReminderHint_(r?.ar_reminder_days_before_overdue);
+      })
+      .catch(function () {
+        setText("db_consignment_open", "—");
+        setText("db_ar_overdue", "—");
+        setText("db_ar_reminder", "—");
+        setText("db_ar_open", "—");
+      });
+  } else if (canConsign) {
+    callAPI({ action: "list_ar_dashboard_summary", _ts: String(Date.now()) }, { method: "POST" })
+      .then(function (r) {
+        setText("db_consignment_open", String(r?.open_consignment_count != null ? r.open_consignment_count : "—"));
+        setText("db_ar_overdue", "—");
+        setText("db_ar_reminder", "—");
+        setText("db_ar_open", "—");
+      })
+      .catch(function () {
+        setText("db_consignment_open", "—");
+        setText("db_ar_overdue", "—");
+        setText("db_ar_reminder", "—");
+        setText("db_ar_open", "—");
+      });
+  }
+
   var guide = document.getElementById("dashboardFirstTimeGuide");
   if (guide) guide.style.display = products.length === 0 ? "block" : "none";
 
@@ -243,6 +293,9 @@ function renderDashboard(ctx) {
 }
 
 /** 「一鍵刪除」僅 ADMIN 可看見（角色來自登入回傳，存於 erp_current_role） */
+var DEV_CLEAR_EXCEPTION_TEXT_ =
+  "產品、供應商、客戶、倉庫、使用者、公司設定、空白 CI、促銷方案、經銷方案";
+
 function syncDashboardDevClearVisibility_() {
   var grp = document.getElementById("dev_clear_button_group");
   if (!grp) return;
@@ -267,7 +320,11 @@ function devClearNonMasterClick() {
   }
   if(
     !window.erpConfirmActionKey_("confirm.action.generic", {
-      fallback: "確定要刪除「除主檔外」所有工作表的資料嗎？\n主檔（產品、供應商、客戶、倉庫、使用者）會保留。"
+      fallback:
+        "確定要一鍵刪除測試資料嗎？\n\n" +
+        "以下例外模組會保留：\n" +
+        DEV_CLEAR_EXCEPTION_TEXT_ +
+        "\n\n其餘單據、庫存、寄賣、應收、已開立 CI、操作紀錄等會刪除。"
     })
   ) return;
   showSaveHint();
@@ -280,11 +337,12 @@ function devClearNonMasterClick() {
   })
     .then(function (res) {
       if (typeof invalidateCache === "function") invalidateCache();
-      if (typeof showToast === "function")
-        showToast(
-          "已清除非主檔資料：" +
-            (res.cleared && res.cleared.length ? res.cleared.join(", ") : "完成")
-        );
+      if (typeof showToast === "function") {
+        var msg =
+          "已清除測試資料：" +
+          (res.cleared && res.cleared.length ? res.cleared.join(", ") : "完成");
+        showToast(msg);
+      }
       return dashboardInit();
     })
     .catch(function (err) {

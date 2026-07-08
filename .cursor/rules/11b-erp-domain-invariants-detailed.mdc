@@ -1,0 +1,12 @@
+---
+description: ERP Domain Invariants（詳細版：僅在相關模組/文件時載入）
+alwaysApply: false
+globs: server/sql/v4.2.*
+---
+
+# ERP Domain Invariants（詳細版）
+
+本檔不作為永遠規則；僅在特定模組變更時載入，用於提醒跨模組不變條件。
+
+完整條文請見：`docs/ERP_Domain_Invariants.md`
+

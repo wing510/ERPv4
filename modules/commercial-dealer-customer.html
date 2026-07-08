@@ -1,0 +1,145 @@
+<!-- ===== Dealer 方案客戶（COMMERCIAL） ===== -->
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>
+      Dealer 方案客戶
+      <button type="button" class="btn-sheet" onclick="openSheetLink('customer')" title="客戶主檔（customer）">Sheet</button>
+    </span>
+    <span data-help="commercialDealerCustomerList"></span>
+  </div>
+  <div class="card-body">
+    <div class="search-toolbar search-toolbar-master">
+      <input type="text" id="search_cdc_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
+      <select id="search_cdc_category">
+        <option value="">全部分類</option>
+        <option value="經銷">經銷</option>
+        <option value="零售">零售</option>
+        <option value="其他">其他</option>
+      </select>
+      <select id="search_cdc_bind_status">
+        <option value="ALL">全部綁定</option>
+        <option value="ANY">僅已綁方案</option>
+        <option value="NONE">僅未綁方案</option>
+      </select>
+      <select id="search_cdc_status">
+        <option value="ALL">全部狀態</option>
+        <option value="ACTIVE" selected>ACTIVE（使用中）</option>
+        <option value="INACTIVE">INACTIVE（停用）</option>
+      </select>
+      <button type="button" class="btn-secondary" onclick="cdcResetSearch_()">重設</button>
+    </div>
+
+    <br>
+
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table master-list-table">
+        <thead>
+          <tr>
+            <th class="col-master-idname" onclick="cdcSort_('customer_name')"><span class="master-th-id-desk">名稱</span><span class="master-th-idname-mob">名稱</span></th>
+            <th class="col-master-name-desk" onclick="cdcSort_('customer_name')">名稱</th>
+            <th onclick="cdcSort_('dealer_rebate_scheme_id')">月結回饋方案</th>
+            <th onclick="cdcSort_('dealer_rebate_credit_balance')">次月折抵</th>
+            <th onclick="cdcSort_('dealer_cumulative_scheme_id')">經銷等級方案</th>
+            <th onclick="cdcSort_('dealer_cumulative_amount')">月結累積</th>
+            <th>目前等級／經銷價</th>
+            <th>次月等級／經銷價</th>
+          </tr>
+        </thead>
+        <tbody id="cdc_list_tbody">
+          <tr><td colspan="8" class="text-muted">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 方案明細 ===== -->
+<div class="card master-edit-card master-edit-collapsed" id="cdc_edit_card">
+  <div class="card-header card-header-flex">
+    <span>方案明細 — <span id="cdc_edit_title">—</span></span>
+    <span data-help="commercialDealerCustomer"></span>
+  </div>
+  <div class="card-body">
+    <input type="hidden" id="cdc_customer_id">
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label>月結回饋方案</label>
+        <select id="cdc_dealer_rebate_scheme_id">
+          <option value="">（未設定）</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>回饋方式預設</label>
+        <select id="cdc_dealer_rebate_settle_mode">
+          <option value="CREDIT_NOTE">折讓（扣當月應收）</option>
+          <option value="CARRY_FORWARD">次月結算折抵</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>排除回饋</label>
+        <select id="cdc_dealer_rebate_excluded">
+          <option value="false">否（參加）</option>
+          <option value="true">是（不參加）</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-grid-4">
+      <div class="form-group">
+        <label>經銷等級方案</label>
+        <select id="cdc_dealer_cumulative_scheme_id">
+          <option value="">（未設定）</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>累積起算日</label>
+        <input type="date" id="cdc_dealer_cumulative_started_at">
+      </div>
+    </div>
+    <div class="button-group" style="margin-top:12px;">
+      <button type="button" class="btn-primary" id="cdc_update_btn" onclick="cdcUpdate_(this)">更新</button>
+      <button type="button" class="btn-secondary" onclick="cdcClearForm_()">清除</button>
+      <button type="button" class="btn-secondary" id="cdc_stat_toggle_btn" onclick="cdcStatTogglePreview_()">本月預覽</button>
+      <button type="button" class="btn-secondary" onclick="cdcGoMonthlyStat_()">月結統計</button>
+    </div>
+    <div id="cdc_stat_preview" class="cdc-stat-detail-box cdc-stat-box-hidden" style="margin-top:12px;" aria-label="本月預覽"></div>
+    <style>
+      .cdc-stat-detail-box{
+        font-size:13px;line-height:1.55;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;
+      }
+      .cdc-stat-detail-box.cdc-stat-box-hidden{ display:none; }
+    </style>
+  </div>
+</div>
+
+<!-- ===== 客戶促銷（點客戶後展開，在方案明細下方） ===== -->
+<div class="card master-edit-card master-edit-collapsed" id="cdc_promo_card">
+  <div class="card-header card-header-flex">
+    <span>此客戶促銷方案</span>
+    <span>
+      <button type="button" class="btn-secondary btn-sm" onclick="cdcGoPromoForEditingCustomer_()">前往 Promo 管理</button>
+    </span>
+  </div>
+  <div class="card-body">
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table master-list-table">
+        <thead>
+          <tr>
+            <th class="col-master-idname"><span class="master-th-id-desk">名稱</span><span class="master-th-idname-mob">名稱</span></th>
+            <th class="col-master-name-desk">名稱</th>
+            <th>狀態</th>
+            <th>有效期</th>
+            <th>範圍</th>
+            <th>管道</th>
+            <th>明細數</th>
+          </tr>
+        </thead>
+        <tbody id="cdc_promo_tbody">
+          <tr><td colspan="7" class="text-muted">請先點選上方客戶</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:12px;color:#64748b;margin-top:8px;">
+      點方案列展開品項明細（品項／促銷類型對齊狀態／內容對齊有效期），再點一次收合；顯示今天仍在有效期且狀態為「生效」的促銷方案。
+    </div>
+  </div>
+</div>

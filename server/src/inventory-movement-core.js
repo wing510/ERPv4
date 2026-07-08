@@ -2,6 +2,8 @@ const { getSupabase } = require("./supabase");
 const { fail } = require("./response");
 const {
   nowIso,
+  normalizeTaipeiTimestamp_,
+  timestamptzFromClient_,
   buildTxId,
   buildId_,
   sumMovementsForLot_,
@@ -29,7 +31,7 @@ async function createInventoryMovementUnlocked_(p) {
 
   const manualOutPurposes = ["INTERNAL_USE", "SAMPLE", "SCRAP", "OTHER"];
   if (movementType === "OUT" && manualOutPurposes.includes(refType)) {
-    if (!issuedTo) return fail("手動扣庫：請選擇「給誰（領用/交付）」");
+    if (!issuedTo) return fail("手動扣庫：請選擇「給誰（領用／交付）」");
     if (!remark) return fail("手動扣庫：請填寫原因");
   }
   if (refType === "TRANSFER") {
@@ -37,7 +39,7 @@ async function createInventoryMovementUnlocked_(p) {
       if (!refId) return fail("轉倉：缺少對應的新 Lot（ref_id）");
       if (!remark) return fail("轉倉：請填寫原因");
     }
-    if (issuedTo) return fail("轉倉：不可填寫「給誰（領用/交付）」");
+    if (issuedTo) return fail("轉倉：不可填寫「給誰（領用／交付）」");
   }
 
   const sb = getSupabase();
@@ -101,7 +103,7 @@ async function createInventoryMovementUnlocked_(p) {
     remark: remark,
     system_remark: String(p.system_remark || "").trim(),
     created_by: String(p.created_by || actor || "").trim(),
-    created_at: p.created_at || nowIso(),
+    created_at: timestamptzFromClient_(p.created_at),
     updated_by: String(p.updated_by || "").trim(),
     updated_at: p.updated_at || null
   };

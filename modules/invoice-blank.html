@@ -10,7 +10,7 @@
   </div>
   <div class="card-body">
     <div class="button-group" style="margin-bottom:12px;">
-      <input type="text" id="inv_blank_search_keyword" placeholder="關鍵字（發票號／買方）" style="min-width:240px;">
+      <input type="text" id="inv_blank_search_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <select id="inv_blank_search_status">
         <option value="">全部狀態</option>
         <option value="ISSUED">已開立</option>
@@ -34,7 +34,6 @@
             <th>買方</th>
             <th>發票日期</th>
             <th>狀態</th>
-            <th class="col-ci-actions">操作</th>
           </tr>
         </thead>
         <tbody id="invBlankListBody"></tbody>
@@ -151,7 +150,7 @@
         <label>地址 Address</label>
         <input type="text" id="inv_ci_buyer_address">
       </div>
-      <div class="form-group" style="grid-column:span 4;">
+      <div class="form-group form-group-span-2">
         <label>備註 Remarks</label>
         <input type="text" id="inv_ci_remark">
       </div>
@@ -167,7 +166,7 @@
       <table class="data-table inv-ci-lines-table">
         <thead>
           <tr>
-            <th>項次 No.</th>
+            <th>#</th>
             <th>品名描述 Description</th>
             <th>數量 Qty</th>
             <th>單價 Unit Price</th>

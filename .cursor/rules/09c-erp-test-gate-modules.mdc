@@ -1,0 +1,15 @@
+---
+description: ERP 測試 Gate（modules/ 變更時提醒；高風險才完整）
+alwaysApply: false
+globs: modules/**
+---
+
+# ERP Test Gate（modules reminder）
+
+若 `modules/` 改動屬 Task Level A/B，至少補齊：
+- Happy Path（使用者從畫面操作到成功）
+- Retry（double click / timeout retry）
+- relevant concurrency（若同一筆資料可被多人同時操作）
+
+完整規則請見 `09-erp-test-gate.mdc`。
+

@@ -1,0 +1,80 @@
+---
+description: ERP Database Migration 安全規則（高風險必做）
+alwaysApply: false
+globs: server/sql/**
+---
+
+# ERP Migration and Database Safety
+
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
+任何 schema、index、constraint、function、RPC、trigger 修改必須先做 migration analysis。
+
+## 上 migration 前必做
+
+## Preflight（執行前檢查）
+
+- duplicate existing data
+- null values
+- invalid references
+- incompatible historical rows
+- index collision
+- constraint violation
+- function dependency
+- view dependency
+- trigger dependency
+
+## UNIQUE Index
+
+新增 UNIQUE 前必須先查：
+
+- 是否已有 duplicate
+- duplicate 如何處理
+- 是否需要 partial unique
+
+禁止直接建立後期待成功。
+
+## Migration（必須定義）
+
+- forward migration
+- rollback plan
+- deployment order
+- application compatibility window
+
+## Expand / Contract
+
+跨版本部署優先：
+
+1. Add new schema
+2. Backfill
+3. Dual-read or controlled transition
+4. Switch application
+5. Verify
+6. Remove old path later
+
+禁止 DB 與 Node 必須同一毫秒切換才不壞。
+
+## Function Replacement
+
+CREATE OR REPLACE 前檢查：
+
+- signature
+- grants
+- callers
+- return contract
+
+## Production
+
+未完成：
+
+- backup
+- preflight
+- rollback
+- staging test
+
+不得 production migration。
+
+## 建議策略
+- 只在 DEV/測試庫先跑
+- 新增欄位優先「可選」→ 回填 → 再收緊約束（視需求）
+

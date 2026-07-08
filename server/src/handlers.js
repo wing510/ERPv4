@@ -5,6 +5,58 @@ const { docCrudHandlers } = require("./crud-doc");
 const { inventoryCrudHandlers } = require("./crud-inventory");
 const { postTransferBundle } = require("./bundles/transfer");
 const { postShipmentBundle, cancelShipmentBundle } = require("./bundles/shipment");
+const {
+  listArReceivableEnriched_,
+  listArPaymentByAr_,
+  listArAdjustmentByAr_,
+  listArPaymentBatchBundle_,
+  getArPaymentBatchBundle_,
+  listArDashboardSummary_,
+  registerArPaymentBundle,
+  registerArPaymentBatchBundle,
+  updateArPaymentBundle,
+  voidArPaymentBundle,
+  voidArPaymentBatchBundle,
+  adjustArAmountBundle,
+  settleArBundle,
+  forceCloseArBundle
+} = require("./bundles/ar");
+const {
+  createConsignmentCaseBundle,
+  listConsignmentCaseEnriched_,
+  listConsignmentCaseLite_,
+  listConsignmentCasePoolByCase_,
+  listConsignmentCaseSettlementByCase_,
+  listConsignmentCaseReturnByCase_,
+  postConsignmentCaseSettlementBundle,
+  previewConsignmentCaseReturnBundle,
+  postConsignmentCaseReturnBundle,
+  cancelConsignmentCaseSettlementBundle,
+  cancelConsignmentCaseReturnBundle
+} = require("./bundles/consignment-case");
+const {
+  listConsignmentPromoActiveForCase_,
+  previewConsignmentCaseSettlementPromo_,
+  listConsignmentPromoSchemeEnriched_,
+  saveConsignmentPromoSchemeBundle,
+  endConsignmentPromoSchemeBundle,
+  previewSalesOrderPromoLineBundle
+} = require("./bundles/consignment-promo");
+const {
+  listCommercialDealerSchemeEnriched_,
+  listCommercialDealerCustomerEnriched_,
+  listCommercialDealerRebateEnriched_,
+  saveCommercialDealerSchemeBundle,
+  previewCommercialDealerRebateBundle,
+  postCommercialDealerRebateBundle,
+  voidCommercialDealerRebateBundle,
+  listCommercialDealerMonthlyStatEnriched_,
+  previewCommercialDealerMonthlyStatBundle,
+  postCommercialDealerMonthlyStatBundle,
+  voidCommercialDealerMonthlyStatBundle,
+  previewCumulativeDealerForSettlementBundle,
+  syncCustomerCumulativeTierBundle
+} = require("./bundles/commercial-dealer");
 const { registerEinvoiceBundle, listEinvoiceLineByShipment } = require("./bundles/einvoice");
 const {
   getCompanyProfile,
@@ -37,6 +89,8 @@ const {
   cancelImportDocumentBundle
 } = require("./bundles/import-document");
 const { traceLotBundle, traceTransactionBundle } = require("./bundles/trace");
+const { devClearNonMasterBundle } = require("./bundles/dev-clear");
+const { nowIso } = require("./bundles/shared");
 const {
   allowedGoogleAudiences_,
   verifyGoogleIdToken_,
@@ -160,7 +214,21 @@ const SUPABASE_LIST_TABLES = {
   commercial_invoice_blank: "commercial_invoice_blank",
   commercial_invoice_blank_line: "commercial_invoice_blank_line",
   erp_company_profile: "erp_company_profile",
-  company_profile: "erp_company_profile"
+  company_profile: "erp_company_profile",
+  consignment_case: "consignment_case",
+  consignment_case_pool_item: "consignment_case_pool_item",
+  consignment_case_settlement: "consignment_case_settlement",
+  consignment_case_settlement_item: "consignment_case_settlement_item",
+  consignment_case_return: "consignment_case_return",
+  consignment_case_return_item: "consignment_case_return_item",
+  consignment_promo_scheme: "consignment_promo_scheme",
+  consignment_promo_scheme_line: "consignment_promo_scheme_line",
+  commercial_dealer_scheme: "commercial_dealer_scheme",
+  commercial_dealer_scheme_tier: "commercial_dealer_scheme_tier",
+  commercial_dealer_rebate: "commercial_dealer_rebate",
+  ar_receivable: "ar_receivable",
+  ar_payment: "ar_payment",
+  ar_amount_adjustment_log: "ar_amount_adjustment_log"
 };
 
 function stripUserSecret_(row) {
@@ -348,7 +416,7 @@ async function setUserPassword(p) {
     .update({
       password_hash: hash,
       updated_by: actor,
-      updated_at: new Date().toISOString()
+      updated_at: nowIso()
     })
     .eq("user_id", targetId);
   if (error) return fail(error.message || String(error));
@@ -452,13 +520,82 @@ const LIST_ORDER_COL = {
   commercial_invoice_line: "ci_line_id",
   commercial_invoice_blank: "ci_id",
   commercial_invoice_blank_line: "ci_line_id",
-  einvoice_line: "einvoice_line_id"
+  einvoice_line: "einvoice_line_id",
+  consignment_case: "case_id",
+  consignment_case_pool_item: "pool_item_id",
+  consignment_case_settlement: "settlement_id",
+  consignment_case_settlement_item: "settlement_item_id",
+  consignment_case_return: "return_id",
+  consignment_case_return_item: "return_item_id",
+  consignment_promo_scheme: "scheme_id",
+  consignment_promo_scheme_line: "line_id",
+  commercial_dealer_scheme: "scheme_id",
+  commercial_dealer_scheme_tier: "line_no",
+  commercial_dealer_rebate: "rebate_id"
 };
 
-async function listFromSupabaseTable(table, orderCol) {
+/** 明細列維持 ID/行號升冪；其餘表頭列表改 created_at 新→舊 */
+const LIST_LINE_ITEM_SHEETS_ = new Set([
+  "customer_recipient",
+  "goods_receipt_item",
+  "import_item",
+  "import_receipt_item",
+  "purchase_order_item",
+  "sales_order_item",
+  "shipment_item",
+  "process_order_input",
+  "process_order_output",
+  "lot_relation",
+  "commercial_invoice_line",
+  "commercial_invoice_blank_line",
+  "consignment_case_pool_item",
+  "consignment_case_settlement_item",
+  "consignment_case_return_item",
+  "consignment_promo_scheme_line",
+  "commercial_dealer_scheme_tier",
+  "einvoice_line"
+]);
+
+function listUsesCreatedAtDesc_(sheetKey) {
+  if (sheetKey === "logs") return true;
+  if (LIST_LINE_ITEM_SHEETS_.has(sheetKey)) return false;
+  if (LIST_ORDER_COL[sheetKey] === "line_no") return false;
+  return !!SUPABASE_LIST_TABLES[sheetKey];
+}
+
+/** 有業務日期的表頭：先比業務日期，再比 created_at */
+const LIST_BUSINESS_DATE_COL_ = {
+  purchase_order: "order_date",
+  import_document: "import_date",
+  sales_order: "order_date",
+  shipment: "ship_date",
+  goods_receipt: "receipt_date",
+  import_receipt: "receipt_date",
+  commercial_invoice: "ci_date",
+  commercial_invoice_blank: "ci_date",
+  consignment_case: "open_date",
+  consignment_case_settlement: "settlement_date",
+  consignment_case_return: "return_date",
+  process_order: "planned_date"
+};
+
+const LIST_MASTER_SHEETS_ = new Set(["product", "supplier", "customer", "warehouse", "user"]);
+
+async function listFromSupabaseTable(table, orderCol, sheetKey) {
   const sb = getSupabase();
   let q = sb.from(table).select("*");
-  if (orderCol) q = q.order(orderCol, { ascending: true });
+  if (sheetKey && listUsesCreatedAtDesc_(sheetKey)) {
+    const bizCol = LIST_BUSINESS_DATE_COL_[sheetKey];
+    if (bizCol) {
+      q = q.order(bizCol, { ascending: false }).order("created_at", { ascending: false });
+    } else if (LIST_MASTER_SHEETS_.has(sheetKey)) {
+      q = q.order("updated_at", { ascending: false }).order("created_at", { ascending: false });
+    } else {
+      q = q.order("created_at", { ascending: false });
+    }
+  } else if (orderCol) {
+    q = q.order(orderCol, { ascending: true });
+  }
   const { data, error } = await q;
   if (error) return fail(error.message || String(error));
   const rows = data || [];
@@ -483,8 +620,7 @@ async function listGenericSheet(sheetKey, p) {
   const orderCol =
     LIST_ORDER_COL[sheetKey] ||
     (sheetKey === "logs" ? "created_at" : sheetKey + "_id");
-  return listFromSupabaseTable(table, orderCol);
-
+  return listFromSupabaseTable(table, orderCol, sheetKey);
 }
 
 async function listInventoryMovementAvailableByLot(p) {
@@ -535,10 +671,35 @@ async function listInventoryMovementAvailableByLot(p) {
     if (!Object.prototype.hasOwnProperty.call(map, id)) missing.push(id);
   });
 
+  if (missing.length > 0) {
+    const { data: movRows, error: movErr } = await sb
+      .from("inventory_movement")
+      .select("lot_id, qty")
+      .in("lot_id", missing);
+    if (!movErr && movRows) {
+      movRows.forEach((r) => {
+        const id = String(r.lot_id || "").trim();
+        if (!id) return;
+        const q = Number(r.qty || 0);
+        if (Number.isNaN(q)) return;
+        map[id] = (map[id] || 0) + q;
+      });
+    }
+  }
+
+  const stillMissing = [];
+  (lots || []).forEach((lot) => {
+    const id = String(lot.lot_id || "").trim();
+    if (!id) return;
+    const inv = String(lot.inventory_status || "ACTIVE").trim().toUpperCase();
+    if (inv === "VOID") return;
+    if (!Object.prototype.hasOwnProperty.call(map, id)) stillMissing.push(id);
+  });
+
   return ok({
     data: map,
-    missing_movement_count: missing.length,
-    missing_lot_ids: missing.slice(0, 100),
+    missing_movement_count: stillMissing.length,
+    missing_lot_ids: stillMissing.slice(0, 100),
     balance_source: balanceSource,
     source: "supabase"
   });
@@ -577,6 +738,39 @@ async function listInventoryMovementRecent(p) {
   return ok({ data: data || [] });
 }
 
+async function listInventoryMovementByRefs(p) {
+  const gate = requireSession(p);
+  if (gate.err) return gate.err;
+  if (!supabaseReady()) {
+    return fail("SUPABASE_URL and SUPABASE_SECRET_KEY required in .env");
+  }
+
+  const refType = String(p.ref_type || "").trim().toUpperCase();
+  if (!refType) return fail("ref_type required");
+
+  let ids = [];
+  try {
+    ids = JSON.parse(String(p.ref_ids_json || "[]"));
+  } catch (_e) {
+    return fail("ref_ids_json must be valid JSON array");
+  }
+  if (!Array.isArray(ids) || !ids.length) return ok({ data: [] });
+
+  const idList = [...new Set(ids.map((x) => String(x || "").trim()).filter(Boolean))].slice(0, 200);
+  if (!idList.length) return ok({ data: [] });
+
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("inventory_movement")
+    .select("*")
+    .eq("ref_type", refType)
+    .in("ref_id", idList)
+    .order("created_at", { ascending: false });
+
+  if (error) return fail(error.message || String(error));
+  return ok({ data: data || [], source: "supabase" });
+}
+
 async function listLogsRecent(p) {
   const gate = requireSession(p);
   if (gate.err) return gate.err;
@@ -597,6 +791,34 @@ async function listLogsRecent(p) {
     .gte("created_at", cutoff)
     .order("created_at", { ascending: false })
     .limit(cap);
+
+  if (error) return fail(error.message || String(error));
+  return ok({ data: data || [] });
+}
+
+async function listLogsByRef(p) {
+  const gate = requireSession(p);
+  if (gate.err) return gate.err;
+  if (!supabaseReady()) return ok({ data: [] });
+
+  const tableName = String(p.table_name || "").trim();
+  const referenceId = String(p.reference_id || "").trim();
+  if (!tableName) return fail("table_name required");
+  if (!referenceId) return fail("reference_id required");
+
+  const days = Number(p.days);
+  const dayCap = Number.isNaN(days) ? 3650 : Math.max(1, Math.min(days, 3650));
+  const cutoff = new Date(Date.now() - dayCap * 86400000).toISOString();
+
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("logs")
+    .select("*")
+    .eq("table_name", tableName)
+    .eq("reference_id", referenceId)
+    .gte("created_at", cutoff)
+    .order("created_at", { ascending: false })
+    .limit(500);
 
   if (error) return fail(error.message || String(error));
   return ok({ data: data || [] });
@@ -667,22 +889,27 @@ async function listTableRecent(p, table, defaultDays) {
   const days = Number(p.days);
   const dayCap = Number.isNaN(days) ? defaultDays : Math.max(1, days);
   const cutoff = new Date(Date.now() - dayCap * 86400000).toISOString();
+  const bizCol = LIST_BUSINESS_DATE_COL_[table];
 
   const sb = getSupabase();
-  const { data, error } = await sb
-    .from(table)
-    .select("*")
-    .gte("created_at", cutoff)
-    .order("created_at", { ascending: false });
+  let q = sb.from(table).select("*").gte("created_at", cutoff);
+  if (bizCol) {
+    q = q.order(bizCol, { ascending: false }).order("created_at", { ascending: false });
+  } else {
+    q = q.order("created_at", { ascending: false });
+  }
+  const { data, error } = await q;
 
   if (error) return fail(error.message || String(error));
   let rows = data || [];
   if (!rows.length) {
-    const { data: tail, error: tailErr } = await sb
-      .from(table)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(2000);
+    let tailQ = sb.from(table).select("*");
+    if (bizCol) {
+      tailQ = tailQ.order(bizCol, { ascending: false }).order("created_at", { ascending: false });
+    } else {
+      tailQ = tailQ.order("created_at", { ascending: false });
+    }
+    const { data: tail, error: tailErr } = await tailQ.limit(2000);
     if (tailErr) return fail(tailErr.message || String(tailErr));
     rows = tail || [];
   }
@@ -861,7 +1088,9 @@ const EXACT_LIST_ROUTES = {
   list_inventory_movement_available_by_lot: listInventoryMovementAvailableByLot,
   list_lots_missing_movement: listLotsMissingMovement,
   list_inventory_movement_recent: listInventoryMovementRecent,
+  list_inventory_movement_by_refs: listInventoryMovementByRefs,
   list_logs_recent: listLogsRecent,
+  list_logs_by_ref: listLogsByRef,
   list_sales_order_recent: listSalesOrderRecent,
   list_shipment_recent: listShipmentRecent,
   list_sales_order_item_by_so: listSalesOrderItemBySo,
@@ -877,7 +1106,23 @@ const EXACT_LIST_ROUTES = {
   list_commercial_invoice_by_shipment: listCommercialInvoiceByShipmentRoute,
   list_commercial_invoice_by_ci: listCommercialInvoiceByCiRoute,
   list_commercial_invoice_blank_by_ci: listCommercialInvoiceByCiRoute,
-  list_supabase_backups: listSupabaseBackupsRoute
+  list_supabase_backups: listSupabaseBackupsRoute,
+  list_ar_receivable_enriched: listArReceivableEnriched_,
+  list_ar_payment_by_ar: listArPaymentByAr_,
+  list_ar_adjustment_by_ar: listArAdjustmentByAr_,
+  list_ar_payment_batch_bundle: listArPaymentBatchBundle_,
+  list_ar_dashboard_summary: listArDashboardSummary_,
+  list_consignment_case_enriched: listConsignmentCaseEnriched_,
+  list_consignment_case_lite: listConsignmentCaseLite_,
+  list_consignment_case_pool_by_case: listConsignmentCasePoolByCase_,
+  list_consignment_case_settlement_by_case: listConsignmentCaseSettlementByCase_,
+  list_consignment_case_return_by_case: listConsignmentCaseReturnByCase_,
+  list_consignment_promo_scheme_enriched: listConsignmentPromoSchemeEnriched_,
+  list_consignment_promo_active_for_case: listConsignmentPromoActiveForCase_,
+  list_commercial_dealer_scheme_enriched: listCommercialDealerSchemeEnriched_,
+  list_commercial_dealer_customer_enriched: listCommercialDealerCustomerEnriched_,
+  list_commercial_dealer_rebate_enriched: listCommercialDealerRebateEnriched_,
+  list_commercial_dealer_monthly_stat_enriched: listCommercialDealerMonthlyStatEnriched_
 };
 
 async function handleListAction(action, p) {
@@ -906,11 +1151,40 @@ const ROUTES = Object.assign(
     post_transfer_bundle: postTransferBundle,
     post_shipment_bundle: postShipmentBundle,
     cancel_shipment_bundle: cancelShipmentBundle,
+    register_ar_payment_bundle: registerArPaymentBundle,
+    register_ar_payment_batch_bundle: registerArPaymentBatchBundle,
+    get_ar_payment_batch_bundle: getArPaymentBatchBundle_,
+    update_ar_payment_bundle: updateArPaymentBundle,
+    void_ar_payment_bundle: voidArPaymentBundle,
+    void_ar_payment_batch_bundle: voidArPaymentBatchBundle,
+    adjust_ar_amount_bundle: adjustArAmountBundle,
+    settle_ar_bundle: settleArBundle,
+    force_close_ar_bundle: forceCloseArBundle,
+    create_consignment_case_bundle: createConsignmentCaseBundle,
+    post_consignment_case_settlement_bundle: postConsignmentCaseSettlementBundle,
+    cancel_consignment_case_settlement_bundle: cancelConsignmentCaseSettlementBundle,
+    cancel_consignment_case_return_bundle: cancelConsignmentCaseReturnBundle,
+    preview_consignment_case_return_bundle: previewConsignmentCaseReturnBundle,
+    post_consignment_case_return_bundle: postConsignmentCaseReturnBundle,
+    preview_consignment_case_settlement_promo: previewConsignmentCaseSettlementPromo_,
+    preview_sales_order_promo_line_bundle: previewSalesOrderPromoLineBundle,
+    save_consignment_promo_scheme_bundle: saveConsignmentPromoSchemeBundle,
+    end_consignment_promo_scheme_bundle: endConsignmentPromoSchemeBundle,
+    save_commercial_dealer_scheme_bundle: saveCommercialDealerSchemeBundle,
+    preview_commercial_dealer_rebate_bundle: previewCommercialDealerRebateBundle,
+    post_commercial_dealer_rebate_bundle: postCommercialDealerRebateBundle,
+    void_commercial_dealer_rebate_bundle: voidCommercialDealerRebateBundle,
+    preview_commercial_dealer_monthly_stat_bundle: previewCommercialDealerMonthlyStatBundle,
+    post_commercial_dealer_monthly_stat_bundle: postCommercialDealerMonthlyStatBundle,
+    void_commercial_dealer_monthly_stat_bundle: voidCommercialDealerMonthlyStatBundle,
+    preview_cumulative_dealer_for_settlement: previewCumulativeDealerForSettlementBundle,
+    sync_customer_cumulative_tier: syncCustomerCumulativeTierBundle,
     register_einvoice_bundle: registerEinvoiceBundle,
     get_company_profile: getCompanyProfile,
     update_company_profile: updateCompanyProfileRoute,
     trigger_supabase_backup: triggerSupabaseBackupRoute,
     trigger_supabase_restore: triggerSupabaseRestoreRoute,
+    dev_clear_non_master: devClearNonMasterBundle,
     save_commercial_invoice_bundle: saveCommercialInvoiceBundle,
     save_standalone_commercial_invoice_bundle: saveStandaloneCommercialInvoiceBundle,
     void_commercial_invoice_bundle: voidCommercialInvoiceBundle,
@@ -970,10 +1244,12 @@ async function dispatch(action, params) {
         a === "trigger_supabase_restore" ||
         a === "set_user_password" ||
         a === "env_info" ||
-        a === "supabase_table_editor_url");
+        a === "supabase_table_editor_url" ||
+        a === "dev_clear_non_master");
     if (needsSession) {
       const gate = requireSession(p);
       if (gate.err) return gate.err;
+      p._session = gate.session;
     }
     return ROUTES[a](p);
   }

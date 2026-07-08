@@ -1,6 +1,6 @@
 {
   "siteUrl": "https://wing510.github.io/ERP",
-  "expectedVersion": "4.1",
+  "expectedVersion": "4.2",
   "login": {
     "userId": "ADMIN",
     "password": "YOUR_PASSWORD"
@@ -15,6 +15,6 @@
     "shipQty": 1,
     "voidReasonIndex": 1
   },
-  "notes": "fullFlow=true 會跑「收貨過帳→作廢沖銷、出貨過帳→作廢反沖」的閉環，務必只在測試環境使用。"
+  "notes": "fullFlow=true 會跑「收貨過帳→作廢沖銷、出貨過帳→作廢反沖」的閉環，務必只在測試環境使用。AR 手動 UAT 見 docs/ERPv4.2.8_AR_UAT清單.md"
 }
 

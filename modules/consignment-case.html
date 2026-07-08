@@ -1,0 +1,132 @@
+<!-- ===== Case 案件管理 ===== -->
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>
+      Case 案件管理
+      <button type="button" class="btn-sheet" onclick="openSheetLink('consignment_case')" title="寄賣案件">Sheet</button>
+      <span id="ccCaseStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">手動開案 → 出貨掛案累加品項池 → 結算／收回</span>
+    </span>
+    <span data-help="consignmentCaseMain"></span>
+  </div>
+  <div class="card-body">
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 16px;margin-bottom:12px;">
+      <div class="form-group" style="margin:0;min-width:160px;">
+        <select id="cc_filter_status" onchange="ccReloadCaseList_()" aria-label="狀態篩選">
+          <option value="OPEN">進行中</option>
+          <option value="ALL">全部</option>
+          <option value="CLOSED">已結案</option>
+        </select>
+      </div>
+      <div class="button-group" style="margin-top:0;width:auto;flex-wrap:nowrap;">
+        <button class="btn-secondary" type="button" onclick="ccReloadCaseList_()">重新整理</button>
+        <button class="btn-secondary" id="cc_toggle_new_case_btn" type="button" onclick="ccToggleNewCasePanel_()">開新寄賣案</button>
+      </div>
+    </div>
+
+    <div id="cc_new_case_panel" style="display:none;margin-bottom:16px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+      <div class="form-grid-4">
+        <div class="form-group">
+          <label>案件ID</label>
+          <input type="text" id="cc_new_case_id" placeholder="自動產生ID">
+        </div>
+        <div class="form-group">
+          <label>客戶 *</label>
+          <select id="cc_new_customer_id"></select>
+        </div>
+        <div class="form-group">
+          <label>開案日 *</label>
+          <input type="date" id="cc_new_open_date">
+        </div>
+        <div class="form-group" style="grid-column:span 2;">
+          <label>備註</label>
+          <input type="text" id="cc_new_remark">
+        </div>
+        <div class="button-group" style="margin-top:0;grid-column:span 1;align-self:end;flex-wrap:nowrap;">
+          <button class="btn-primary" id="cc_create_btn" type="button" onclick="ccCreateCaseSubmit_(this)">建立寄賣案</button>
+          <button class="btn-secondary" type="button" onclick="ccClearNewCaseForm_()">清空</button>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .cc-case-row:hover { background: #f1f5f9; }
+    </style>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>案件ID</th>
+            <th>客戶</th>
+            <th>開案日</th>
+            <th>狀態</th>
+            <th>已收/預估應收(%)</th>
+            <th>備註</th>
+          </tr>
+        </thead>
+        <tbody id="cc_case_tbody">
+          <tr><td colspan="6" class="text-muted">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="cc_detail_card" style="display:none;">
+  <div class="card-header card-header-flex">
+    <span>案件明細 · <span id="cc_detail_title">—</span></span>
+    <span data-help="consignmentCaseDetail"></span>
+  </div>
+  <div class="card-body">
+    <div id="cc_summary_box" style="margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;line-height:1.6;"></div>
+
+    <div class="button-group" style="margin-bottom:16px;">
+      <button class="btn-secondary" type="button" id="cc_btn_go_settle" onclick="ccGoSettlementFromDetail_()">結算</button>
+      <button class="btn-secondary" type="button" id="cc_btn_go_return" onclick="ccGoReturnFromDetail_()">收回</button>
+    </div>
+
+    <h4 style="margin:0 0 10px 0;">品項池</h4>
+    <style>
+      .cc-pool-stack-cell{ line-height:1.35; min-width:0; }
+      .cc-pool-stack-main{ line-height:1.25; }
+      .cc-pool-stack-sub{ font-size:12px; color:#64748b; margin-top:2px; }
+    </style>
+    <div class="table-wrap" style="margin-bottom:20px;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>產品／加工廠 Lot</th>
+            <th>出貨／到期</th>
+            <th>出貨量</th>
+            <th>已結算</th>
+            <th>已收回</th>
+            <th>未售剩餘</th>
+            <th>單位</th>
+            <th>經銷價</th>
+          </tr>
+        </thead>
+        <tbody id="cc_pool_tbody"></tbody>
+      </table>
+    </div>
+
+    <h4 style="margin:0 0 10px 0;">歷史（結算／收回）</h4>
+    <style>
+      .cc-history-row:hover { background: #f1f5f9; }
+    </style>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>類型／單據ID</th>
+            <th>日期</th>
+            <th>金額／原因</th>
+            <th>應收ID／退回倉</th>
+            <th>備註</th>
+          </tr>
+        </thead>
+        <tbody id="cc_history_tbody">
+          <tr><td colspan="5" class="text-muted">請先選擇案件</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

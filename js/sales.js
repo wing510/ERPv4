@@ -23,8 +23,22 @@ let soHeaderSnapshot_ = null;
 let soItemsSnapshot_ = null;
 /** 載入時快取：是否有未作廢出貨單（用於「僅未出貨可整批改主檔／明細」） */
 let soHasShipmentsCached_ = false;
+let soLots_ = [];
+let soAvailableByLotId_ = {};
+let soInventoryAvailLoaded_ = false;
+let soInventoryAvailLoading_ = null;
+/** 一般銷售：促銷預覽（建明細前） */
+let soItemPromoPreview_ = null;
+let soPromoPreviewToken_ = 0;
 
 const SO_CURRENCIES_ = ["USD", "TWD", "CNY", "EUR"];
+
+function soTypeLabelZh_(soType){
+  const t = String(soType || "NORMAL").trim().toUpperCase();
+  if(t === "NORMAL") return "一般";
+  if(t === "CONSIGNMENT") return "寄賣";
+  return (typeof termLabelZhOnly === "function" ? termLabelZhOnly(t) : t) || t || "—";
+}
 
 function soIsTaiwanCountry_(country){
   const c = String(country || "").trim();
@@ -58,9 +72,29 @@ function soFormatAmountWithCurrency_(amount){
 }
 
 function onSOCustomerChange_(){
-  if(soEditing) return;
   const custId = document.getElementById("so_customer_id")?.value || "";
-  soSetCurrency_(soResolveDefaultCurrency_(custId));
+  if(!soEditing){
+    soSetCurrency_(soResolveDefaultCurrency_(custId));
+  }
+  soFillDealerDiscountDisplay_({ recalcUnitPrice: true });
+  void soRefreshPromoPreview_();
+}
+
+function soDealerStatSourceAllowsChannel_(statSource, channel){
+  const src = String(statSource || "CONSIGNMENT").trim().toUpperCase();
+  const ch = String(channel || "CONSIGNMENT").trim().toUpperCase();
+  if(src === "ALL") return true;
+  return src === ch;
+}
+
+function soShouldApplyDealerPricing_(){
+  if(soIsConsignmentSO_()) return true;
+  const custId = document.getElementById("so_customer_id")?.value || "";
+  const customer = soFindCustomer_(custId);
+  if(!String(customer?.dealer_cumulative_scheme_id || "").trim()) return false;
+  const statSource = String(customer?.dealer_cumulative_stat_source || "").trim().toUpperCase();
+  if(!statSource) return true;
+  return soDealerStatSourceAllowsChannel_(statSource, "GENERAL");
 }
 
 function soSetHeaderReadOnly_(readOnly){
@@ -82,7 +116,7 @@ function soSetItemsReadOnly_(readOnly){
   const lineFormLocked = soEditing
     ? (!soAllowFullLineOps_() || !soItemsEditMode_)
     : !!ro;
-  ["so_item_product_id","so_item_order_qty","so_item_unit_price"].forEach(id=>{
+  ["so_item_product_id","so_item_order_qty","so_item_discount_pct","so_item_unit_price"].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
     try{ el.disabled = !!lineFormLocked; }catch(_e){}
@@ -93,6 +127,7 @@ function soSetItemsReadOnly_(readOnly){
   }
   const addBtn = document.getElementById("so_add_item_btn");
   if(addBtn) addBtn.disabled = ro;
+  soSyncConsignmentDiscountFieldLock_();
 }
 
 /** 主按鈕：有選取已存檔列時為「套用至本列」，否則「新增明細」 */
@@ -131,6 +166,11 @@ async function soReloadItemsDraftFromServer_(soId){
     unit: it.unit || "",
     unit_price: Number(it.unit_price || 0),
     amount: Number(it.amount || 0),
+    billable_qty: it.billable_qty != null ? Number(it.billable_qty) : null,
+    free_qty: Number(it.free_qty || 0),
+    promo_scheme_id: String(it.promo_scheme_id || ""),
+    promo_scheme_name: String(it.promo_scheme_name || ""),
+    promo_type: String(it.promo_type || ""),
     remark: it.remark || ""
   }));
   renderSOItemsDraft();
@@ -159,7 +199,7 @@ function soRestoreHeaderSnapshot_(snap){
   try{ document.getElementById("so_reship_ref_type").value = snap.so_reship_ref_type || ""; }catch(_e){}
   try{ document.getElementById("so_reship_ref_id").value = snap.so_reship_ref_id || ""; }catch(_e){}
   try{ soSetCurrency_(snap.so_currency || "TWD"); }catch(_eCur){}
-  try{ soSyncReshipRefUI_(); }catch(_e2){}
+  try{ soOnSOTypeChange_(); }catch(_e2){}
 }
 
 function toggleSOHeaderEditSave_(triggerEl){
@@ -259,7 +299,7 @@ async function saveSOHeaderOnly_(triggerEl){
       status: header?.status || "OPEN",
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     showToast("主檔已儲存");
     await renderSalesOrders();
@@ -287,7 +327,7 @@ async function saveSOHeaderRemarkOnly_(triggerEl){
     await updateRecord("sales_order","so_id",so_id,{
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     showToast("備註已儲存");
     try{ if(typeof invalidateCache === "function") invalidateCache("sales_order"); }catch(_eInv){}
@@ -367,6 +407,7 @@ function downloadSalesOrderPdf(){
     const orderDate = String(document.getElementById("so_order_date")?.value || "").trim();
     const soRemark = String(document.getElementById("so_remark")?.value || "").trim();
     const currency = soGetCurrency_();
+    const unitPriceLabel = soGetUnitPriceLabel_();
     const fillDate = (function(){
       try{ return String(nowIso16() || "").slice(0,10); }catch(_e){ return ""; }
     })();
@@ -378,6 +419,19 @@ function downloadSalesOrderPdf(){
 
     const items = Array.isArray(soItemsDraft) ? soItemsDraft.slice() : [];
     if(items.length === 0) return showToast("此銷售單沒有明細，無法下載 PDF", "error");
+
+    function soPromoPreviewForPdf_(it){
+      const name = String(it?.promo_scheme_name || "").trim();
+      if(!name) return "";
+      const type = String(it?.promo_type || "").trim().toUpperCase();
+      const freeQty = Number(it?.free_qty || 0);
+      const orderQty = Number(it?.order_qty || 0);
+      const billable = it?.billable_qty != null ? Number(it.billable_qty) : (orderQty - freeQty);
+      if(type === "BUY_N_GET_M" && (freeQty > 0 || billable > 0)){
+        return `${name} | 計價 ${billable}、贈 ${freeQty}`;
+      }
+      return name;
+    }
 
     const rowsHtml = items.map((it, idx) => {
       const p = (soProducts || []).find(x => String(x?.product_id || "") === String(it?.product_id || "")) || {};
@@ -436,10 +490,10 @@ function downloadSalesOrderPdf(){
         </colgroup>
         <thead>
           <tr>
-            <th style="width:46px;">項次</th>
+            <th style="width:46px;">#</th>
             <th>產品</th>
             <th style="width:110px;">數量</th>
-            <th style="width:110px;">單價</th>
+            <th style="width:110px;">${erpEscapeHtml_(unitPriceLabel)}</th>
             <th style="width:110px;">金額(${erpEscapeHtml_(currency)})</th>
             <th style="width:150px;">備註</th>
           </tr>
@@ -454,7 +508,11 @@ function downloadSalesOrderPdf(){
             const oq = u ? `${it.order_qty} ${u}` : String(it.order_qty || "");
             const price = (it.unit_price != null) ? String(it.unit_price) : "";
             const amt = (it.amount != null && typeof it.amount === "number") ? it.amount.toFixed(2) : String(it.amount || "");
-            const rmk = String(it.remark || "");
+            const baseRmk = String(it.remark || "");
+            const promoRmk = soPromoPreviewForPdf_(it);
+            const rmk = promoRmk
+              ? (baseRmk ? (baseRmk + " / " + promoRmk) : promoRmk)
+              : baseRmk;
             return `<tr>
               <td>${idx+1}</td>
               <td>
@@ -540,9 +598,9 @@ function soValidateReshipRef_(soType){
   const t = String(soType || "").trim().toUpperCase();
   if(t !== "RESHIP") return null;
   const ref = soReadReshipRef_();
-  if(!ref.reship_ref_type) return "補寄：請選擇參考類型（原 SO / 原出貨）";
+  if(!ref.reship_ref_type) return "補寄：請選擇參考類型（原 SO／原出貨）";
   if(ref.reship_ref_type !== "SO" && ref.reship_ref_type !== "SHIPMENT") return "補寄：參考類型不正確";
-  if(!ref.reship_ref_id) return "補寄：請填寫參考ID（原 SO ID / 原出貨單 ID）";
+  if(!ref.reship_ref_id) return "補寄：請填寫參考ID（原 SO ID／原出貨單 ID）";
   return null;
 }
 
@@ -713,23 +771,383 @@ function soFindProduct_(productId){
   return (soProducts || []).find(p => String(p.product_id || "").trim() === id) || null;
 }
 
+function soGetSoType_(){
+  return String(document.getElementById("so_type")?.value || "NORMAL").trim().toUpperCase();
+}
+
+function soIsConsignmentSO_(){
+  return soGetSoType_() === "CONSIGNMENT";
+}
+
+function soGetUnitPriceLabel_(){
+  return soShouldApplyDealerPricing_() ? "經銷價" : "單價";
+}
+
+function soSyncConsignmentPriceLabels_(){
+  const label = soGetUnitPriceLabel_();
+  const formLbl = document.getElementById("so_item_unit_price_label");
+  const th = document.getElementById("so_item_unit_price_th");
+  if(formLbl) formLbl.textContent = label;
+  if(th) th.textContent = label;
+}
+
+function soFindCustomer_(customerId){
+  const id = String(customerId || "").trim();
+  if(!id) return null;
+  return (soCustomers || []).find(c => String(c.customer_id || "").trim() === id) || null;
+}
+
+async function soResolveCustomerDealerDiscountPct_(customerId){
+  const cid = String(customerId || "").trim();
+  if(!cid) return null;
+
+  let customer = soFindCustomer_(cid);
+  if(!customer){
+    try{
+      customer = await getOne("customer", "customer_id", cid);
+    }catch(_e){}
+  }
+  if(!customer) return null;
+
+  let rate = customer.dealer_cumulative_price_rate;
+  if(
+    (rate == null || rate === "" || !String(customer.dealer_cumulative_stat_source || "").trim()) &&
+    String(customer.dealer_cumulative_scheme_id || "").trim()
+  ){
+    try{
+      const r = await callAPI(
+        {
+          action: "sync_customer_cumulative_tier",
+          customer_id: cid,
+          updated_by: typeof getCurrentUser === "function" ? getCurrentUser() : ""
+        },
+        { method: "POST", silent: true }
+      );
+      if(r){
+        if(r.dealer_cumulative_price_rate != null) rate = r.dealer_cumulative_price_rate;
+        const idx = (soCustomers || []).findIndex(c => String(c.customer_id || "").trim() === cid);
+        if(idx >= 0){
+          soCustomers[idx] = Object.assign({}, soCustomers[idx], {
+            dealer_cumulative_price_rate: r.dealer_cumulative_price_rate != null ? r.dealer_cumulative_price_rate : soCustomers[idx].dealer_cumulative_price_rate,
+            dealer_cumulative_tier_label: r.dealer_cumulative_tier_label || soCustomers[idx].dealer_cumulative_tier_label,
+            dealer_cumulative_stat_source: r.dealer_cumulative_stat_source || soCustomers[idx].dealer_cumulative_stat_source
+          });
+        }
+      }
+    }catch(_eSync){}
+  }
+
+  const n = Number(rate);
+  return Number.isFinite(n) && n > 0 ? money2(n) : null;
+}
+
+function soSyncConsignmentDiscountFieldLock_(){
+  const discEl = document.getElementById("so_item_discount_pct");
+  if(!discEl) return;
+  const lockDealer = soShouldApplyDealerPricing_();
+  if(typeof erpSyncInputReadonlyStyle_ === "function"){
+    erpSyncInputReadonlyStyle_(discEl, lockDealer);
+  }else{
+    discEl.readOnly = lockDealer;
+  }
+  if(!lockDealer) discEl.title = "";
+}
+
+async function soFillDealerDiscountDisplay_(opts){
+  const recalcUnitPrice = !(opts && opts.recalcUnitPrice === false);
+  soSyncConsignmentDiscountFieldLock_();
+  const discEl = document.getElementById("so_item_discount_pct");
+  if(!discEl) return;
+
+  const custId = document.getElementById("so_customer_id")?.value || "";
+  if(!soIsConsignmentSO_()){
+    const customer = soFindCustomer_(custId);
+    if(!String(customer?.dealer_cumulative_scheme_id || "").trim()){
+      if(typeof erpSyncInputReadonlyStyle_ === "function") erpSyncInputReadonlyStyle_(discEl, false);
+      else discEl.readOnly = false;
+      discEl.value = "";
+      discEl.title = "";
+      return;
+    }
+    const pct = await soResolveCustomerDealerDiscountPct_(custId);
+    const afterCustomer = soFindCustomer_(custId);
+    const statSource = String(afterCustomer?.dealer_cumulative_stat_source || "").trim().toUpperCase();
+    if(statSource && !soDealerStatSourceAllowsChannel_(statSource, "GENERAL")){
+      if(typeof erpSyncInputReadonlyStyle_ === "function") erpSyncInputReadonlyStyle_(discEl, false);
+      else discEl.readOnly = false;
+      discEl.value = "";
+      discEl.title = "此客戶經銷等級方案僅適用寄賣";
+      return;
+    }
+    if(pct != null){
+      if(typeof erpSyncInputReadonlyStyle_ === "function") erpSyncInputReadonlyStyle_(discEl, true);
+      else discEl.readOnly = true;
+      discEl.value = String(pct);
+      discEl.title = "一般銷售：依客戶目前經銷等級（不可手改）";
+      if(recalcUnitPrice) soApplyDiscountToUnitPrice_();
+      return;
+    }
+    if(typeof erpSyncInputReadonlyStyle_ === "function") erpSyncInputReadonlyStyle_(discEl, false);
+    else discEl.readOnly = false;
+    discEl.value = "";
+    discEl.title = custId ? "客戶未設定經銷等級折數；請至 COMMERCIAL → Dealer 方案客戶 設定" : "請先選客戶";
+    return;
+  }
+
+  if(!soShouldApplyDealerPricing_()) return;
+
+  const pct = await soResolveCustomerDealerDiscountPct_(custId);
+  if(pct != null){
+    discEl.value = String(pct);
+    discEl.title = "寄賣：依客戶目前經銷等級（不可手改）";
+    if(recalcUnitPrice) soApplyDiscountToUnitPrice_();
+    return;
+  }
+
+  discEl.value = "";
+  discEl.title = custId
+    ? "客戶未設定經銷等級折數；請至 COMMERCIAL → Dealer 方案客戶 設定"
+    : "請先選客戶";
+}
+
+/** @deprecated 相容舊名稱 */
+async function soFillConsignmentDiscountDisplay_(opts){
+  return soFillDealerDiscountDisplay_(opts);
+}
+
+function soOnSOTypeChange_(){
+  soSyncReshipRefUI_();
+  soSyncConsignmentPriceLabels_();
+  soFillDealerDiscountDisplay_({ recalcUnitPrice: true });
+  soRefreshProductAvailableDisplay_();
+}
+
+async function soEnsureInventoryAvail_(opts){
+  const force = !!(opts && opts.force);
+  if(!force && soInventoryAvailLoaded_) return;
+  if(soInventoryAvailLoading_ && !force) return soInventoryAvailLoading_;
+  if(force){
+    soInventoryAvailLoaded_ = false;
+  }
+  soInventoryAvailLoading_ = (async function(){
+    try{
+      if(typeof loadInventoryCoreData_ !== "function"){
+        soLots_ = [];
+        soAvailableByLotId_ = {};
+        return;
+      }
+      const core = await loadInventoryCoreData_({ needWarehouses: false, needMovementDetails: false });
+      soLots_ = core.lots || [];
+      soAvailableByLotId_ = core.movementAvailableByLotId || {};
+      soInventoryAvailLoaded_ = true;
+    }catch(_e){
+      soLots_ = [];
+      soAvailableByLotId_ = {};
+    }finally{
+      soInventoryAvailLoading_ = null;
+    }
+  })();
+  return soInventoryAvailLoading_;
+}
+
+function soGetLotAvail_(lotId){
+  const id = String(lotId || "").trim();
+  if(!id || !soAvailableByLotId_) return null;
+  if(Object.prototype.hasOwnProperty.call(soAvailableByLotId_, id)) return soAvailableByLotId_[id];
+  return null;
+}
+
+function soLotEligibleForShipAvail_(lot){
+  if(!lot) return false;
+  if(String(lot.inventory_status || "ACTIVE").toUpperCase() !== "ACTIVE") return false;
+  const qa = String(lot.status || "PENDING").toUpperCase();
+  if(qa !== "APPROVED") return false;
+  try{
+    if(typeof invIsExpired_ === "function" && invIsExpired_(lot.expiry_date)) return false;
+  }catch(_e){}
+  const av = soGetLotAvail_(lot.lot_id);
+  if(typeof invIsMissingMovement_ === "function" && invIsMissingMovement_(av)) return false;
+  return Number(av || 0) > 1e-9;
+}
+
+function soComputeProductShipAvail_(productId){
+  const pid = String(productId || "").trim().toUpperCase();
+  if(!pid) return { qty: 0, unit: "", missing: false };
+  let sum = 0;
+  let unit = "";
+  let anyMissing = false;
+  (soLots_ || []).forEach(function(l){
+    if(String(l.product_id || "").trim().toUpperCase() !== pid) return;
+    if(String(l.inventory_status || "ACTIVE").toUpperCase() !== "ACTIVE") return;
+    const qa = String(l.status || "PENDING").toUpperCase();
+    if(qa !== "APPROVED") return;
+    try{
+      if(typeof invIsExpired_ === "function" && invIsExpired_(l.expiry_date)) return;
+    }catch(_e){}
+    const av = soGetLotAvail_(l.lot_id);
+    if(typeof invIsMissingMovement_ === "function" && invIsMissingMovement_(av)){
+      anyMissing = true;
+      return;
+    }
+    const n = Number(av || 0);
+    if(n > 1e-9){
+      sum += n;
+      if(!unit) unit = String(l.unit || "").trim();
+    }
+  });
+  return {
+    qty: Math.round(sum * 10000) / 10000,
+    unit: unit,
+    missing: anyMissing && sum <= 1e-9
+  };
+}
+
+async function soRefreshProductAvailableDisplay_(){
+  const el = document.getElementById("so_item_available_qty");
+  if(!el) return;
+  if(soIsConsignmentSO_()){
+    el.value = "—";
+    el.title = "寄賣單不顯示倉庫可用量（依寄賣案品項池）";
+    return;
+  }
+  const productId = String(document.getElementById("so_item_product_id")?.value || "").trim();
+  if(!productId){
+    el.value = "";
+    el.title = "全倉可出貨合計（ACTIVE＋QA已放行＋未過期）";
+    return;
+  }
+  el.value = "載入中…";
+  await soEnsureInventoryAvail_({ force: true });
+  // 若無法載入 lot / movement map（權限或後端失敗），避免誤顯示 0
+  if((!Array.isArray(soLots_) || soLots_.length === 0) && (!soAvailableByLotId_ || Object.keys(soAvailableByLotId_).length === 0)){
+    el.value = "--";
+    el.title = "無法讀取庫存可用量（請確認是否有 Lots/Movements 權限，或後端是否可連線）";
+    return;
+  }
+  const pack = soComputeProductShipAvail_(productId);
+  if(pack.missing){
+    el.value = "--";
+    el.title = "部分批次缺 movement，可用量可能不完整";
+    return;
+  }
+  const p = soFindProduct_(productId);
+  const u = pack.unit || String(p?.unit || "").trim();
+  const q = Number(pack.qty || 0);
+  el.value = u ? q + " " + u : String(q);
+  el.title = "全倉可出貨合計（ACTIVE＋QA已放行＋未過期＋可用量>0）";
+}
+
 function money2(n){
   const num = Number(n);
   if(Number.isNaN(num)) return 0;
   return Math.round(num * 100) / 100;
 }
 
+function soGetProductListPrice_(productId){
+  const p = soFindProduct_(productId);
+  if(!p) return null;
+  const raw = p.suggested_retail_price;
+  if(raw == null || raw === "") return null;
+  const n = Number(raw);
+  if(!Number.isFinite(n) || n < 0) return null;
+  return money2(n);
+}
+
+function soFmtListPriceDisplay_(n){
+  if(n == null || n === "") return "";
+  const v = Number(n);
+  if(!Number.isFinite(v)) return "";
+  return v % 1 === 0 ? String(v) : v.toFixed(2);
+}
+
+function soSetSOItemListPriceDisplay_(listPrice){
+  const el = document.getElementById("so_item_list_price");
+  if(!el) return;
+  el.value = listPrice != null ? soFmtListPriceDisplay_(listPrice) : "";
+}
+
+function soReadSOItemListPrice_(){
+  const el = document.getElementById("so_item_list_price");
+  const s = String(el?.value || "").trim();
+  if(!s) return null;
+  const n = Number(s);
+  if(!Number.isFinite(n) || n < 0) return null;
+  return money2(n);
+}
+
+function soApplyDiscountToUnitPrice_(){
+  const listPrice = soReadSOItemListPrice_();
+  const discEl = document.getElementById("so_item_discount_pct");
+  const priceEl = document.getElementById("so_item_unit_price");
+  if(!discEl || !priceEl) return;
+  const discRaw = String(discEl.value || "").trim();
+  if(!discRaw){
+    void soRefreshPromoPreview_();
+    return;
+  }
+  const disc = Number(discRaw);
+  if(!Number.isFinite(disc) || disc < 0){
+    void soRefreshPromoPreview_();
+    return;
+  }
+  if(listPrice != null && listPrice > 0){
+    priceEl.value = String(money2((listPrice * disc) / 100));
+  }
+  void soRefreshPromoPreview_();
+}
+
+function soSyncDiscountPctFromUnitPrice_(){
+  const listPrice = soReadSOItemListPrice_();
+  const discEl = document.getElementById("so_item_discount_pct");
+  const priceEl = document.getElementById("so_item_unit_price");
+  if(!discEl || !priceEl) return;
+  if(!(listPrice > 0)) return;
+  const unitPrice = Number(priceEl.value || 0);
+  if(!Number.isFinite(unitPrice) || unitPrice < 0) return;
+  discEl.value = String(money2((unitPrice / listPrice) * 100));
+}
+
+function soOnSOItemUnitPriceInput_(){
+  if(soShouldApplyDealerPricing_()){
+    void soRefreshPromoPreview_();
+    return;
+  }
+  soSyncDiscountPctFromUnitPrice_();
+  void soRefreshPromoPreview_();
+}
+
+function soSyncSOItemPricingFromProduct_(productId, unitPriceHint){
+  const listPrice = soGetProductListPrice_(productId);
+  soSetSOItemListPriceDisplay_(listPrice);
+  const discEl = document.getElementById("so_item_discount_pct");
+  const priceEl = document.getElementById("so_item_unit_price");
+  if(unitPriceHint != null && unitPriceHint !== "" && Number.isFinite(Number(unitPriceHint))){
+    if(priceEl) priceEl.value = String(unitPriceHint);
+    soSyncDiscountPctFromUnitPrice_();
+    calcSOAmount();
+    return;
+  }
+  if(discEl && String(discEl.value || "").trim()){
+    soApplyDiscountToUnitPrice_();
+    return;
+  }
+  calcSOAmount();
+}
+
 async function salesInit(){
+  soInventoryAvailLoaded_ = false;
+  soLots_ = [];
+  soAvailableByLotId_ = {};
   await initSalesDropdowns();
   resetSOForm();
   try{
     const tp = document.getElementById("so_type");
     if(tp && !tp.dataset.bound){
       tp.dataset.bound = "1";
-      tp.addEventListener("change", soSyncReshipRefUI_);
+      tp.addEventListener("change", soOnSOTypeChange_);
     }
   }catch(_e){}
-  try{ soSyncReshipRefUI_(); }catch(_e2){}
+  try{ soOnSOTypeChange_(); }catch(_e2){}
   try{
     const curEl = document.getElementById("so_currency");
     if(curEl && !curEl.dataset.bound){
@@ -745,6 +1163,7 @@ async function salesInit(){
     ["so_search_status", "change"]
   ], () => renderSalesOrders());
   await renderSalesOrders();
+  void soEnsureInventoryAvail_();
 }
 
 async function initSalesDropdowns(){
@@ -858,15 +1277,25 @@ function clearSOItemEntry(){
   soSelectedDbItemId_ = "";
   soClear_([
     "so_item_product_id",
+    "so_item_available_qty",
     "so_item_order_qty",
     "so_item_unit",
+    "so_item_list_price",
+    "so_item_discount_pct",
     "so_item_unit_price",
     "so_item_amount",
     "so_item_remark"
   ]);
   soSetV_("so_item_amount", soFormatAmountWithCurrency_(0));
-  syncSOItemUnitSuffix_();
+  soItemPromoPreview_ = null;
+  const previewEl = document.getElementById("so_item_promo_preview");
+  if(previewEl) previewEl.textContent = "";
   soSyncSOItemAddButton_();
+  if(soShouldApplyDealerPricing_()){
+    void soFillDealerDiscountDisplay_({ recalcUnitPrice: false });
+  }else{
+    soSyncConsignmentDiscountFieldLock_();
+  }
 }
 
 function isSOItemDraftRow_(it){
@@ -894,9 +1323,10 @@ function selectSOItemDbRow_(soItemId){
   onSelectSOProduct();
   const qtyEl = document.getElementById("so_item_order_qty");
   if(qtyEl) qtyEl.value = String(it.order_qty ?? "");
-  const priceEl = document.getElementById("so_item_unit_price");
-  if(priceEl) priceEl.value = String(it.unit_price ?? "");
-  calcSOAmount();
+  soSyncSOItemPricingFromProduct_(it.product_id, it.unit_price);
+  if(soShouldApplyDealerPricing_()){
+    void soFillDealerDiscountDisplay_({ recalcUnitPrice: false });
+  }
   const rm = document.getElementById("so_item_remark");
   if(rm) rm.value = String(it.remark || "");
   const canEdit = soAllowFullLineOps_();
@@ -912,6 +1342,7 @@ function selectSOItemDbRow_(soItemId){
         : "已帶入明細（僅改備註請按「儲存備註」）");
   showToast(hint);
   soSyncSOItemAddButton_();
+  void soRefreshPromoPreview_();
 }
 
 async function updateSelectedSOItemRemark(triggerEl){
@@ -927,7 +1358,7 @@ async function updateSelectedSOItemRemark(triggerEl){
     await updateRecord("sales_order_item", "so_item_id", sid, {
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     const row = soItemsDraft.find(x => x.draft_id === sid);
     if(row) row.remark = remark;
@@ -940,7 +1371,7 @@ async function updateSelectedSOItemRemark(triggerEl){
 }
 
 function beginEditSOItemDraft_(draftId){
-  if(!soAllowFullLineOps_()){
+  if(soEditing && !soAllowFullLineOps_()){
     return showToast("已有出貨或單據已結束，無法從列表帶入草稿編輯。明細備註可點列後更新。", "error");
   }
   if(soEditing && !soItemsEditMode_){
@@ -959,40 +1390,143 @@ function beginEditSOItemDraft_(draftId){
   onSelectSOProduct();
   const qtyEl = document.getElementById("so_item_order_qty");
   if(qtyEl) qtyEl.value = String(it.order_qty ?? "");
-  const priceEl = document.getElementById("so_item_unit_price");
-  if(priceEl) priceEl.value = String(it.unit_price ?? "");
-  calcSOAmount();
+  soSyncSOItemPricingFromProduct_(it.product_id, it.unit_price);
+  if(soShouldApplyDealerPricing_()){
+    void soFillDealerDiscountDisplay_({ recalcUnitPrice: false });
+  }
   const rm = document.getElementById("so_item_remark");
   if(rm) rm.value = String(it.remark || "");
 
   renderSOItemsDraft();
   soSyncSOItemAddButton_();
-}
-
-function syncSOItemUnitSuffix_(){
-  syncErpQtyUnitSuffix_("so_item_unit", "so_item_unit_suffix");
+  void soRefreshPromoPreview_();
 }
 
 function onSelectSOProduct(){
   const sel = document.getElementById("so_item_product_id");
   const opt = sel?.selectedOptions?.[0];
   const uEl = document.getElementById("so_item_unit");
+  const productId = String(sel?.value || "").trim();
   if(!uEl) return;
-  if(!opt || !String(sel?.value || "").trim()){
+  if(!opt || !productId){
     soClear_("so_item_unit");
-    syncSOItemUnitSuffix_();
+    soSetSOItemListPriceDisplay_(null);
+    void soRefreshPromoPreview_();
+    soRefreshProductAvailableDisplay_();
     return;
   }
   uEl.value = opt.getAttribute("data-unit") || "";
-  syncSOItemUnitSuffix_();
+  soSyncSOItemPricingFromProduct_(productId, null);
+  if(soShouldApplyDealerPricing_()){
+    void soFillDealerDiscountDisplay_({ recalcUnitPrice: true }).then(function(){
+      void soRefreshPromoPreview_();
+    });
+  }else{
+    void soRefreshPromoPreview_();
+  }
+  soRefreshProductAvailableDisplay_();
 }
 
 function calcSOAmount(){
   const qty = Number(document.getElementById("so_item_order_qty")?.value || 0);
   const price = Number(document.getElementById("so_item_unit_price")?.value || 0);
-  const amount = money2(qty * price);
+  const billable =
+    soItemPromoPreview_ && String(soItemPromoPreview_.promo_scheme_id || "").trim()
+      ? Number(soItemPromoPreview_.billable_qty || 0)
+      : qty;
+  const amount = money2(billable * price);
   const el = document.getElementById("so_item_amount");
   if(el) el.value = soFormatAmountWithCurrency_(amount);
+}
+
+function soOnSOItemOrderQtyInput_(){
+  void soRefreshPromoPreview_();
+}
+
+async function soRefreshPromoPreview_(){
+  const previewEl = document.getElementById("so_item_promo_preview");
+  if(previewEl) previewEl.value = "";
+  soItemPromoPreview_ = null;
+
+  const soType = String(document.getElementById("so_type")?.value || "NORMAL").trim().toUpperCase();
+  if(soType !== "NORMAL" || soIsConsignmentSO_()) {
+    calcSOAmount();
+    return;
+  }
+
+  const customerId = String(document.getElementById("so_customer_id")?.value || "").trim();
+  const orderDateInput = String(document.getElementById("so_order_date")?.value || "").trim().slice(0, 10);
+  // 促銷預覽：未填下單日期時先用今天（避免畫面看起來像「不見了」）
+  const orderDate = orderDateInput || (typeof nowIso16 === "function" ? String(nowIso16()).slice(0, 10) : "");
+  const productId = String(document.getElementById("so_item_product_id")?.value || "").trim();
+  const orderQty = Number(document.getElementById("so_item_order_qty")?.value || 0);
+  if(!customerId || !productId || !(orderQty > 0) || !orderDate){
+    calcSOAmount();
+    return;
+  }
+
+  const token = ++soPromoPreviewToken_;
+  try{
+    const unitPrice = Number(document.getElementById("so_item_unit_price")?.value || 0);
+    const pack = await callAPI({
+      action: "preview_sales_order_promo_line_bundle",
+      customer_id: customerId,
+      order_date: orderDate,
+      product_id: productId,
+      order_qty: String(orderQty),
+      unit_price: String(unitPrice)
+    }, { method: "POST", silent: true });
+    if(token !== soPromoPreviewToken_) return;
+    soItemPromoPreview_ = pack || null;
+    if(previewEl && pack && String(pack.promo_scheme_name || "").trim()){
+      const name = String(pack.promo_scheme_name || "").trim();
+      const type = String(pack.promo_type || "").trim().toUpperCase();
+      let cond = "";
+      if(type === "BUY_N_GET_M"){
+        const buy = Number(pack.promo_buy_qty || 0);
+        const free = Number(pack.promo_scheme_free_qty || 0);
+        cond = (buy > 0 && free > 0) ? (`買${buy}送${free}`) : "買送";
+      }else if(type === "DISCOUNT_PCT"){
+        const pct = Number(pack.promo_discount_pct || 0);
+        cond = pct > 0 ? (`${pct}%`) : "折扣";
+      }else if(type === "FIXED_PRICE"){
+        cond = "固定價";
+      }
+
+      const billable = Number(pack.billable_qty || 0);
+      const freeQty = Number(pack.free_qty || 0);
+      const qtyPart =
+        (type === "BUY_N_GET_M" && (billable > 0 || freeQty > 0))
+          ? (`計價 ${billable}、贈 ${freeQty}`)
+          : "";
+
+      const parts = [name, cond, qtyPart].map(s => String(s || "").trim()).filter(Boolean);
+      previewEl.value = parts.join(" | ");
+    }else if(previewEl){
+      previewEl.value = "（無符合促銷）";
+    }
+  }catch(_e){
+    if(token !== soPromoPreviewToken_) return;
+    soItemPromoPreview_ = null;
+  }
+  calcSOAmount();
+}
+
+function soFormatOrderQtyWithPromo_(it){
+  const su = String(it?.unit || "").trim();
+  const oq = Number(it?.order_qty || 0);
+  const base = su ? `${oq} ${su.replace(/</g, "")}` : String(oq);
+  const promoId = String(it?.promo_scheme_id || "").trim();
+  if(!promoId) return base;
+  const billable = it.billable_qty != null ? Number(it.billable_qty) : oq;
+  const free = Number(it?.free_qty || 0);
+  if(String(it?.promo_type || "").toUpperCase() === "BUY_N_GET_M" && free > 0){
+    return `${base}<br><span class="text-muted" style="font-size:12px;">計價 ${billable}、贈 ${free}</span>`;
+  }
+  if(String(it?.promo_scheme_name || "").trim()){
+    return `${base}<br><span class="text-muted" style="font-size:12px;">${String(it.promo_scheme_name).replace(/</g, "")}</span>`;
+  }
+  return base;
 }
 
 function addSOItemDraft(){
@@ -1007,17 +1541,19 @@ function addSOItemDraft(){
   const order_qty = Number(document.getElementById("so_item_order_qty")?.value || 0);
   const unit = document.getElementById("so_item_unit")?.value || "";
   const unit_price = Number(document.getElementById("so_item_unit_price")?.value || 0);
-  const amount = money2(order_qty * unit_price);
+  const promo = soItemPromoPreview_ && String(soItemPromoPreview_.promo_scheme_id || "").trim() ? soItemPromoPreview_ : null;
+  const billable = promo ? Number(promo.billable_qty || order_qty) : order_qty;
+  const amount = money2(billable * unit_price);
   const remark = (document.getElementById("so_item_remark")?.value || "").trim();
 
   if(!product_id) return showToast("請選擇產品","error");
   if(!order_qty || order_qty <= 0) return showToast("訂購數量需大於 0","error");
   if(!unit) return showToast("產品單位缺失","error");
 
-  // 正常訂單：必須有單價（避免後續對帳/業績無法計算）
+  // 一般：必須有單價（避免後續對帳/業績無法計算）
   const soType = String(document.getElementById("so_type")?.value || "NORMAL").trim().toUpperCase();
   if(soType === "NORMAL" && !(unit_price > 0)){
-    return showToast("正常訂單：單價必填且需大於 0", "error");
+    return showToast("一般：單價必填且需大於 0", "error");
   }
 
   const sid = String(soSelectedDbItemId_ || "").trim();
@@ -1038,6 +1574,14 @@ function addSOItemDraft(){
   const product_name = String(p?.product_name || product_id || "").trim();
   const product_spec = opt?.getAttribute("data-spec") || "";
 
+  const promoFields = promo ? {
+    billable_qty: Number(promo.billable_qty || order_qty),
+    free_qty: Number(promo.free_qty || 0),
+    promo_scheme_id: String(promo.promo_scheme_id || ""),
+    promo_scheme_name: String(promo.promo_scheme_name || ""),
+    promo_type: String(promo.promo_type || "")
+  } : {};
+
   if(existingIdx >= 0){
     const row = soItemsDraft[existingIdx];
     row.product_id = product_id;
@@ -1048,10 +1592,18 @@ function addSOItemDraft(){
     row.unit_price = money2(unit_price);
     row.amount = amount;
     row.remark = remark;
+    Object.assign(row, promoFields);
+    if(!promo){
+      delete row.billable_qty;
+      delete row.free_qty;
+      delete row.promo_scheme_id;
+      delete row.promo_scheme_name;
+      delete row.promo_type;
+    }
     showToast("已套用至本列；請按「儲存明細」寫入後端。");
   }else{
     const draft_id = "DRAFT-" + Date.now() + "-" + Math.floor(Math.random()*1000);
-    soItemsDraft.push({
+    soItemsDraft.push(Object.assign({
       draft_id,
       product_id,
       product_name,
@@ -1062,8 +1614,12 @@ function addSOItemDraft(){
       unit_price: money2(unit_price),
       amount,
       remark
-    });
+    }, promoFields));
   }
+
+  soItemPromoPreview_ = null;
+  const previewEl = document.getElementById("so_item_promo_preview");
+  if(previewEl) previewEl.value = "";
 
   clearSOItemEntry();
   renderSOItemsDraft();
@@ -1090,7 +1646,10 @@ function renderSOItemsDraft(){
 
   tbody.innerHTML = "";
   const footLock = isSOFormLocked_();
-  const fullLine = soAllowFullLineOps_();
+  const canEditDraftRow =
+    !footLock && (!soEditing || (soItemsEditMode_ && soAllowFullLineOps_()));
+  const canDeleteSavedRow =
+    !footLock && soEditing && soItemsEditMode_ && soAllowFullLineOps_();
   soItemsDraft.forEach((it, idx) => {
     const p = soProducts.find(x => x.product_id === it.product_id) || {};
     const display = formatSOProductDisplay_(
@@ -1100,18 +1659,19 @@ function renderSOItemsDraft(){
     );
     const safeId = String(it.draft_id || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     const draftClick =
-      soItemsEditMode_ && fullLine && !footLock
+      canEditDraftRow && isSOItemDraftRow_(it)
         ? `onclick="beginEditSOItemDraft_('${safeId}')"`
         : "";
-    const savedClick = soEditing ? `onclick="selectSOItemDbRow_('${safeId}')"` : "";
+    const savedClick =
+      soEditing && !isSOItemDraftRow_(it) ? `onclick="selectSOItemDbRow_('${safeId}')"` : "";
     const rowClick = isSOItemDraftRow_(it) ? draftClick : savedClick;
     const rowCursor = rowClick ? "cursor:pointer;" : "";
     const opHtml =
-      soItemsEditMode_ && fullLine && !footLock
+      (canEditDraftRow && isSOItemDraftRow_(it)) || canDeleteSavedRow
         ? `<button type="button" class="btn-secondary" onclick="event.stopPropagation(); removeSOItemDraft('${safeId}')">刪除</button>`
         : "—";
     const su = String(it.unit || "").trim();
-    const orderQtyCell = su ? `${it.order_qty} ${su.replace(/</g, "")}` : String(it.order_qty);
+    const orderQtyCell = soFormatOrderQtyWithPromo_(it);
     tbody.innerHTML += `
       <tr style="${rowCursor}" ${rowClick}>
         <td>${idx+1}</td>
@@ -1153,7 +1713,7 @@ async function createSalesOrder(triggerEl){
   if(reshipErr) return showToast(reshipErr, "error");
   if(so_type === "NORMAL"){
     const bad = (soItemsDraft || []).some(x => !(Number(x?.unit_price || 0) > 0));
-    if(bad) return showToast("正常訂單：所有品項都必須有單價（>0）", "error");
+    if(bad) return showToast("一般：所有品項都必須有單價（>0）", "error");
   }
 
   showSaveHint(triggerEl || document.getElementById("soItemsCommitGroup"));
@@ -1176,37 +1736,26 @@ async function createSalesOrder(triggerEl){
     status,
     remark,
     created_by: getCurrentUser(),
-    created_at: nowIso16(),
+    created_at: nowIsoTaipei(),
     updated_by: "",
     updated_at: ""
   });
 
-  // 讓每筆銷售單明細與主單共用同一條 transaction_id（由後端若缺則自動產生）
-  const soAfter = await getOne("sales_order", "so_id", so_id).catch(() => null);
-  const txId = String(soAfter && soAfter.transaction_id || "").trim().toUpperCase();
-
-  for(let idx=0; idx<soItemsDraft.length; idx++){
-    const it = soItemsDraft[idx];
-    const so_item_id = `SOI-${so_id}-${String(idx+1).padStart(3,"0")}`;
-    await createRecord("sales_order_item", {
-      so_item_id,
-      so_id,
-      product_id: it.product_id,
-      transaction_id: txId,
-      parent_ref_type: "SO",
-      parent_ref_id: so_id,
-      order_qty: String(it.order_qty),
-      shipped_qty: "0",
-      unit: it.unit,
-      unit_price: String(it.unit_price),
-      amount: it.amount.toFixed(2),
-      remark: it.remark || "",
-      created_by: getCurrentUser(),
-      created_at: nowIso16(),
-      updated_by: "",
-      updated_at: ""
-    });
-  }
+  await callAPI({
+    action: "reset_sales_order_items_cmd",
+    so_id,
+    items_json: JSON.stringify((soItemsDraft || []).map(function (it) {
+      return {
+        product_id: it.product_id,
+        order_qty: String(it.order_qty),
+        unit: it.unit,
+        unit_price: String(it.unit_price),
+        amount: money2(it.amount).toFixed(2),
+        remark: it.remark || ""
+      };
+    })),
+    updated_by: getCurrentUser()
+  }, { method: "POST" });
 
   await renderSalesOrders();
   resetSOForm();
@@ -1220,6 +1769,12 @@ async function createSalesOrder(triggerEl){
 async function loadSalesOrder(soId, triggerEl){
   const id = String(soId || "").trim().toUpperCase();
   if(!id) return;
+  const curSo = String(document.getElementById("so_id")?.value || "").trim().toUpperCase();
+  if(soEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curSo, id)){
+    if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("sales", curSo, id, "soTableBody")) return;
+  }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
+    erpClearTxnListRowCollapsed_("sales");
+  }
   if(soLoadInFlight_){
     soPendingLoadId_ = id;
     try{
@@ -1274,7 +1829,10 @@ async function loadSalesOrder(soId, triggerEl){
   if(rt) rt.value = String(so.reship_ref_type || "").trim().toUpperCase();
   const rid = document.getElementById("so_reship_ref_id");
   if(rid) rid.value = String(so.reship_ref_id || "").trim().toUpperCase();
-  try{ soSyncReshipRefUI_(); }catch(_eSync2){}
+  try{ soOnSOTypeChange_(); }catch(_eSync2){}
+  if(soIsConsignmentSO_()){
+    soFillConsignmentDiscountDisplay_({ recalcUnitPrice: false });
+  }
   document.getElementById("so_order_date").value = dateInputValue_(so.order_date);
   soSetCurrency_(so.currency || soResolveDefaultCurrency_(so.customer_id));
   document.getElementById("so_remark").value = so.remark || "";
@@ -1307,6 +1865,7 @@ async function loadSalesOrder(soId, triggerEl){
     }
     }catch(_e){}
     setSOButtons_();
+    if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("soTableBody", "data-row-id", id);
     if(typeof scrollToEditorTop === "function") scrollToEditorTop();
   }finally{
     try{
@@ -1527,7 +2086,7 @@ async function updateSalesOrder(triggerEl){
     status: header?.status || "OPEN",
     remark,
     updated_by: getCurrentUser(),
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   });
   soLoadedStatus_ = String(header?.status || "OPEN").toUpperCase();
 
@@ -1598,12 +2157,14 @@ async function renderSalesOrders(){
     const cn = String(customerMap[so.customer_id]?.customer_name || "").toUpperCase();
     return sid.includes(qKw) || cid.includes(qKw) || (cn && cn.includes(qKw)) || spid.includes(qKw) || (spName && spName.includes(qKw));
   });
-  const sorted = [...filtered].sort((a,b)=>{
-    const ta = String(a?.order_date || a?.created_at || "");
-    const tb = String(b?.order_date || b?.created_at || "");
-    if(ta !== tb) return tb.localeCompare(ta);
-    return String(b?.created_at || "").localeCompare(String(a?.created_at || ""));
-  });
+  const sorted = typeof erpSortRowsNewestFirst_ === "function"
+    ? erpSortRowsNewestFirst_(filtered, ["order_date", "created_at"], "so_id")
+    : [...filtered].sort((a,b)=>{
+        const ta = String(a?.order_date || "");
+        const tb = String(b?.order_date || "");
+        if(ta !== tb) return tb.localeCompare(ta);
+        return String(b?.created_at || "").localeCompare(String(a?.created_at || ""));
+      });
   tbody.innerHTML = "";
   if (!sorted.length) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#64748b;padding:24px;">尚無銷售單。請先至「產品」「客戶」建立主檔，再於銷售單填妥主檔與明細後按明細下方「建立」。</td></tr>';
@@ -1615,23 +2176,24 @@ async function renderSalesOrders(){
       ? (String(sp?.user_name || "").trim() || "—")
       : "";
     const typeCode = String(so.so_type || "NORMAL").trim().toUpperCase() || "NORMAL";
-    const typeLabel = (typeof termLabelZhOnly === "function")
-      ? termLabelZhOnly(typeCode)
-      : typeCode;
+    const typeLabel = soTypeLabelZh_(typeCode);
     const c = customerMap[so.customer_id] || null;
     const customerNameOnly = (c && c.customer_name) ? c.customer_name : (so.customer_id || "");
+    const soId = String(so.so_id || "");
+    const safeSoId = soId.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("so_id")?.value || "").trim().toUpperCase();
+    const open = typeof erpListRowOpenInRender_ === "function"
+      ? erpListRowOpenInRender_("sales", selId, soId.trim().toUpperCase())
+      : selId === soId.trim().toUpperCase();
     tbody.innerHTML += `
-      <tr>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${soId.replace(/"/g, "&quot;")}" onclick="loadSalesOrder('${safeSoId}')">
         <td>${so.so_id || ""}</td>
         <td>${customerNameOnly}</td>
         <td>${spLabel}</td>
         <td>${typeLabel}</td>
         <td>${so.order_date || ""}</td>
         <td>${termLabelZhOnly(so.status)}</td>
-        <td>
-          <button class="btn-edit" onclick="loadSalesOrder('${so.so_id}', this)">Load</button>
-          <button type="button" class="btn-secondary" onclick="gotoShippingFromSO_('${so.so_id}')">出貨</button>
-        </td>
+        <td onclick="event.stopPropagation()"><button type="button" class="btn-secondary" onclick="gotoShippingFromSO_('${safeSoId}')">出貨</button></td>
       </tr>
     `;
   });

@@ -1,0 +1,103 @@
+<!-- ===== Settlement 結算 ===== -->
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>
+      Settlement 結算
+      <button type="button" class="btn-sheet" onclick="openSheetLink('consignment_case_settlement')" title="寄賣案件結算">Sheet</button>
+      <span id="ccStlStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">選寄賣案 → 填結算量 → 產生應收</span>
+    </span>
+    <span data-help="consignmentSettle"></span>
+  </div>
+  <div class="card-body">
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group" style="grid-column:span 2;">
+        <label>寄賣案 *</label>
+        <select id="cc_stl_case_id"></select>
+      </div>
+      <div class="form-group">
+        <label>結算日 *</label>
+        <input type="date" id="cc_stl_date">
+      </div>
+      <div class="form-group">
+        <label>備註</label>
+        <input type="text" id="cc_stl_remark">
+      </div>
+    </div>
+
+    <div id="cc_stl_summary_box" style="display:none;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;line-height:1.6;"></div>
+    <div id="cc_stl_promo_summary" style="display:none;margin-bottom:12px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:13px;line-height:1.6;"></div>
+    <div id="cc_stl_conflict_box" style="display:none;margin-bottom:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;"></div>
+
+    <style>
+      .cc-pool-stack-cell{ line-height:1.35; min-width:0; }
+      .cc-pool-stack-main{ line-height:1.25; }
+      .cc-pool-stack-sub{ font-size:12px; color:#64748b; margin-top:2px; }
+      /* 促銷欄預設隱藏；由表格 class 決定是否顯示（tbody 重繪後仍生效） */
+      #cc_stl_pool_table .cc-stl-col-free,
+      #cc_stl_pool_table .cc-stl-col-discount,
+      #cc_stl_pool_table .cc-stl-col-fixed{ display:none; }
+      #cc_stl_pool_table.cc-stl-show-free .cc-stl-col-free,
+      #cc_stl_pool_table.cc-stl-show-discount .cc-stl-col-discount,
+      #cc_stl_pool_table.cc-stl-show-fixed .cc-stl-col-fixed{ display:table-cell; }
+    </style>
+    <div class="table-wrap" style="margin-bottom:16px;">
+      <table class="data-table" id="cc_stl_pool_table">
+        <thead>
+          <tr>
+            <th>產品／加工廠 Lot</th>
+            <th>出貨／到期</th>
+            <th>未售剩餘</th>
+            <th>單位</th>
+            <th>經銷價</th>
+            <th style="min-width:100px;">本次結算量</th>
+            <th class="cc-stl-col-free">贈送</th>
+            <th class="cc-stl-col-discount">折扣%</th>
+            <th class="cc-stl-col-fixed">促銷單價</th>
+            <th>計價量</th>
+            <th>小計</th>
+          </tr>
+        </thead>
+        <tbody id="cc_stl_pool_tbody">
+          <tr><td colspan="8" class="text-muted">請先選擇寄賣案</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="text-align:right;font-size:14px;margin-bottom:12px;">
+      預估 AR 合計：<strong id="cc_stl_preview_total">0</strong>
+    </div>
+
+    <div class="button-group">
+      <button class="btn-primary" id="cc_stl_submit_btn" type="button" onclick="ccSettlementSubmit_(this)">提交結算</button>
+      <button class="btn-secondary" type="button" onclick="ccNavDealerRebate_()">月結回饋</button>
+      <button class="btn-secondary" type="button" onclick="navigate('consignment_case')">案件管理</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>結算歷史</span>
+  </div>
+  <div class="card-body">
+    <style>
+      .cc-history-row:hover { background: #f1f5f9; }
+    </style>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>結算ID/促銷ID</th>
+            <th>日期</th>
+            <th>金額</th>
+            <th>應收ID</th>
+            <th>備註</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="cc_stl_history_tbody">
+          <tr><td colspan="6" class="text-muted">請先選擇寄賣案</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

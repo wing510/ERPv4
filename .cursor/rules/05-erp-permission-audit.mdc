@@ -1,0 +1,75 @@
+---
+description: ERP 權限與稽核安全規則（高風險必做）
+alwaysApply: false
+globs: server/**
+---
+
+# ERP Permission and Audit
+
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
+UI 權限不是安全邊界。所有 mutation 必須 server-side 驗證。
+
+## 權限（Permission）
+
+## Permission Layers（必須分析）
+
+- authenticated session
+- role
+- module permission
+- action permission
+- data scope
+- organization scope
+- branch scope
+- approval authority
+
+## Actor（必須來自可信來源）
+
+- server session
+- verified auth context
+
+禁止信任 client 傳入：
+
+- created_by
+- updated_by
+- posted_by
+- voided_by
+- approved_by
+
+## Sensitive Actions（必須特別驗證）
+
+- POST
+- VOID
+- DELETE
+- payment
+- refund
+- write-off
+- price override
+- credit adjustment
+- cumulative adjustment
+- period unlock
+- permission change
+
+## 稽核（Audit Trail）
+重要 mutation 必須可回答：
+
+- who
+- when
+- action
+- entity
+- before
+- after
+- reason
+- source transaction
+- reversal transaction
+
+## 禁止
+
+- 用 remark/system_remark 解析正式狀態（可暫時存在，但要列為技術債）
+- audit log 取代正式 ledger
+- client actor 作權威來源
+- permission unknown -> allow
+- hidden button -> considered secure
+
+Permission 不明確：**fail closed**
+

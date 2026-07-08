@@ -1,6 +1,6 @@
 const { getSupabase } = require("./supabase");
 const { ok, fail } = require("./response");
-const { buildTxId, writeAuditLog_, buildLogSnapshot_, buildLogDiff_ } = require("./bundles/shared");
+const { buildTxId, writeAuditLog_, buildLogSnapshot_, buildLogDiff_, nowIso, normalizeTaipeiTimestamp_ } = require("./bundles/shared");
 
 const DOCS = {
   purchase_order: {
@@ -104,24 +104,6 @@ const DOCS = {
   }
 };
 
-function nowIso() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return (
-    d.getFullYear() +
-    "-" +
-    pad(d.getMonth() + 1) +
-    "-" +
-    pad(d.getDate()) +
-    "T" +
-    pad(d.getHours()) +
-    ":" +
-    pad(d.getMinutes()) +
-    ":" +
-    pad(d.getSeconds())
-  );
-}
-
 function pickRow(meta, params, mode) {
   const row = {};
   const actor = String(params.updated_by || params.created_by || "").trim();
@@ -137,6 +119,10 @@ function pickRow(meta, params, mode) {
     }
     if (meta.fields.includes("shipped_qty") && row.shipped_qty === undefined) {
       row.shipped_qty = "0";
+    }
+    if (row.created_at) {
+      const norm = normalizeTaipeiTimestamp_(row.created_at);
+      if (norm) row.created_at = norm;
     }
     if (!row.created_at) row.created_at = nowIso();
     if (!row.created_by && actor) row.created_by = actor;

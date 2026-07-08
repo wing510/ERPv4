@@ -1,6 +1,6 @@
 const { getSupabase } = require("./supabase");
 const { ok, fail } = require("./response");
-const { writeAuditLog_, buildLogDiff_ } = require("./bundles/shared");
+const { writeAuditLog_, buildLogDiff_, nowIso } = require("./bundles/shared");
 const { createInventoryMovementUnlocked_ } = require("./inventory-movement-core");
 
 const LOT_FIELDS = [
@@ -17,6 +17,7 @@ const LOT_FIELDS = [
   "received_date",
   "manufacture_date",
   "expiry_date",
+  "factory_lot",
   "remark",
   "created_by",
   "created_at",
@@ -33,24 +34,6 @@ const LOT_NULLABLE_ON_EMPTY = new Set([
   "system_remark",
   "type"
 ]);
-
-function nowIso() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return (
-    d.getFullYear() +
-    "-" +
-    pad(d.getMonth() + 1) +
-    "-" +
-    pad(d.getDate()) +
-    "T" +
-    pad(d.getHours()) +
-    ":" +
-    pad(d.getMinutes()) +
-    ":" +
-    pad(d.getSeconds())
-  );
-}
 
 function pickLotPatch_(p) {
   const patch = {};
@@ -70,6 +53,28 @@ function pickLotPatch_(p) {
   return patch;
 }
 
+/** Lots 補登 factory_lot 時，同步寄賣品項池（出貨當下若為空，池內仍為空） */
+async function syncConsignmentPoolFactoryLot_(sb, lotId, factoryLot, actor) {
+  const id = String(lotId || "").trim();
+  const fl = String(factoryLot || "").trim().toUpperCase();
+  if (!id || !fl) return;
+  const who = String(actor || "").trim();
+  const ts = nowIso();
+  const { data: rows, error: selErr } = await sb
+    .from("consignment_case_pool_item")
+    .select("pool_item_id, factory_lot")
+    .eq("lot_id", id);
+  if (selErr || !rows || !rows.length) return;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || {};
+    if (String(row.factory_lot || "").trim()) continue;
+    await sb
+      .from("consignment_case_pool_item")
+      .update({ factory_lot: fl, updated_by: who, updated_at: ts })
+      .eq("pool_item_id", String(row.pool_item_id || "").trim());
+  }
+}
+
 async function updateLot(p) {
   const lotId = String(p.lot_id || "").trim();
   if (!lotId) return fail("lot_id required");
@@ -82,10 +87,30 @@ async function updateLot(p) {
   const patch = pickLotPatch_(p);
   if (!Object.keys(patch).length) return fail("No fields to update");
 
+  if (String(patch.status || "").trim().toUpperCase() === "APPROVED") {
+    const srcType = String(old.source_type || "").trim().toUpperCase();
+    if (srcType === "PROCESS") {
+      const factoryLot = String(patch.factory_lot ?? old.factory_lot ?? "").trim();
+      if (!factoryLot) {
+        return fail("委外加工產出須有加工廠 Lot 後才能 QA 放行");
+      }
+    }
+  }
+
   const { error } = await sb.from("lot").update(patch).eq("lot_id", lotId);
   if (error) return fail(error.message || String(error));
 
   const actor = String(p.updated_by || p.created_by || "").trim();
+
+  if (Object.prototype.hasOwnProperty.call(patch, "factory_lot")) {
+    const newFl = String(patch.factory_lot || "").trim().toUpperCase();
+    if (newFl) {
+      try {
+        await syncConsignmentPoolFactoryLot_(sb, lotId, newFl, actor);
+      } catch (_ePool) {}
+    }
+  }
+
   const { oldOut, newOut } = buildLogDiff_(old, patch, LOT_FIELDS);
   await writeAuditLog_("lot", lotId, "UPDATE", actor, newOut, oldOut);
   return ok({ message: "Updated", source: "supabase" });
@@ -123,7 +148,7 @@ async function rebuildLotBalance_(p) {
       available_qty: map[lotId],
       movement_count: counts[lotId] || 1,
       last_movement_id: lastMv[lotId] || null,
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso(),
       updated_by: actor
     }));
     const { error: insErr } = await sb.from("lot_balance").insert(rows);

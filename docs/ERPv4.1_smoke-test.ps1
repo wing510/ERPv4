@@ -5,7 +5,7 @@ param(
   [Parameter(Mandatory=$true)]
   [string]$ApiBase,
 
-  [string]$ExpectedVersion = "4.1",
+  [string]$ExpectedVersion = "4.2",
 
   # 選填：要做「已登入 API」檢查才需要
   [string]$ActorId = "",

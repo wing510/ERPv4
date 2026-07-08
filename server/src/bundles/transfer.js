@@ -65,6 +65,7 @@ async function postTransferBundle(p) {
     received_date: String(lot.received_date || "").trim() || String(ts).slice(0, 10),
     manufacture_date: lot.manufacture_date || null,
     expiry_date: lot.expiry_date || null,
+    factory_lot: String(lot.factory_lot || "").trim().toUpperCase() || null,
     remark: "",
     created_by: actor,
     created_at: ts,

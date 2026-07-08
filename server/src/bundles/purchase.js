@@ -1,23 +1,6 @@
 const { getSupabase } = require("../supabase");
 const { ok, fail } = require("../response");
-
-function nowIso() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return (
-    d.getFullYear() +
-    "-" +
-    pad(d.getMonth() + 1) +
-    "-" +
-    pad(d.getDate()) +
-    "T" +
-    pad(d.getHours()) +
-    ":" +
-    pad(d.getMinutes()) +
-    ":" +
-    pad(d.getSeconds())
-  );
-}
+const { buildId_, nowIso } = require("./shared");
 
 function appendSystemRemark_(prev, line) {
   const a = String(prev || "").trim();
@@ -81,14 +64,14 @@ async function cancelPurchaseOrderBundle(p) {
 
   try {
     await sb.from("logs").insert({
-      log_id: "LOG-" + Date.now().toString(36).toUpperCase(),
+      log_id: buildId_("LOG"),
       table_name: "purchase_order",
       reference_id: poId,
       action_type: "BUNDLE_CANCEL_PURCHASE_ORDER",
       old_value: "",
       new_value: note,
       created_by: actor,
-      created_at: new Date().toISOString()
+      created_at: nowIso()
     });
   } catch (_e) {}
 

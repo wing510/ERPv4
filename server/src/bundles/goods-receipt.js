@@ -2,6 +2,7 @@ const { getSupabase } = require("../supabase");
 const { ok, fail } = require("../response");
 const {
   nowIso,
+  timestamptzFromClient_,
   buildTxId,
   buildId_,
   parseJsonArray,
@@ -11,6 +12,7 @@ const {
   calcPurchaseOrderStatusByItems_,
   insertLot_,
   insertMovement_,
+  applyLotBalanceDelta_,
   findInMovement_,
   hasCancelMovement_
 } = require("./shared");
@@ -115,7 +117,7 @@ async function postGoodsReceiptBundle(p) {
     status: "POSTED",
     remark,
     created_by: actor,
-    created_at: p.created_at || ts,
+    created_at: timestamptzFromClient_(p.created_at || ts),
     updated_by: "",
     updated_at: null
   });
@@ -131,6 +133,7 @@ async function postGoodsReceiptBundle(p) {
     const unit = String(ln.unit || item.unit || "").trim();
     const mfg = String(ln.manufacture_date || "").trim();
     const exp = String(ln.expiry_date || "").trim();
+    const factoryLot = String(ln.factory_lot || "").trim().toUpperCase();
     const lotId = "LOT-" + Date.now() + "-" + i + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
 
     const { error: lotErr } = await insertLot_({
@@ -147,6 +150,7 @@ async function postGoodsReceiptBundle(p) {
       received_date: receiptDate,
       manufacture_date: mfg || null,
       expiry_date: exp || null,
+      factory_lot: factoryLot || null,
       remark: "",
       created_by: actor,
       created_at: ts,
@@ -154,8 +158,10 @@ async function postGoodsReceiptBundle(p) {
     });
     if (lotErr) return fail(lotErr.message || String(lotErr));
 
+    const movementId = "MV-" + Date.now() + "-" + i + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
+
     const { error: mvErr } = await insertMovement_({
-      movement_id: "MV-" + Date.now() + "-" + i + "-" + Math.random().toString(36).slice(2, 6).toUpperCase(),
+      movement_id: movementId,
       movement_type: "IN",
       lot_id: lotId,
       product_id: productId,
@@ -174,6 +180,9 @@ async function postGoodsReceiptBundle(p) {
       system_remark: "PO IN: " + poId
     });
     if (mvErr) return fail(mvErr.message || String(mvErr));
+    try {
+      await applyLotBalanceDelta_(lotId, Math.abs(qty), movementId, actor);
+    } catch (_eBal) {}
 
     const { error: itemErr } = await sb.from("goods_receipt_item").insert({
       gr_item_id: "GRI-" + grId + "-" + String(created + 1).padStart(3, "0"),
@@ -271,8 +280,9 @@ async function cancelGoodsReceiptBundle(p) {
   for (let i = 0; i < plan.length; i++) {
     const x = plan[i];
     const inMv = x.inMv;
+    const movementId = buildId_("MV");
     const { error: mvErr } = await insertMovement_({
-      movement_id: buildId_("MV"),
+      movement_id: movementId,
       movement_type: "ADJUST",
       lot_id: x.lotId,
       product_id: String(inMv.product_id || ""),
@@ -291,6 +301,9 @@ async function cancelGoodsReceiptBundle(p) {
       system_remark: "REVERSAL(IN) of " + String(inMv.movement_id || "") + voidTag
     });
     if (mvErr) return fail(mvErr.message || String(mvErr));
+    try {
+      await applyLotBalanceDelta_(x.lotId, -Math.abs(x.inQty), movementId, actor);
+    } catch (_eBal) {}
   }
 
   for (let i = 0; i < plan.length; i++) {

@@ -1,4 +1,4 @@
-let supplierEditing = false;
+﻿let supplierEditing = false;
 let supplierLoadInFlight_ = false;
 let supplierPendingLoadId_ = "";
 
@@ -163,7 +163,8 @@ async function suppliersInit(){
     ["search_supplier_keyword", "input"],
     ["search_supplier_status", "change"]
   ], () => searchSuppliers());
-  await renderSuppliers();
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("search_supplier_status");
+  await searchSuppliers();
   clearSupplierForm();
   if(typeof bindStatusSelectLamp_ === "function") bindStatusSelectLamp_("s_status");
   if(typeof erpLockStatusSelect_ === "function") erpLockStatusSelect_("s_status");
@@ -233,7 +234,7 @@ async function createSupplier(triggerEl){
     status: s_status.value,
     remark,
     created_by: getCurrentUser(),
-    created_at: nowIso16(),
+    created_at: nowIsoTaipei(),
     updated_by: "",
     updated_at: ""
   };
@@ -317,7 +318,7 @@ async function updateSupplier(triggerEl){
     status: newStatus,
     remark,
     updated_by: getCurrentUser(),
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   };
   // 主檔一致化：更新也做必填檢核（避免更新成空值）
   if(!newData.supplier_name)
@@ -379,6 +380,14 @@ function supplierSnapshotFromForm_(){
 async function loadSupplier(id){
   const nextId = String(id || "").trim();
   if(!nextId) return;
+  const curIdEarly = String(s_id?.value || "").trim();
+  if(
+    supplierEditing &&
+    typeof erpTryToggleCloseMasterListRow_ === "function" &&
+    erpTryToggleCloseMasterListRow_(curIdEarly, nextId, "supplier_edit_card", clearSupplierForm, "supplierTableBody")
+  ){
+    return;
+  }
   if(supplierLoadInFlight_){
     supplierPendingLoadId_ = nextId;
     showToast(`載入中：已排隊 ${nextId}（完成後自動載入）`, "warn", 6000);
@@ -401,7 +410,7 @@ async function loadSupplier(id){
   }catch(_e0){}
   supplierLoadInFlight_ = true;
   try{
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("supplier_edit_card");
     const s = await getOne("supplier","supplier_id",nextId);
     if(!s) return;
 
@@ -424,7 +433,7 @@ async function loadSupplier(id){
   if(typeof erpLockStatusSelect_ === "function") erpLockStatusSelect_("s_status");
 
   s_id.disabled=true;
-  if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+  if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("supplier_edit_card");
   try{
     if(window.erpDirty_){
       window.erpDirty_.bind("supplier", supplierSnapshotFromForm_);
@@ -432,6 +441,7 @@ async function loadSupplier(id){
     }
   }catch(_eS){}
     setSupplierButtons_();
+    if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("supplierTableBody", "data-row-id", nextId);
   } finally {
     supplierLoadInFlight_ = false;
     try{
@@ -451,13 +461,16 @@ async function renderSuppliers(list=null){
   if(!tbody) return;
 
   if(!list){
-    setTbodyLoading_(tbody, 6);
+    setTbodyLoading_(tbody, 7);
     list = await getAll("supplier");
+  }
+  if (!supplierSort.field && typeof erpSortRowsNewestFirst_ === "function") {
+    list = erpSortRowsNewestFirst_(list, ["updated_at", "created_at"], "supplier_id");
   }
 
   tbody.innerHTML="";
   if(!list.length){
-    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px;">尚無供應商。請在上方表單填寫後按「建立」新增第一筆供應商。</td></tr>';
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#64748b;padding:24px;">尚無供應商。請在上方表單填寫後按「建立」新增第一筆供應商。</td></tr>';
     return;
   }
 
@@ -466,19 +479,17 @@ async function renderSuppliers(list=null){
     const badge = termStatusLampHtml(s.status);
     const typeZh = supplierCsvToZh_(s.supplier_type, supplierTypeLabelZh_);
     const flowZh = supplierCsvToZh_(s.supplier_flow, supplierFlowLabelZh_);
+    const sid = String(s.supplier_id || "");
+    const safeSid = sid.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("s_id")?.value || "").trim().toUpperCase();
+    const open = selId === sid.trim().toUpperCase();
 
     tbody.innerHTML+=`
-      <tr>
-        <td>${s.supplier_id}</td>
-        <td>${s.supplier_name}</td>
-        <td>${typeZh || ""}</td>
-        <td>${flowZh || ""}</td>
-        <td>${s.contact_person||""}</td>
-        <td>${s.phone||""}</td>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${sid.replace(/"/g, "&quot;")}" onclick="loadSupplier('${safeSid}')">
+        ${typeof masterListIdNameCells_ === "function" ? masterListIdNameCells_(s.supplier_id, s.supplier_name) : `<td>${s.supplier_id}</td><td>${s.supplier_name}</td>`}
+        ${typeof masterListTypeFlowCells_ === "function" ? masterListTypeFlowCells_(typeZh, flowZh) : `<td>${typeZh || ""}</td><td>${flowZh || ""}</td>`}
+        ${typeof masterListContactPhoneCells_ === "function" ? masterListContactPhoneCells_(s.contact_person, s.phone) : `<td>${s.contact_person||""}</td><td>${s.phone||""}</td>`}
         <td class="col-status">${badge}</td>
-        <td>
-          <button class="btn-edit" onclick="loadSupplier('${s.supplier_id}')">Load</button>
-        </td>
       </tr>
     `;
   });
@@ -491,7 +502,7 @@ async function renderSuppliers(list=null){
 let supplierSort = { field:"", asc:true };
 
 async function sortSuppliers(field){
-  setTbodyLoading_("supplierTableBody", 6);
+  setTbodyLoading_("supplierTableBody", 7);
   const list = [...(await getAll("supplier"))];
 
   if(supplierSort.field===field){
@@ -518,7 +529,7 @@ async function sortSuppliers(field){
 
 /* ===== 搜尋 ===== */
 async function searchSuppliers(){
-  setTbodyLoading_("supplierTableBody", 6);
+  setTbodyLoading_("supplierTableBody", 7);
 
   const kw = (document.getElementById("search_supplier_keyword")?.value || "").trim().toLowerCase();
   const status = document.getElementById("search_supplier_status")?.value || "";
@@ -541,6 +552,8 @@ async function searchSuppliers(){
 
 /* ===== 重設 ===== */
 async function resetSupplierSearch(){
-  supClear_(["search_supplier_keyword","search_supplier_status"]);
-  await renderSuppliers();
+  supClear_(["search_supplier_keyword"]);
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("search_supplier_status");
+  await searchSuppliers();
+  if(typeof resetMasterListView_ === "function") resetMasterListView_("supplier_edit_card", clearSupplierForm);
 }

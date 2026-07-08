@@ -1,5 +1,5 @@
 /**
- * v4.1：Supabase 遷移過渡 — API 回 source:"stub" 時提示使用者
+ * v4.2：Supabase 遷移過渡 — API 回 source:"stub" 時提示使用者
  */
 (function () {
   /** 已在 Supabase + Node API 實作讀取的表 */
@@ -35,12 +35,27 @@
     commercial_invoice: 1,
     commercial_invoice_line: 1,
     commercial_invoice_blank: 1,
-    commercial_invoice_blank_line: 1
+    commercial_invoice_blank_line: 1,
+    consignment_case: 1,
+    consignment_case_pool_item: 1,
+    consignment_case_settlement: 1,
+    consignment_case_settlement_item: 1,
+    consignment_case_return: 1,
+    consignment_case_return_item: 1,
+    consignment_promo_scheme: 1,
+    consignment_promo_scheme_line: 1,
+    commercial_dealer_scheme: 1,
+    commercial_dealer_scheme_tier: 1,
+    commercial_dealer_rebate: 1,
+    commercial_dealer_monthly_stat: 1,
+    ar_receivable: 1,
+    ar_payment: 1,
+    ar_amount_adjustment_log: 1
   };
 
   /** 模組 → 依賴的主表（用於進入模組時提示） */
   var MODULE_TABLES = {
-    dashboard: ["product", "lot", "purchase_order", "import_document", "shipment", "sales_order"],
+    dashboard: ["product", "lot", "lot_balance", "purchase_order", "import_document", "shipment", "sales_order", "ar_receivable", "consignment_case"],
     products: ["product"],
     suppliers: ["supplier"],
     customers: ["customer", "customer_recipient"],
@@ -49,13 +64,19 @@
     purchase: ["purchase_order", "purchase_order_item", "supplier", "product"],
     import: ["import_document", "import_item", "import_receipt", "import_receipt_item", "supplier", "product"],
     receive: ["goods_receipt", "goods_receipt_item", "purchase_order", "import_document", "lot", "product"],
-    lots: ["lot", "inventory_movement", "product"],
+    lots: ["lot", "lot_balance", "inventory_movement", "product"],
     movements: ["inventory_movement", "lot", "product"],
     warehouse_stock: ["lot", "inventory_movement", "warehouse", "product"],
     outsource: ["process_order", "process_order_input", "process_order_output", "lot", "product", "supplier"],
     sales: ["sales_order", "sales_order_item", "customer", "product"],
-    shipping: ["shipment", "shipment_item", "sales_order", "sales_order_item", "lot", "customer", "customer_recipient", "product", "commercial_invoice", "commercial_invoice_line", "erp_company_profile"],
-    invoice: ["shipment", "commercial_invoice", "commercial_invoice_line", "customer", "product", "sales_order_item", "erp_company_profile"],
+    consignment: ["consignment_case", "consignment_case_pool_item", "consignment_case_settlement", "consignment_case_settlement_item", "consignment_case_return", "consignment_case_return_item", "shipment", "shipment_item", "sales_order", "sales_order_item", "customer", "product", "warehouse", "lot", "ar_receivable", "inventory_movement"],
+    commercial_promo: ["consignment_promo_scheme", "consignment_promo_scheme_line", "customer", "product", "consignment_case"],
+    commercial_dealer: ["commercial_dealer_scheme", "commercial_dealer_scheme_tier", "customer"],
+    commercial_dealer_customer: ["customer", "commercial_dealer_scheme"],
+    dealer_rebate: ["commercial_dealer_monthly_stat", "commercial_dealer_rebate", "customer", "consignment_case_settlement", "ar_receivable"],
+    ar: ["ar_receivable", "ar_payment", "ar_amount_adjustment_log", "customer", "sales_order", "shipment", "consignment_case_settlement", "erp_company_profile"],
+    shipping: ["shipment", "shipment_item", "sales_order", "sales_order_item", "lot", "customer", "customer_recipient", "product", "commercial_invoice", "commercial_invoice_line", "einvoice_line", "erp_company_profile", "consignment_case"],
+    invoice: ["shipment", "commercial_invoice", "commercial_invoice_line", "einvoice_line", "customer", "product", "sales_order_item", "erp_company_profile"],
     invoice_blank: ["commercial_invoice_blank", "commercial_invoice_blank_line", "erp_company_profile"],
     trace: ["lot", "inventory_movement", "lot_relation", "shipment", "import_document"],
     logs: ["logs"],
@@ -94,6 +115,21 @@
     commercial_invoice_line: "商業發票明細",
     commercial_invoice_blank: "空白商業發票",
     commercial_invoice_blank_line: "空白商業發票明細",
+    consignment_case: "寄賣案件",
+    consignment_case_pool_item: "寄賣案件品項池",
+    consignment_case_settlement: "寄賣案件結算",
+    consignment_case_settlement_item: "寄賣案件結算明細",
+    consignment_case_return: "寄賣案件收回",
+    consignment_case_return_item: "寄賣案件收回明細",
+    consignment_promo_scheme: "寄賣促銷方案",
+    consignment_promo_scheme_line: "寄賣促銷方案明細",
+    commercial_dealer_scheme: "經銷方案",
+    commercial_dealer_scheme_tier: "經銷方案級距",
+    commercial_dealer_rebate: "月結回饋紀錄",
+    commercial_dealer_monthly_stat: "月結統計紀錄",
+    ar_receivable: "應收帳款",
+    ar_payment: "收款紀錄",
+    ar_amount_adjustment_log: "應收調整紀錄",
     logs: "操作紀錄"
   };
 
@@ -131,6 +167,18 @@
 
   function pendingTablesForModule(moduleKey) {
     var mod = String(moduleKey || "").trim();
+    if (mod === "consignment_case" || mod === "consignment_settlement" || mod === "consignment_return") {
+      mod = "consignment";
+    }
+    if (mod === "consignmentPromo" || mod === "commercialPromo") {
+      mod = "commercial_promo";
+    } else if (mod === "commercialDealer") {
+      mod = "commercial_dealer";
+    } else if (mod === "commercialDealerCustomer") {
+      mod = "commercial_dealer_customer";
+    } else if (mod === "dealerRebate") {
+      mod = "dealer_rebate";
+    }
     var tables = MODULE_TABLES[mod] || [];
     var out = [];
     tables.forEach(function (t) {
@@ -167,7 +215,7 @@
     el.className = "erp-migration-stub-banner";
     el.setAttribute("role", "status");
     el.innerHTML =
-      "<strong>此模組尚未遷移（v4.1 Supabase）</strong>" +
+      "<strong>此模組尚未遷移（v4.2 Supabase）</strong>" +
       "<span>目前列表可能為空，不代表正式環境無資料。待遷移：" +
       uniq.join("、") +
       "。</span>";

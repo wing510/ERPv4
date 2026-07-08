@@ -142,7 +142,7 @@
 
       <div class="form-group">
 
-        <label>預設原產地 Default Country of Origin</label>
+        <label>預設原產地 Default Country</label>
 
         <input type="text" id="cp_default_origin" value="Taiwan">
 
@@ -172,6 +172,27 @@
 
       </div>
 
+    </div>
+
+    <div class="form-grid-4 company-profile-finance-grid" id="companyProfileFinanceGrid" style="margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0;">
+      <div class="form-group full-width">
+        <label style="font-weight:600;color:#334155;">財務／收款提醒</label>
+      </div>
+      <div class="form-group">
+        <label>一般銷售逾期門檻（天）</label>
+        <input type="number" id="cp_ar_overdue_days_normal" min="0" step="1" value="14">
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">起算日＋N 天後算逾期</div>
+      </div>
+      <div class="form-group">
+        <label>寄賣逾期門檻（天）</label>
+        <input type="number" id="cp_ar_overdue_days_consignment" min="0" step="1" value="30">
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">結算日＋N 天後算逾期</div>
+      </div>
+      <div class="form-group">
+        <label>到期前提醒（天）</label>
+        <input type="number" id="cp_ar_reminder_days_before_overdue" min="0" step="1" value="5">
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">0＝關閉；例：5＝逾期前 5 天起提醒</div>
+      </div>
     </div>
 
     <div class="button-group" id="companyProfileEditActions">
@@ -209,26 +230,40 @@
       <button class="btn-secondary" type="button" id="cpBackupRefreshBtn" onclick="loadCompanyBackupList()">重新整理</button>
 
       <span id="cpBackupStatus" class="text-muted" style="margin-left:10px;font-size:13px;"></span>
+      <style>
+        #cpBackupStatus.cp-backup-restoring {
+          color: #c2410c;
+          font-weight: 600;
+        }
+      </style>
 
     </div>
 
-    <div style="margin-top:10px;overflow-x:auto;">
+    <div class="cp-backup-table-wrap" style="margin-top:10px;">
 
-      <table class="data-table" id="cpBackupTable" style="min-width:520px;">
+      <table class="data-table cp-backup-table" id="cpBackupTable">
+
+        <colgroup>
+          <col class="col-backup-c-time">
+          <col class="col-backup-c-filename-desk">
+          <col class="col-backup-c-size">
+          <col class="col-backup-c-kind">
+          <col class="col-backup-c-action">
+        </colgroup>
 
         <thead>
 
           <tr>
 
-            <th>時間</th>
+            <th class="col-backup-timefile"><span class="cp-backup-th-time-desk">時間</span><span class="cp-backup-th-timefile-mob">時間</span></th>
 
-            <th>檔名</th>
+            <th class="col-backup-filename-desk">檔名</th>
 
-            <th>大小</th>
+            <th class="col-backup-size">大小</th>
 
-            <th>方式</th>
+            <th class="col-backup-kind">方式</th>
 
-            <th>操作</th>
+            <th class="col-backup-action">操作</th>
 
           </tr>
 

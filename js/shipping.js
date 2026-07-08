@@ -114,7 +114,7 @@ async function saveShipHeaderRemarkOnly_(triggerEl){
       shipment_id,
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     }, { method: "POST" });
     invalidateShipCaches_();
     showToast("備註已儲存");
@@ -264,8 +264,8 @@ function shipBuildPdfItemsTableHtml_(items, soAggByProduct, v2){
           <col style="width:84px;">
         </colgroup>`;
   const headCells = v2
-    ? `<th style="${thNowrap}">項次</th><th style="${th}">產品</th><th style="${thNowrap}">本次</th><th style="${thNowrap}">訂貨數量</th><th style="${thNowrap}">未出</th><th style="${th}">備註</th>`
-    : `<th style="width:46px;">項次</th><th>產品</th><th>本次</th><th>訂貨數量</th><th>未出</th><th>備註</th>`;
+    ? `<th style="${thNowrap}">#</th><th style="${th}">產品</th><th style="${thNowrap}">本次</th><th style="${thNowrap}">訂貨數量</th><th style="${thNowrap}">未出</th><th style="${th}">備註</th>`
+    : `<th style="width:46px;">#</th><th>產品</th><th>本次</th><th>訂貨數量</th><th>未出</th><th>備註</th>`;
   const bodyRows = (items || []).map((it, idx) => {
     const u = String(it.unit || "").trim();
     const q = u ? `${it.ship_qty} ${u}` : String(it.ship_qty || "");
@@ -488,13 +488,15 @@ function shipShouldAutoReloadAfterError_(err){
 
 function invalidateShipCaches_(){
   try{
-    if(typeof invalidateCache !== "function") return;
-    invalidateCache("shipment");
-    invalidateCache("shipment_item");
-    invalidateCache("inventory_movement");
-    invalidateCache("lot");
-    invalidateCache("sales_order_item");
-    invalidateCache("sales_order");
+    if(typeof invalidateCache === "function"){
+      invalidateCache("shipment");
+      invalidateCache("shipment_item");
+      invalidateCache("inventory_movement");
+      invalidateCache("lot");
+      invalidateCache("sales_order_item");
+      invalidateCache("sales_order");
+      invalidateCache("customer");
+    }
   }catch(_e){}
 }
 
@@ -1276,7 +1278,7 @@ function resetShipForm(){
   const dateEl = document.getElementById("ship_date");
   if(dateEl) dateEl.value = nowIso16().slice(0, 10);
 
-  shipClear_(["ship_remark", "ship_so_id", "ship_customer_id", "ship_shipper_id", "ship_recipient_id", "ship_recipient_name", "ship_recipient_name_en", "ship_recipient_address", "ship_recipient_phone", "ship_orderer_display"]);
+  shipClear_(["ship_remark", "ship_so_id", "ship_customer_id", "ship_shipper_id", "ship_recipient_id", "ship_recipient_name", "ship_recipient_name_en", "ship_recipient_address", "ship_recipient_phone", "ship_orderer_display", "ship_consignment_case_id"]);
   try{
     const shipperSel = document.getElementById("ship_shipper_id");
     const me = typeof getCurrentUser === "function" ? String(getCurrentUser() || "").trim() : "";
@@ -1301,16 +1303,51 @@ function clearShipItemEntry(){
     "ship_item_remark"
   ]);
   syncErpQtyUnitSuffix_("ship_line_unit", "ship_qty_unit_suffix");
+  try{ shipUpdatePromoShipHint_(); }catch(_eHint){}
+}
+
+/** 從銷售明細快照推算買 N 送 M（舊單可能未存 promo_buy_qty） */
+function shipInferPromoBuyFreeFromSoItem_(soi){
+  if(!soi) return null;
+  let buy = Number(soi.promo_buy_qty || 0);
+  let free = Number(soi.promo_scheme_free_qty || 0);
+  if(buy > 0 && free > 0) return { buy, free };
+
+  const orderQty = Number(soi.order_qty || 0);
+  const billable = soi.billable_qty != null ? Number(soi.billable_qty) : null;
+  const freeQty = soi.free_qty != null ? Number(soi.free_qty) : null;
+  if(!(orderQty > 0) || billable == null || freeQty == null || !(freeQty > 0)) return null;
+
+  let best = null;
+  for(let d = 1; d <= freeQty; d++){
+    if(freeQty % d !== 0) continue;
+    const freePerBundle = freeQty / d;
+    const numBundles = d;
+    if(billable % numBundles !== 0) continue;
+    const buyPerBundle = billable / numBundles;
+    if(!(buyPerBundle > 0)) continue;
+    const bundle = buyPerBundle + freePerBundle;
+    if(Math.abs(orderQty - numBundles * bundle) > 1e-9) continue;
+    if(!best || bundle < best.bundle){
+      best = { buy: buyPerBundle, free: freePerBundle, bundle };
+    }
+  }
+  return best ? { buy: best.buy, free: best.free } : null;
 }
 
 function isShipDraftLineRow_(it){
   return String(it?.draft_id || "").startsWith("DRAFT-");
 }
 
-/** 明細列表「狀態」欄：對齊銷售／投料（草稿 vs 已過帳） */
+/** 明細列表「狀態」欄：草稿／已過帳／已作廢 */
 function formatShipLineStatus_(it){
   if(isShipDraftLineRow_(it)) return "草稿";
+  if(shipNormStatus_(shipLoadedStatus_) === "CANCELLED") return "已作廢";
   return "已過帳";
+}
+
+function shipIsVoidLoaded_(){
+  return shipNormStatus_(shipLoadedStatus_) === "CANCELLED";
 }
 
 function selectShipDraftRow_(draftId){
@@ -1396,7 +1433,7 @@ async function updateSelectedShipItemRemark(triggerEl){
         shipment_item_id: selId,
         remark: remark,
         updated_by: getCurrentUser(),
-        updated_at: nowIso16()
+        updated_at: nowIsoTaipei()
       }, { method: "POST" });
       const row = shipDraft.find(x => x.draft_id === selId);
       if(row) row.remark = remark;
@@ -1479,6 +1516,59 @@ function onSelectShipRecipient_(){
   shipSetV_("ship_recipient_phone", row?.phone || "");
 }
 
+function shipIsConsignmentSoSelected_(){
+  const soId = shipResolveCurSoId_();
+  if(!soId) return false;
+  const so = (shipSalesOrders || []).find(x => String(x?.so_id || "").trim().toUpperCase() === soId);
+  return String(so?.so_type || "").trim().toUpperCase() === "CONSIGNMENT";
+}
+
+async function shipRefreshConsignmentCaseDropdown_(customerId, presetCaseId){
+  const row = document.getElementById("ship_consignment_case_row");
+  const sel = document.getElementById("ship_consignment_case_id");
+  if(!row || !sel) return;
+
+  const isConsignment = shipIsConsignmentSoSelected_();
+  if(!isConsignment){
+    row.style.display = "none";
+    sel.innerHTML = `<option value="">—</option>`;
+    sel.value = "";
+    return;
+  }
+
+  row.style.display = "";
+  const cid = String(customerId || document.getElementById("ship_customer_id")?.value || "").trim().toUpperCase();
+  if(!cid){
+    sel.innerHTML = `<option value="">請先選擇銷售單</option>`;
+    return;
+  }
+
+  sel.innerHTML = `<option value="">載入中…</option>`;
+  try{
+    if(typeof ccLoadMasterData_ === "function") await ccLoadMasterData_();
+    const cases = (await ccListCasesForDropdown_({ status: "OPEN", customer_id: cid, limit: "200" })).filter(function (c) {
+      return String(c.status || "").trim().toUpperCase() !== "CLOSED";
+    });
+    const preset = String(presetCaseId || "").trim().toUpperCase();
+    if(!cases.length){
+      sel.innerHTML = `<option value="">（此客戶尚無進行中寄賣案，請先到「案件」開案）</option>`;
+      return;
+    }
+    sel.innerHTML =
+      `<option value="">請選擇</option>` +
+      cases.map(c => {
+        const id = String(c.case_id || "").trim();
+        const label = typeof ccFormatCaseDropdownLabel_ === "function" ? ccFormatCaseDropdownLabel_(c) : id;
+        return `<option value="${escapeHtml_(id)}">${escapeHtml_(label)}</option>`;
+      }).join("");
+    if(preset && cases.some(c => String(c.case_id || "").trim().toUpperCase() === preset)){
+      sel.value = preset;
+    }
+  }catch(_e){
+    sel.innerHTML = `<option value="">載入失敗</option>`;
+  }
+}
+
 function onSelectShipSO(){
   const soIdRaw = document.getElementById("ship_so_id")?.value || "";
   const soId = String(soIdRaw || "").trim().toUpperCase();
@@ -1492,6 +1582,7 @@ function onSelectShipSO(){
     clearShipLotEntryOnly_();
     shipRefreshRecipientDropdown_("");
     shipSyncOrdererDisplay_("");
+    shipRefreshConsignmentCaseDropdown_("").catch(function(){});
     return;
   }
 
@@ -1505,11 +1596,13 @@ function onSelectShipSO(){
   // 關鍵欄位變更：SO 改變時，清空「品項/Lot/數量」避免殘留不相容資料
   shipClear_("ship_so_item_id");
   clearShipLotEntryOnly_();
+  try{ shipUpdatePromoShipHint_(); }catch(_eHint){}
 
   // 銷售品項改為按 SO 載入（非同步更新 dropdown）
   shipRefreshSoItemDropdown_(soId).catch(() => {
     soiSel.innerHTML = `<option value="">請先選擇銷售單</option>`;
   });
+  shipRefreshConsignmentCaseDropdown_(so?.customer_id || "").catch(function(){});
 }
 
 function onSelectShipSOItem(){
@@ -1520,6 +1613,7 @@ function onSelectShipSOItem(){
   // 關鍵欄位變更：品項改變時，清空 Lot/數量，避免舊 Lot 與新產品不一致
   clearShipLotEntryOnly_();
   try{ shipUpdateAllocModeUI_(); }catch(_e){}
+  try{ shipUpdatePromoShipHint_(); }catch(_eHint){}
 }
 
 function onSelectShipLot(){
@@ -1532,6 +1626,107 @@ function onSelectShipLot(){
   try{
     shipClear_("ship_qty");
   }catch(_e){}
+  try{ shipUpdatePromoShipHint_(); }catch(_eHint){}
+}
+
+function shipOnShipQtyInput_(){
+  try{ shipUpdatePromoShipHint_(); }catch(_e){}
+}
+
+function shipFmtPromoQtyUnit_(qty, unitSafe){
+  const u = String(unitSafe || "").trim();
+  return u ? `${qty} ${u}` : String(qty);
+}
+
+function shipFmtPromoMoney_(amount){
+  const v = Math.round(Number(amount || 0) * 100) / 100;
+  return "$" + v.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function shipPromoBatchWarnText_(){
+  return "※ 提醒：分批出貨將各批獨立計算買送，不跨出貨單累計，因此 AR 金額可能與銷售單不同。";
+}
+
+function shipShouldShowPromoBatchWarn_(qty, bundle){
+  const q = Number(qty || 0);
+  const b = Number(bundle || 0);
+  if(!(q > 0) || !(b > 0)) return false;
+  return (q % b) > 1e-9;
+}
+
+function shipUpdatePromoShipHint_(){
+  const hintEl = document.getElementById("ship_promo_ship_hint");
+  if(!hintEl) return;
+
+  const soItemId = String(document.getElementById("ship_so_item_id")?.value || "").trim();
+  const qty = Number(document.getElementById("ship_qty")?.value || 0);
+  if(!soItemId){
+    hintEl.style.display = "none";
+    hintEl.textContent = "";
+    return;
+  }
+  const soi = (shipSalesItems || []).find(x => String(x?.so_item_id || "").trim() === soItemId) || null;
+  const promoType = String(soi?.promo_type || "").trim().toUpperCase();
+  if(promoType !== "BUY_N_GET_M"){
+    hintEl.style.display = "none";
+    hintEl.textContent = "";
+    return;
+  }
+
+  const inferred = shipInferPromoBuyFreeFromSoItem_(soi);
+  const buy = inferred ? inferred.buy : 0;
+  const free = inferred ? inferred.free : 0;
+  const unit = String(soi?.unit || "").trim();
+  const unitSafe = unit ? unit.replace(/</g, "") : "";
+  const schemeName = String(soi?.promo_scheme_name || "").trim();
+  const orderQty = Number(soi?.order_qty || 0);
+  const soBillable = soi?.billable_qty != null ? Number(soi.billable_qty) : null;
+  const soFree = soi?.free_qty != null ? Number(soi.free_qty) : null;
+  const remain = Math.max(0, orderQty - Number(soi?.shipped_qty || 0));
+  const lines = [];
+
+  if(!(buy > 0 && free > 0)){
+    const snapParts = [];
+    if(schemeName) snapParts.push(schemeName);
+    if(soBillable != null && soFree != null && orderQty > 0){
+      snapParts.push(`整單計價 ${shipFmtPromoQtyUnit_(soBillable, unitSafe)}、贈送 ${shipFmtPromoQtyUnit_(soFree, unitSafe)}`);
+    }
+    if(remain > 0 && remain < orderQty){
+      snapParts.push(`尚餘未出 ${shipFmtPromoQtyUnit_(remain, unitSafe)}`);
+    }
+    lines.push(snapParts.length ? snapParts.join("｜") : "此品項為買送促銷。");
+    lines.push(shipPromoBatchWarnText_());
+    hintEl.style.display = "block";
+    hintEl.textContent = lines.join("\n");
+    return;
+  }
+
+  const bundle = buy + free;
+  const q = Number.isFinite(qty) ? qty : 0;
+  const head = [schemeName, `買${buy}送${free}（${shipFmtPromoQtyUnit_(bundle, unitSafe)}一組）`].filter(Boolean).join("｜");
+  lines.push(head);
+
+  if(!(q > 0)){
+    hintEl.style.display = "block";
+    hintEl.textContent = lines.join("\n");
+    return;
+  }
+
+  const freeQty = Math.floor(q / bundle + 1e-9) * free;
+  const billableQty = q - freeQty;
+  const up = Number(soi?.unit_price || 0);
+  const amount = (up > 0) ? Math.round(billableQty * up * 100) / 100 : null;
+  let batchLine = `本批出貨 ${shipFmtPromoQtyUnit_(q, unitSafe)}：計價 ${shipFmtPromoQtyUnit_(billableQty, unitSafe)}、贈送 ${shipFmtPromoQtyUnit_(freeQty, unitSafe)}`;
+  if(amount != null) batchLine += `，預估金額 ${shipFmtPromoMoney_(amount)}`;
+  batchLine += "。";
+  lines.push(batchLine);
+
+  if(shipShouldShowPromoBatchWarn_(q, bundle)){
+    lines.push(shipPromoBatchWarnText_());
+  }
+
+  hintEl.style.display = "block";
+  hintEl.textContent = lines.join("\n");
 }
 
 async function addShipItemDraft(){
@@ -1689,8 +1884,12 @@ function renderShipDraft(){
     const orderDisp = agg ? (soUnit ? `${orderQty} ${soUnit}` : String(orderQty)) : "—";
     const shippedDisp = agg ? (soUnit ? `${shippedQty} ${soUnit}` : String(shippedQty)) : "—";
     const remainDisp = agg ? (soUnit ? `${remainQty} ${soUnit}` : String(remainQty)) : "—";
+    const lineStatus = formatShipLineStatus_(it);
+    const voidRow = shipIsVoidLoaded_();
+    const rowClass = voidRow ? " ship-item-row-void" : "";
+    const statusClass = voidRow ? " ship-line-status-void" : "";
     tbody.innerHTML += `
-      <tr style="${rowClick ? "cursor:pointer;" : ""}" ${rowClick}>
+      <tr class="${rowClass.trim()}" style="${rowClick ? "cursor:pointer;" : ""}" ${rowClick}>
         <td>${idx+1}</td>
         <td>
           <div style="font-size:12px; font-weight:700; line-height:1.1;">${escapeHtml_(String(it.lot_id || ""))}</div>
@@ -1701,7 +1900,7 @@ function renderShipDraft(){
         <td>${escapeHtml_(shippedDisp)}</td>
         <td>${escapeHtml_(remainDisp)}</td>
         <td>${shipQtyCell}</td>
-        <td>${formatShipLineStatus_(it)}</td>
+        <td class="${statusClass.trim()}">${escapeHtml_(lineStatus)}</td>
         <td>${actionBtn}</td>
       </tr>
     `;
@@ -1720,11 +1919,18 @@ function shipStatusZh_(status){
   return (typeof termLabelZhOnly === "function" ? termLabelZhOnly(s) : s) || s;
 }
 
+function shipSoTypeLabelZh_(soType){
+  const t = String(soType || "NORMAL").trim().toUpperCase();
+  if(t === "CONSIGNMENT") return "寄賣";
+  if(t === "NORMAL") return "一般";
+  return (typeof termLabelZhOnly === "function" ? termLabelZhOnly(t) : t) || t || "—";
+}
+
 async function renderShipments(){
   const tbody = document.getElementById("shipTableBody");
   if(!tbody) return;
 
-  setTbodyLoading_(tbody, 9);
+  setTbodyLoading_(tbody, 7);
   const qKw = (document.getElementById("ship_search_keyword")?.value || "").trim().toUpperCase();
   const qSt = (document.getElementById("ship_search_status")?.value || "").trim().toUpperCase();
 
@@ -1741,18 +1947,47 @@ async function renderShipments(){
   (shipSalesOrders || []).forEach(so => { if(so && so.so_id) soMap[String(so.so_id)] = so; });
   const userMap = {};
   (shipUsers || []).forEach(u => { if(u && u.user_id) userMap[String(u.user_id)] = u; });
-  const filtered = (list || []).filter(s => {
-    const stOk = !qSt || String(s.status||"").toUpperCase() === qSt;
-    if(!stOk) return false;
-    if(!qKw) return true;
-    const sid = String(s.shipment_id||"").toUpperCase();
-    const cid = String(s.customer_id||"").toUpperCase();
-    const soid = String(s.so_id||"").toUpperCase();
-    const cn = String(customerMap[s.customer_id]?.customer_name || "").toUpperCase();
-    return sid.includes(qKw) || cid.includes(qKw) || (cn && cn.includes(qKw)) || soid.includes(qKw);
-  }).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
+  const filtered = typeof erpSortRowsNewestFirst_ === "function"
+    ? erpSortRowsNewestFirst_(
+        (list || []).filter(s => {
+          const stOk = !qSt || String(s.status||"").toUpperCase() === qSt;
+          if(!stOk) return false;
+          if(!qKw) return true;
+          const sid = String(s.shipment_id||"").toUpperCase();
+          const cid = String(s.customer_id||"").toUpperCase();
+          const soid = String(s.so_id||"").toUpperCase();
+          const cn = String(customerMap[s.customer_id]?.customer_name || "").toUpperCase();
+          return sid.includes(qKw) || cid.includes(qKw) || (cn && cn.includes(qKw)) || soid.includes(qKw);
+        }),
+        ["ship_date", "created_at"],
+        "shipment_id"
+      )
+    : (list || []).filter(s => {
+        const stOk = !qSt || String(s.status||"").toUpperCase() === qSt;
+        if(!stOk) return false;
+        if(!qKw) return true;
+        const sid = String(s.shipment_id||"").toUpperCase();
+        const cid = String(s.customer_id||"").toUpperCase();
+        const soid = String(s.so_id||"").toUpperCase();
+        const cn = String(customerMap[s.customer_id]?.customer_name || "").toUpperCase();
+        return sid.includes(qKw) || cid.includes(qKw) || (cn && cn.includes(qKw)) || soid.includes(qKw);
+      }).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
 
   if(typeof invRefreshCiMap_ === "function") await invRefreshCiMap_();
+
+  const showActionsCol = filtered.some(s => {
+    const st = String(s.status || "").trim().toUpperCase();
+    if(st !== "POSTED") return false;
+    const c = customerMap[s.customer_id] || null;
+    const needsCi = typeof invShipmentNeedsCi_ === "function"
+      ? invShipmentNeedsCi_(c)
+      : !(String(c?.country || "").trim() === "台灣" || String(c?.country || "").trim() === "Taiwan" || String(c?.country || "").trim() === "TW");
+    return needsCi;
+  });
+  const listTable = document.getElementById("ship_list_table");
+  if(listTable){
+    listTable.classList.toggle("ship-list-hide-actions", !showActionsCol);
+  }
 
   tbody.innerHTML = "";
   filtered.forEach(s => {
@@ -1767,26 +2002,40 @@ async function renderShipments(){
     const shipper = shipperUser ? (String(shipperUser.user_name || "").trim() || shipperId) : (shipperId || "—");
     const st = String(s.status || "").trim().toUpperCase();
     const sid = String(s.shipment_id || "");
+    const soId = String(s.so_id || "");
+    const typeLabel = shipSoTypeLabelZh_(so?.so_type);
     const ciLabel = typeof invCiListLabel_ === "function" ? invCiListLabel_(s) : "—";
     const needsCi = typeof invShipmentNeedsCi_ === "function"
       ? invShipmentNeedsCi_(c)
       : !(String(c?.country || "").trim() === "台灣" || String(c?.country || "").trim() === "Taiwan" || String(c?.country || "").trim() === "TW");
-    const ciBtn = st === "POSTED" && needsCi
-      ? `<button class="btn-secondary" type="button" style="margin-left:6px;" onclick="navigateOpenInvoice_('${sid.replace(/'/g, "\\'")}')">開立</button>`
+    const ciBtn = showActionsCol && st === "POSTED" && needsCi
+      ? `<button class="btn-secondary" type="button" onclick="navigateOpenInvoice_('${sid.replace(/'/g, "\\'")}')">CI</button>`
       : "";
+    const selId = String(document.getElementById("ship_id")?.value || "").trim().toUpperCase();
+    const open = typeof erpListRowOpenInRender_ === "function"
+      ? erpListRowOpenInRender_("shipping", selId, sid.trim().toUpperCase())
+      : selId === sid.trim().toUpperCase();
+    const voidRow = st === "CANCELLED";
     tbody.innerHTML += `
-      <tr>
-        <td>${sid}</td>
-        <td>${s.so_id || ""}</td>
-        <td>${customerNameOnly}</td>
-        <td>${escapeHtml_(sp)}</td>
-        <td>${escapeHtml_(shipper)}</td>
-        <td>${dateInputValue_(s.ship_date)}</td>
-        <td>${shipStatusZh_(s.status)}</td>
-        <td>${escapeHtml_(ciLabel)}</td>
-        <td>
-          <button class="btn-edit" onclick="loadShipment('${sid.replace(/'/g, "\\'")}', this)">Load</button>${ciBtn}
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}${voidRow ? " erp-list-row-void" : ""}" data-row-id="${sid.replace(/"/g, "&quot;")}" onclick="loadShipment('${sid.replace(/'/g, "\\'")}')">
+        <td class="logs-stack-cell">
+          <div class="logs-stack-main ship-list-id">${escapeHtml_(sid)}</div>
+          <div class="logs-stack-sub">${escapeHtml_(soId || "—")}</div>
         </td>
+        <td>${escapeHtml_(customerNameOnly)}</td>
+        <td>${escapeHtml_(sp)}</td>
+        <td class="logs-stack-cell">
+          <div class="logs-stack-main">${escapeHtml_(dateInputValue_(s.ship_date) || "—")}</div>
+          <div class="logs-stack-sub">${escapeHtml_(shipper)}</div>
+        </td>
+        <td class="logs-stack-cell">
+          <div class="logs-stack-main${voidRow ? " ship-status-void" : ""}">${escapeHtml_(shipStatusZh_(s.status))}</div>
+          <div class="logs-stack-sub">${escapeHtml_(typeLabel)}</div>
+        </td>
+        <td>${escapeHtml_(ciLabel)}</td>
+        ${showActionsCol ? `<td class="ship-col-actions" onclick="event.stopPropagation()">
+          <span class="ship-list-actions">${ciBtn}</span>
+        </td>` : ""}
       </tr>
     `;
   });
@@ -1795,6 +2044,12 @@ async function renderShipments(){
 async function loadShipment(shipmentId, triggerEl){
   const id = String(shipmentId || "").trim().toUpperCase();
   if(!id) return;
+  const curShip = String(document.getElementById("ship_id")?.value || "").trim().toUpperCase();
+  if(shipEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curShip, id)){
+    if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("shipping", curShip, id, "shipTableBody")) return;
+  }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
+    erpClearTxnListRowCollapsed_("shipping");
+  }
   if(shipLoadInFlight_){
     shipPendingLoadId_ = id;
     // 避免 Toast 被「載入中」進度提示蓋掉造成一閃而過：改用狀態列提示
@@ -1875,6 +2130,7 @@ async function loadShipment(shipmentId, triggerEl){
     document.getElementById("ship_date").value = dateInputValue_(sh.ship_date);
     shipSetV_("ship_shipper_id", sh.shipper_id || "");
   document.getElementById("ship_remark").value = sh.remark || "";
+  await shipRefreshConsignmentCaseDropdown_(sh.customer_id || "", sh.consignment_case_id || "");
 
   clearShipLotEntryOnly_();
   shipSelectedLineId_ = "";
@@ -1926,6 +2182,9 @@ async function loadShipment(shipmentId, triggerEl){
     try{ if(triggerEl) triggerEl.disabled = false; }catch(_e2){}
     // Load 不使用「儲存中」提示；最後再依目前單據狀態重算按鈕狀態
     try{ setShipButtons_(); }catch(_e3){}
+    if(loadedOk_ && typeof erpSyncListRowHighlight_ === "function"){
+      erpSyncListRowHighlight_("shipTableBody", "data-row-id", id);
+    }
     try{
       if(!loadedOk_){
         updateShipStatusHint_();
@@ -1980,7 +2239,7 @@ async function cancelShipment(triggerEl){
       shipment_id: shipment_id,
       idempotency_key: shipBuildIdempotencyKey_("SHIP_CANCEL", [shipment_id]),
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     }, { method: "POST" });
 
     invalidateShipCaches_();
@@ -1998,6 +2257,10 @@ async function cancelShipment(triggerEl){
       const em = String(err && err.message || "");
       if(em.includes("ERR_CI_NOT_VOID")){
         showToast(shipCiVoidBlockMessageFromApi_(em), "error", 9000);
+      }else if(/ERR_CONSIGNMENT_CASE_SETTLED/i.test(em)){
+        showToast(typeof formatCallApiUserMessage_ === "function" ? formatCallApiUserMessage_(err) : em, "error", 9000);
+      }else if(/ERR_CONSIGNMENT_CASE_RETURNED/i.test(em)){
+        showToast(typeof formatCallApiUserMessage_ === "function" ? formatCallApiUserMessage_(err) : em, "error", 9000);
       }else{
         showToast("作廢失敗：請稍後重試；若仍失敗請重新載入後再試", "error");
       }
@@ -2063,6 +2326,11 @@ async function postShipment(triggerEl){
   if(shipDraft.length === 0) missing.push("出貨明細（至少 1 筆）");
   if(missing.length) return showToast("缺少必填：" + missing.join("、"), "error");
 
+  if(shipIsConsignmentSoSelected_()){
+    const ccId = String(document.getElementById("ship_consignment_case_id")?.value || "").trim().toUpperCase();
+    if(!ccId) return showToast("寄賣出貨須選擇寄賣案", "error");
+  }
+
   shipPostInFlight_ = true;
   showSaveHint(triggerEl || document.getElementById("shipPostButtonGroup"));
   try {
@@ -2092,10 +2360,11 @@ async function postShipment(triggerEl){
     recipient_name_en,
     recipient_address,
     recipient_phone,
+    consignment_case_id: String(document.getElementById("ship_consignment_case_id")?.value || "").trim().toUpperCase(),
     expected_existed_shipment_item_count: "0",
     idempotency_key: shipBuildIdempotencyKey_("SHIP_POST", [shipment_id, so_id, ship_date, shipper_id, payloadItems]),
     created_by: getCurrentUser(),
-    created_at: nowIso16(),
+    created_at: nowIsoTaipei(),
     items_json: JSON.stringify(payloadItems)
   }, { method: "POST" });
 
