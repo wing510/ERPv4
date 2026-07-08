@@ -1,6 +1,7 @@
 ---
 description: ERP 原子交易與回滾安全規則（高風險必做）
-alwaysApply: true
+alwaysApply: false
+globs: server/**
 ---
 
 # ERP Transaction Safety

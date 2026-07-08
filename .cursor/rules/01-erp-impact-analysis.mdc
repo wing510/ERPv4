@@ -1,6 +1,7 @@
 ---
 description: ERP 跨模組影響分析規則（高風險必做）
-alwaysApply: true
+alwaysApply: false
+globs: server/**
 ---
 
 # ERP Impact Analysis

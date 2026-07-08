@@ -6,6 +6,8 @@ Desktop.ini
 # Cursor / VS Code
 .cursor/
 .vscode/
+!.cursor/rules/
+!.cursor/rules/*.mdc
 
 # Node / tooling
 node_modules/

@@ -1,6 +1,7 @@
 ---
 description: ERP 舊新商業規則一致性（高風險必做）
-alwaysApply: true
+alwaysApply: false
+globs: server/**
 ---
 
 # ERP Business Rule Parity

@@ -1,0 +1,12 @@
+---
+description: ERP Domain Invariants（編修 docs 時載入）
+alwaysApply: false
+globs: docs/ERP_Domain_Invariants.md
+---
+
+# ERP Domain Invariants（編修文件用）
+
+編修 `docs/ERP_Domain_Invariants.md` 時，請同步檢查：
+- 是否與現行程式（`js/`、`server/src/`、`server/sql/`）一致
+- 若矛盾：依 `11-erp-domain-invariants.mdc` 輸出差異與風險（不得自行選邊）
+

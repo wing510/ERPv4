@@ -1,0 +1,11 @@
+---
+description: ERP UI/API 相容性（modules/ 變更時套用；高風險才完整）
+alwaysApply: false
+globs: modules/**
+---
+
+# ERP UI and API Compatibility（modules）
+
+當你正在修改 `modules/`（畫面 HTML）且任務被判定為 A/B 級時，需檢查相容性與 error mapping。  
+完整規則請參考 `07-erp-ui-api-compatibility.mdc`。
+

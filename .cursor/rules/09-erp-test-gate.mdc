@@ -1,6 +1,7 @@
 ---
 description: ERP 實作測試 Gate（高風險必做）
-alwaysApply: true
+alwaysApply: false
+globs: server/**
 ---
 
 # ERP Test Gate
@@ -61,13 +62,7 @@ Expected: full rollback
 - forged actor
 
 ### Parity（OLD vs NEW）
-- amount
-- qty
-- status
-- pricing
-- promotion
-- credit
-- cumulative
+Parity 清單以 `06-erp-business-rule-parity.mdc` 為唯一母規則；此處只要求「確實做 parity 測試並記錄差異」。
 
 ### Migration
 - old data

@@ -1,6 +1,7 @@
 ---
 description: ERP 權限與稽核安全規則（高風險必做）
-alwaysApply: true
+alwaysApply: false
+globs: server/**
 ---
 
 # ERP Permission and Audit

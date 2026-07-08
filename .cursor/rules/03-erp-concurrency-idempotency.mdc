@@ -1,6 +1,7 @@
 ---
 description: ERP 競態與冪等安全規則（高風險必做）
-alwaysApply: true
+alwaysApply: false
+globs: server/**
 ---
 
 # ERP Concurrency and Idempotency

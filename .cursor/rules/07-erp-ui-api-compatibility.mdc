@@ -1,6 +1,7 @@
 ---
-description: ERP UI API 操作相容性規則（高風險必做）
-alwaysApply: true
+description: ERP UI API 操作相容性規則（高風險必做；詳見 00 路由）
+alwaysApply: false
+globs: js/**
 ---
 
 # ERP UI and API Compatibility
@@ -49,22 +50,7 @@ alwaysApply: true
 `ERR_AR_HAS_PAYMENT` -> `已有收款紀錄，無法作廢`
 
 ## Parity
-
-至少比較：
-
-- amount
-- quantity
-- status
-- promotion
-- credit
-- cumulative
-- error behavior
-
-任何差異：
-
-- 列出
-- 分類 intentional / unintentional
-- 未核准不得自行改規則
+Parity 規則以 `06-erp-business-rule-parity.mdc` 為唯一母規則；本檔只要求「列差異、分類、未核准不得改」。
 
 UI/API regression 未確認：**NO-GO**
 

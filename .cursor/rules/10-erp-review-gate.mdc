@@ -1,6 +1,7 @@
 ---
 description: ERP 最終審查 Gate（完成後不得直接宣告上線）
-alwaysApply: true
+alwaysApply: false
+globs: server/**
 ---
 
 # ERP Final Gate
@@ -12,38 +13,62 @@ alwaysApply: true
 ## Gate A - Functional
 需求是否完成？
 
+- **Blocker/Fail**：需求未完成、需求文字與實作不一致、缺關鍵輸入/輸出、或需人工確認但未列出。
+
 ## Gate B - Data Integrity
 是否可能 partial success？
+
+- **Blocker/Fail**：存在「可能成功一半」的寫入（跨表步驟）且無單一 transaction/回滾證明；或 failure injection 不能 full rollback。
 
 ## Gate C - Financial Integrity
 金額是否一致？
 
+- **Blocker/Fail**：OLD/NEW parity 未完成或差異未核准；金額來源（SoT/快照/衍生）不清；reversal 不是用原值反向。
+
 ## Gate D - Inventory Integrity
 庫存是否可能負數或重複？
+
+- **Blocker/Fail**：可能 oversell/over-ship、負庫存、重複扣庫存；lot/supply 競態未鎖定；POST/VOID 鎖序不一致導致死鎖風險未處理。
 
 ## Gate E - Concurrency
 兩人同時操作是否安全？
 
+- **Blocker/Fail**：同一 lot/SO/AR/shipment 並行操作無明確 lock/UNIQUE/樂觀鎖策略；未至少跑 1 個 relevant concurrency test。
+
 ## Gate F - Idempotency
 重送是否安全？
+
+- **Blocker/Fail**：重送可能重複 mutation（扣庫存、建單、入帳、reversal）；idempotency key/UNIQUE/source_key 未定義；同 key 不同 payload 未拒絕/未報錯。
 
 ## Gate G - POST/VOID
 是否完整對稱？
 
+- **Blocker/Fail**：VOID/CANCEL/REVERSAL 不完整、需猜原值、重新計價、或找不到資料就繼續；重複 VOID 不冪等。
+
 ## Gate H - Permission
 是否 server-side 驗證？
+
+- **Blocker/Fail**：只靠 UI 隱藏；server-side 無 session/role/action/scope 驗證；actor 可被 client 偽造。
 
 ## Gate I - Audit
 是否可追溯？
 
+- **Blocker/Fail**：重要 mutation 無法回答 who/when/before/after/reason/source/reversal；只靠 remark/system_remark 表示財務狀態且未列技術債。
+
 ## Gate J - Compatibility
 原 UI / API / Workflow 是否維持？
+
+- **Blocker/Fail**：UI/API contract/error behavior/report meaning 被改但未列差異/未核准；routing 不清導致 unsupported flow 才發現。
 
 ## Gate K - Migration
 舊資料是否相容？
 
+- **Blocker/Fail**：新增 UNIQUE/FK/CHECK/NOT NULL 未做 preflight；rollback plan/相容窗/部署順序不明；staging/DEV 未測。
+
 ## Gate L - Rollback
 部署失敗能否回復？
+
+- **Blocker/Fail**：無回滾方案或回滾會破壞資料；需要 DB 與 Node 同毫秒切換才不壞；未完成備份或移除過渡計畫。
 
 ## 必須切換 Reviewer 心態
 假設自己的實作有錯，主動攻擊：
