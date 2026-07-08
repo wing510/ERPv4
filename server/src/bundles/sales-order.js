@@ -3,10 +3,14 @@ const { ok, fail } = require("../response");
 const {
   nowIso,
   buildTxId,
+  buildId_,
   parseJsonArray,
   appendSystemRemark_,
   writeAuditLog_
 } = require("./shared");
+const { computeSalesOrderPromoLine_ } = require("./consignment-promo");
+
+const SO_PRICING_ENGINE_VERSION = "SO_PRICING_ENGINE_V1";
 
 function calcSalesOrderStatus_(items) {
   const rows = items || [];
@@ -57,6 +61,54 @@ async function hasActiveShipmentBySoId_(soId) {
   return (data || []).some((s) => String(s.status || "").trim().toUpperCase() !== "CANCELLED");
 }
 
+async function nextPricingVersionForSoItem_(sb, soItemId) {
+  const sid = String(soItemId || "").trim().toUpperCase();
+  if (!sid) return 1;
+  const { data, error } = await sb
+    .from("so_item_pricing_snapshot")
+    .select("pricing_version")
+    .eq("so_item_id", sid)
+    .order("pricing_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && !/does not exist|Could not find|relation .* does not exist/i.test(error.message || "")) {
+    throw new Error(error.message || String(error));
+  }
+  const cur = Number(data?.pricing_version || 0);
+  return cur > 0 ? cur + 1 : 1;
+}
+
+/** Phase1：建立 immutable SO Pricing Snapshot（dealer/base）；已被 Shipment 引用之 version 永不覆寫 */
+async function insertSoItemPricingSnapshot_(sb, opts) {
+  const o = opts || {};
+  const soItemId = String(o.soItemId || "").trim().toUpperCase();
+  const soId = String(o.soId || "").trim().toUpperCase();
+  if (!soItemId || !soId) throw new Error("soItemId and soId required for pricing snapshot");
+
+  const pricingVersion = o.pricingVersion != null ? Number(o.pricingVersion) : 1;
+  const snapId = buildId_("SOPS");
+  const ts = o.ts || nowIso();
+  const row = {
+    pricing_snapshot_id: snapId,
+    so_item_id: soItemId,
+    so_id: soId,
+    pricing_version: pricingVersion,
+    dealer_tier_label: String(o.dealerTierLabel || "").trim(),
+    dealer_price_rate: o.dealerPriceRate != null && o.dealerPriceRate !== "" ? Number(o.dealerPriceRate) : null,
+    dealer_price_source: String(o.dealerPriceSource || "").trim(),
+    base_price_basis: String(o.basePriceBasis || "DEALER").trim().toUpperCase() || "DEALER",
+    list_unit_price: Math.round(Number(o.listUnitPrice || 0) * 100) / 100,
+    base_unit_price: Math.round(Number(o.baseUnitPrice || 0) * 100) / 100,
+    pricing_engine_version: String(o.pricingEngineVersion || SO_PRICING_ENGINE_VERSION),
+    snapshot_ts: ts,
+    created_by: String(o.actor || "").trim(),
+    created_at: ts
+  };
+  const { error } = await sb.from("so_item_pricing_snapshot").insert(row);
+  if (error) throw new Error(error.message || String(error));
+  return row;
+}
+
 async function resetSalesOrderItemsCmd(p) {
   const soId = String(p.so_id || "").trim().toUpperCase();
   if (!soId) return fail("so_id required");
@@ -74,6 +126,16 @@ async function resetSalesOrderItemsCmd(p) {
   if (!items.length) return fail("items_json required");
 
   const sb = getSupabase();
+  const { data: soHeader, error: soHeaderErr } = await sb
+    .from("sales_order")
+    .select("customer_id, order_date, so_type")
+    .eq("so_id", soId)
+    .maybeSingle();
+  if (soHeaderErr) return fail(soHeaderErr.message || String(soHeaderErr));
+  const soType = String(soHeader?.so_type || "NORMAL").trim().toUpperCase();
+  const customerId = String(soHeader?.customer_id || "").trim().toUpperCase();
+  const orderDate = String(soHeader?.order_date || "").trim().slice(0, 10);
+
   const { error: delErr } = await sb.from("sales_order_item").delete().eq("so_id", soId);
   if (delErr) return fail(delErr.message || String(delErr));
 
@@ -90,8 +152,9 @@ async function resetSalesOrderItemsCmd(p) {
     if (!(oq > 0)) return fail("order_qty must be > 0 (items[" + i + "])");
     if (!unit) return fail("unit required (items[" + i + "])");
 
-    const { error: insErr } = await sb.from("sales_order_item").insert({
-      so_item_id: "SOI-" + soId + "-" + String(i + 1).padStart(3, "0"),
+    const soItemId = "SOI-" + soId + "-" + String(i + 1).padStart(3, "0");
+    const insertRow = {
+      so_item_id: soItemId,
       so_id: soId,
       product_id: pid,
       transaction_id: txId,
@@ -107,11 +170,71 @@ async function resetSalesOrderItemsCmd(p) {
       created_at: nowIso(),
       updated_by: "",
       updated_at: null
-    });
+    };
+
+    let computed = null;
+    if (soType === "NORMAL" && customerId && orderDate) {
+      try {
+        computed = await computeSalesOrderPromoLine_(sb, {
+          customerId,
+          orderDate,
+          productId: pid,
+          orderQty: oq,
+          unitPriceHint: Number.isNaN(up) ? 0 : up,
+          authoritative: true
+        });
+        // SO 層：權威底價來自 Server；促銷欄位僅 preview/相容顯示（財務促銷在 Shipment 層）
+        if (computed && computed.base_unit_price != null) insertRow.base_unit_price = computed.base_unit_price;
+        if (computed && computed.unit_price != null) insertRow.unit_price = computed.unit_price;
+        if (computed && computed.amount != null) insertRow.amount = computed.amount;
+        if (computed && computed.billable_qty != null) insertRow.billable_qty = computed.billable_qty;
+        if (computed && computed.free_qty != null) insertRow.free_qty = computed.free_qty;
+        if (computed && String(computed.promo_scheme_id || "").trim()) {
+          insertRow.promo_scheme_id = computed.promo_scheme_id;
+          insertRow.promo_scheme_name = computed.promo_scheme_name;
+          insertRow.promo_type = computed.promo_type;
+          insertRow.promo_price_basis = computed.promo_price_basis;
+          if (computed.promo_buy_qty != null) insertRow.promo_buy_qty = computed.promo_buy_qty;
+          if (computed.promo_scheme_free_qty != null) insertRow.promo_scheme_free_qty = computed.promo_scheme_free_qty;
+        }
+      } catch (promoErr) {
+        return fail("促銷計價失敗：" + (promoErr?.message || String(promoErr)));
+      }
+    }
+
+    // Phase1：SO Pricing Snapshot（dealer/base）identity + version
+    if (soType === "NORMAL" && customerId && orderDate && computed) {
+      try {
+        const snap = await insertSoItemPricingSnapshot_(sb, {
+          soItemId,
+          soId,
+          pricingVersion: 1,
+          dealerTierLabel: computed.dealer_tier_label,
+          dealerPriceRate: computed.dealer_price_rate,
+          dealerPriceSource: computed.dealer_price_source,
+          basePriceBasis: computed.base_price_basis || computed.promo_price_basis || "DEALER",
+          listUnitPrice: computed.list_unit_price,
+          baseUnitPrice: computed.base_unit_price,
+          actor
+        });
+        insertRow.pricing_snapshot_id = snap.pricing_snapshot_id;
+        insertRow.pricing_version = snap.pricing_version;
+      } catch (snapErr) {
+        if (/does not exist|relation .* does not exist|Could not find/i.test(snapErr?.message || "")) {
+          return fail(
+            "計價快照表尚未建置，請先執行 server/sql/v4.2.15.00_銷售與出貨計價快照.sql：" +
+              (snapErr?.message || String(snapErr))
+          );
+        }
+        return fail("建立計價快照失敗：" + (snapErr?.message || String(snapErr)));
+      }
+    }
+
+    const { error: insErr } = await sb.from("sales_order_item").insert(insertRow);
     if (insErr) return fail(insErr.message || String(insErr));
   }
 
-  return ok({ message: "RESET", so_id: soId, count: items.length });
+  return ok({ message: "RESET", so_id: soId, count: items.length, pricing_engine: SO_PRICING_ENGINE_VERSION });
 }
 
 async function cancelSalesOrderBundle(p) {
@@ -152,5 +275,8 @@ module.exports = {
   calcSalesOrderStatus_,
   ensureSalesOrderTx_,
   resetSalesOrderItemsCmd,
-  cancelSalesOrderBundle
+  cancelSalesOrderBundle,
+  insertSoItemPricingSnapshot_,
+  nextPricingVersionForSoItem_,
+  SO_PRICING_ENGINE_VERSION
 };

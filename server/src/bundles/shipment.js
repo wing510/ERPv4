@@ -140,6 +140,7 @@ async function postShipmentBundle(p) {
   if (shInsErr) return fail(shInsErr.message || String(shInsErr));
 
   const shippedDeltaBySoItem = {};
+  const itemsWithShipmentItemId = [];
 
   for (let i = 0; i < items.length; i++) {
     const it = items[i] || {};
@@ -182,6 +183,7 @@ async function postShipmentBundle(p) {
       updated_at: null
     });
     if (siErr) return fail(siErr.message || String(siErr));
+    itemsWithShipmentItemId.push(Object.assign({}, it, { shipment_item_id: shiId, so_item_id: soItemId, ship_qty: q }));
 
     const mvRes = await createInventoryMovementUnlocked_({
       movement_id: String(it.movement_id || "").trim() || buildId_("MV"),
@@ -252,7 +254,7 @@ async function postShipmentBundle(p) {
       customerId,
       txId,
       shipDate,
-      items,
+      items: itemsWithShipmentItemId,
       currency: soRow?.currency,
       actor,
       ts,

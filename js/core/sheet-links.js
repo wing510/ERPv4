@@ -45,6 +45,7 @@ const ERP_TABLE_ZH_ = {
   process_order_output: "委外產出",
   sales_order: "銷售單",
   sales_order_item: "銷售明細",
+  so_item_pricing_snapshot: "銷售明細計價快照",
   shipment: "出貨單",
   shipment_item: "出貨明細",
   commercial_invoice: "商業發票",

@@ -540,13 +540,11 @@ async function computeSalesOrderPromoLine_(sb, opts) {
   const productId = normId_(o.productId);
   const orderQty = roundQty_(o.orderQty);
   const unitPriceHint = Number(o.unitPriceHint || 0);
+  const authoritative = o.authoritative === true;
 
   const productListMap = await loadProductListPriceMap_(sb, [productId]);
   const listFromProduct = productListMap[productId];
-  const listPrice =
-    listFromProduct != null && listFromProduct !== "" && Number(listFromProduct) >= 0
-      ? Number(listFromProduct)
-      : unitPriceHint;
+  const listPrice = listFromProduct != null && listFromProduct !== "" && Number(listFromProduct) >= 0 ? Number(listFromProduct) : 0;
 
   let dealerCtx = { enabled: false };
   if (customerId && orderDate) {
@@ -560,12 +558,12 @@ async function computeSalesOrderPromoLine_(sb, opts) {
   const candidates = buildPromoCandidates_(schemePacks);
   const promo = pickPromoForProduct_(productId, candidates, {}, true);
 
-  const priceBasis = promo ? normPriceBasis_(promo.price_basis) : "DEALER";
+  const basePriceBasis = promo ? normPriceBasis_(promo.price_basis) : "DEALER";
   const baseUnitPrice = resolvePromoBaseUnitPrice_({
-    priceBasis,
+    priceBasis: basePriceBasis,
     listPrice,
     dealerCtx,
-    fallbackUnitPrice: unitPriceHint
+    fallbackUnitPrice: authoritative ? 0 : unitPriceHint
   });
 
   let freeQty = 0;
@@ -582,13 +580,10 @@ async function computeSalesOrderPromoLine_(sb, opts) {
 
   const settleUnitPrice = settleUnitPrice_(baseUnitPrice, promo);
   let unitPrice;
-  if (promo) {
-    unitPrice = settleUnitPrice;
-  } else if (unitPriceHint > 0) {
-    unitPrice = roundMoney_(unitPriceHint);
-  } else {
-    unitPrice = baseUnitPrice;
-  }
+  if (authoritative) unitPrice = promo ? settleUnitPrice : baseUnitPrice;
+  else if (promo) unitPrice = settleUnitPrice;
+  else if (unitPriceHint > 0) unitPrice = roundMoney_(unitPriceHint);
+  else unitPrice = baseUnitPrice;
   const amount = roundMoney_(billableQty * unitPrice);
 
   return {
@@ -596,10 +591,18 @@ async function computeSalesOrderPromoLine_(sb, opts) {
     order_qty: orderQty,
     billable_qty: billableQty,
     free_qty: freeQty,
+    list_unit_price: listPrice > 0 ? roundMoney_(listPrice) : 0,
     base_unit_price: baseUnitPrice,
+    base_price_basis: basePriceBasis,
     settle_unit_price: unitPrice,
     unit_price: unitPrice,
     amount,
+    dealer_tier_label: dealerCtx.enabled ? String(dealerCtx.tier_label || "").trim() : "",
+    dealer_price_rate:
+      dealerCtx.enabled && dealerCtx.price_rate != null && dealerCtx.price_rate !== ""
+        ? Number(dealerCtx.price_rate)
+        : null,
+    dealer_price_source: dealerCtx.enabled ? String(dealerCtx.price_source || "CURRENT") : "",
     promo_scheme_id: promo ? promo.scheme_id : "",
     promo_scheme_name: promo ? promo.scheme_name : "",
     promo_type: promo ? promo.promo_type : "",
@@ -609,6 +612,103 @@ async function computeSalesOrderPromoLine_(sb, opts) {
     promo_buy_qty: promo && normId_(promo.promo_type) === "BUY_N_GET_M" ? Number(promo.buy_qty || 0) : null,
     promo_scheme_free_qty: promo && normId_(promo.promo_type) === "BUY_N_GET_M" ? Number(promo.free_qty || 0) : null
   };
+}
+
+/** Phase1：一般出貨過帳（以 SO snapshot 為底價；Promo PER_SHIPMENT；三種 promo_type 同權威） */
+function computeShipmentPromoLinesPhase1_(shipmentItems, soSnapshotMap, schemePacks, promoOverrides) {
+  const overrides = promoOverrides || {};
+  const candidates = buildPromoCandidates_(schemePacks);
+
+  const grouped = {};
+  (shipmentItems || []).forEach((it) => {
+    const shiId = normId_(it.shipment_item_id);
+    const soItemId = normId_(it.so_item_id);
+    const snap = soSnapshotMap[soItemId];
+    if (!shiId || !soItemId || !snap) return;
+    const shipQty = roundQty_(it.ship_qty);
+    if (!(shipQty > 0)) return;
+    const productId = normId_(snap.product_id || it.product_id);
+    if (!productId) return;
+    if (!grouped[productId]) grouped[productId] = [];
+    grouped[productId].push({
+      shipment_item_id: shiId,
+      so_item_id: soItemId,
+      product_id: productId,
+      ship_qty: shipQty,
+      list_unit_price: Number(snap.list_unit_price || 0),
+      base_unit_price: Number(snap.base_unit_price || 0),
+      so_pricing_snapshot_id: normId_(snap.pricing_snapshot_id),
+      so_pricing_version: Number(snap.pricing_version || 0)
+    });
+  });
+
+  const computedByShipmentItem = {};
+  Object.keys(grouped).forEach((productId) => {
+    const rows = grouped[productId];
+    const promo = pickPromoForProduct_(productId, candidates, overrides, true);
+    const sumShip = roundQty_(rows.reduce((s, r) => s + r.ship_qty, 0));
+
+    const priceBasis = promo ? normPriceBasis_(promo.price_basis) : "DEALER";
+    const baseCandidate = (r) => (priceBasis === "LIST" ? Number(r.list_unit_price || 0) : Number(r.base_unit_price || 0));
+
+    let freeTotal = 0;
+    if (promo && normId_(promo.promo_type) === "BUY_N_GET_M") {
+      const buy = Number(promo.buy_qty || 0);
+      const free = Number(promo.free_qty || 0);
+      if (buy > 0 && free > 0) {
+        const bundle = buy + free;
+        freeTotal = Math.floor(sumShip / bundle + 1e-9) * free;
+      }
+    }
+
+    const freeMap = allocateFreeQtyHighPriceFirst_(
+      rows.map((r) => ({
+        pool_item_id: r.shipment_item_id,
+        settle_qty: r.ship_qty,
+        list_unit_price: baseCandidate(r)
+      })),
+      freeTotal
+    );
+
+    rows.forEach((r) => {
+      const freeQty = roundQty_(freeMap[r.shipment_item_id] || 0);
+      const billableQty = roundQty_(r.ship_qty - freeQty);
+      const baseUnitPrice = roundMoney_(baseCandidate(r));
+      const settlePrice = settleUnitPrice_(baseUnitPrice, promo);
+      const amount = roundMoney_(billableQty * settlePrice);
+
+      computedByShipmentItem[r.shipment_item_id] = {
+        shipment_item_id: r.shipment_item_id,
+        so_item_id: r.so_item_id,
+        product_id: r.product_id,
+        ship_qty: r.ship_qty,
+        billable_qty: billableQty,
+        free_qty: freeQty,
+        base_unit_price: baseUnitPrice,
+        settle_unit_price: settlePrice,
+        unit_price: settlePrice,
+        amount,
+        so_pricing_snapshot_id: r.so_pricing_snapshot_id,
+        so_pricing_version: r.so_pricing_version,
+        promo_scheme_id: promo ? promo.scheme_id : "",
+        promo_scheme_name: promo ? promo.scheme_name : "",
+        promo_type: promo ? promo.promo_type : "",
+        promo_price_basis: promo ? normPriceBasis_(promo.price_basis) : "",
+        promo_discount_pct:
+          promo && normId_(promo.promo_type) === "DISCOUNT_PCT" ? Number(promo.discount_pct || 0) : null,
+        promo_buy_qty: promo && normId_(promo.promo_type) === "BUY_N_GET_M" ? Number(promo.buy_qty || 0) : null,
+        promo_scheme_free_qty: promo && normId_(promo.promo_type) === "BUY_N_GET_M" ? Number(promo.free_qty || 0) : null,
+        promo_scope: promo ? "PER_SHIPMENT" : ""
+      };
+    });
+  });
+
+  const out = [];
+  (shipmentItems || []).forEach((it) => {
+    const shiId = normId_(it.shipment_item_id);
+    if (shiId && computedByShipmentItem[shiId]) out.push(computedByShipmentItem[shiId]);
+  });
+  return out;
 }
 
 async function previewSalesOrderPromoLineBundle(p) {
@@ -645,18 +745,6 @@ async function buildShipmentArPricing_(sb, opts) {
     return { err: "buildShipmentArPricing_: customerId, shipDate and items required" };
   }
 
-  const soItemIds = items.map((it) => normId_(it.so_item_id)).filter(Boolean);
-  const soItemMap = await loadSoItemsMapForPromo_(sb, soItemIds);
-  const productIds = Object.keys(soItemMap).map((id) => normId_(soItemMap[id].product_id)).filter(Boolean);
-  const productListMap = await loadProductListPriceMap_(sb, productIds);
-
-  let dealerCtx = { enabled: false };
-  try {
-    dealerCtx = await resolveCumulativeDealerPriceForSettlement_(sb, customerId, shipDate, "GENERAL");
-  } catch (dealerErr) {
-    return { err: dealerErr?.message || String(dealerErr) };
-  }
-
   let schemePacks = [];
   try {
     schemePacks = await loadPromoSchemesForGeneralShipment_(sb, customerId, shipDate);
@@ -664,28 +752,50 @@ async function buildShipmentArPricing_(sb, opts) {
     return { err: promoErr?.message || String(promoErr) };
   }
 
-  let lines = computeShipmentPromoLines_(
-    items,
-    soItemMap,
-    productListMap,
-    schemePacks,
-    o.promoOverrides || {},
-    dealerCtx
-  );
+  // Phase1：以 SO Pricing Snapshot 為底價（不取 live dealer）；Promo PER_SHIPMENT
+  const soItemIds = items.map((it) => normId_(it.so_item_id)).filter(Boolean);
+  const { data: soItems, error: soErr } = await sb
+    .from("sales_order_item")
+    .select("so_item_id, product_id, pricing_snapshot_id, pricing_version")
+    .in("so_item_id", soItemIds);
+  if (soErr) return { err: soErr.message || String(soErr) };
 
-  lines = applyCumulativeDealerPriceToLines_(lines, dealerCtx);
-  lines = (lines || []).map((ln) => {
-    if (String(ln.promo_scheme_id || "").trim()) return ln;
-    const soItem = soItemMap[normId_(ln.so_item_id)];
-    const unitPrice = Number(soItem?.unit_price || ln.settle_unit_price || ln.list_unit_price || 0);
-    const billable = roundQty_(ln.billable_qty != null ? ln.billable_qty : ln.ship_qty);
-    return Object.assign({}, ln, {
-      settle_unit_price: unitPrice,
-      unit_price: unitPrice,
-      amount: roundMoney_(billable * unitPrice)
-    });
+  const soItemRowMap = {};
+  (soItems || []).forEach((r) => {
+    const sid = normId_(r.so_item_id);
+    if (sid) soItemRowMap[sid] = r;
   });
 
+  const snapIds = (soItems || []).map((r) => normId_(r.pricing_snapshot_id)).filter(Boolean);
+  if (!snapIds.length) {
+    return {
+      err:
+        "SO 計價快照缺失：請先執行 server/sql/v4.2.15.00_銷售與出貨計價快照.sql，並重新儲存銷售單（讓 server 產生 pricing_snapshot_id）"
+    };
+  }
+  const { data: snaps, error: snapErr } = await sb
+    .from("so_item_pricing_snapshot")
+    .select("pricing_snapshot_id, so_item_id, pricing_version, list_unit_price, base_unit_price")
+    .in("pricing_snapshot_id", snapIds);
+  if (snapErr) return { err: snapErr.message || String(snapErr) };
+
+  const soSnapshotMap = {};
+  (snaps || []).forEach((s) => {
+    const sid = normId_(s.so_item_id);
+    if (!sid) return;
+    soSnapshotMap[sid] = Object.assign({}, s, { product_id: normId_(soItemRowMap[sid]?.product_id) });
+  });
+
+  // fail-closed：NORMAL 出貨若缺快照，禁止 silent fallback（避免 Mixed Authority）
+  const missing = soItemIds.filter((sid) => !soSnapshotMap[sid]);
+  if (missing.length) {
+    return { err: "SO 計價快照缺失（需重儲存銷售單）：" + missing.join(", ") };
+  }
+
+  const requiredKeysOk = (items || []).every((it) => normId_(it.shipment_item_id));
+  if (!requiredKeysOk) return { err: "buildShipmentArPricing_: shipment_item_id required for Phase1 pricing" };
+
+  const lines = computeShipmentPromoLinesPhase1_(items, soSnapshotMap, schemePacks, o.promoOverrides || {});
   const amountSystem = roundMoney_((lines || []).reduce((s, ln) => s + Number(ln.amount || 0), 0));
   const promoNames = [
     ...new Set(
@@ -696,16 +806,10 @@ async function buildShipmentArPricing_(sb, opts) {
   ];
   const remarkParts = ["General shipment commercial"];
   if (promoNames.length) remarkParts.push("Promo: " + promoNames.join(", "));
-  if (dealerCtx.enabled) {
-    remarkParts.push(
-      "Dealer tier " + String(dealerCtx.tier_label || "") + " @ " + String(dealerCtx.price_rate || "") + "%"
-    );
-  }
 
   return {
     amount_system: amountSystem,
     lines,
-    dealer_cumulative: dealerCtx,
     promo_scheme_count: schemePacks.length,
     system_remark: remarkParts.join(" | ")
   };
@@ -731,6 +835,38 @@ async function createGeneralShipmentArWithCommercial_(ctx) {
 
   const pricing = await buildShipmentArPricing_(sb, { customerId, shipDate, items });
   if (pricing.err) return fail(pricing.err);
+
+  // Phase1：落帳 shipment promotion snapshot（AR/VOID 以此為唯一真相）
+  try {
+    for (let i = 0; i < (pricing.lines || []).length; i++) {
+      const ln = pricing.lines[i] || {};
+      const shiId = normId_(ln.shipment_item_id);
+      if (!shiId) continue;
+      const patch = {
+        so_pricing_snapshot_id: normId_(ln.so_pricing_snapshot_id) || null,
+        so_pricing_version: ln.so_pricing_version != null ? Number(ln.so_pricing_version) : null,
+        shipment_pricing_unit_price: roundMoney_(Number(ln.unit_price || 0)),
+        shipment_pricing_billable_qty: roundQty_(Number(ln.billable_qty || 0)),
+        shipment_pricing_free_qty: roundQty_(Number(ln.free_qty || 0)),
+        shipment_pricing_amount: roundMoney_(Number(ln.amount || 0)),
+        applied_promo_scheme_id: String(ln.promo_scheme_id || "").trim(),
+        applied_promo_type: String(ln.promo_type || "").trim(),
+        applied_promo_scope: String(ln.promo_scope || (ln.promo_scheme_id ? "PER_SHIPMENT" : "")).trim()
+      };
+      const { error: updErr } = await sb.from("shipment_item").update(patch).eq("shipment_item_id", shiId);
+      if (updErr) {
+        if (/column.*does not exist|Could not find|relation .* does not exist/i.test(updErr.message || "")) {
+          return fail(
+            "出貨計價快照欄位尚未建置，請先執行 server/sql/v4.2.15.00_銷售與出貨計價快照.sql：" +
+              (updErr.message || String(updErr))
+          );
+        }
+        return fail(updErr.message || String(updErr));
+      }
+    }
+  } catch (e) {
+    return fail(e?.message || String(e));
+  }
 
   const arRes = await createArFromShipment_({
     sb,
@@ -1173,6 +1309,7 @@ module.exports = {
   buildPromoCandidates_,
   computeSettlementPromoLines_,
   computeShipmentPromoLines_,
+  computeShipmentPromoLinesPhase1_,
   computeSalesOrderPromoLine_,
   buildShipmentArPricing_,
   createGeneralShipmentArWithCommercial_,
