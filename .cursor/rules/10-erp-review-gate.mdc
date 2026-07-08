@@ -85,9 +85,9 @@ globs: server/**
 
 說明：本檔是「實作後」最終覆核，因此不輸出 `GO FOR IMPLEMENTATION`。
 
-## Final Result
+## Gate Result 規則
 
-- 任一 Gate 有 Blocker：Final Result = **NO-GO**
-- 全部通過：Final Result = **GO FOR TESTING**
-- 只有完成 migration test / regression test / concurrency test / parity test / rollback test，才能：**GO FOR PRODUCTION**
+- 任一 Gate 有 Blocker：Gate Result = **NO-GO**
+- 全部通過：Gate Result = **GO FOR TESTING**
+- 只有完成 migration test / regression test / concurrency test / parity test / rollback test，才能：Gate Result = **GO FOR PRODUCTION**
 

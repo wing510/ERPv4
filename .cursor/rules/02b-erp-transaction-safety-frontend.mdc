@@ -7,5 +7,9 @@ globs: js/**
 # ERP Transaction Safety（Frontend reminder）
 
 當前端變更會影響金額/POST-VOID/權限/交易流程（Task Level A/B）時，仍必須滿足交易安全。  
+最小檢核（精簡）：
+- 是否會導致「部分成功」但 UI 顯示失敗（或反之）？
+- 若有新舊路由（Node -> RPC / legacy）：禁止 silent fallback；除非符合 00 的「人工核准過渡方案」並記錄 Compatibility/Parity/Test/Removal Plan
+
 完整規則請見 `02-erp-transaction-safety.mdc`。
 

@@ -7,5 +7,9 @@ globs: js/**
 # ERP Business Rule Parity（Frontend reminder）
 
 當前端變更會影響計價、顯示金額口徑、或 old/new 路由（Task Level A/B）時，仍必須做 parity。  
+最小檢核（精簡）：
+- 列出 OLD vs NEW 差異（amount/qty/status/error behavior）
+- 未核准差異：不得自行上線
+
 完整規則請見 `06-erp-business-rule-parity.mdc`。
 

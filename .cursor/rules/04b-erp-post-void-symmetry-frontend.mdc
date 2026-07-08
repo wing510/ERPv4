@@ -7,5 +7,9 @@ globs: js/**
 # ERP POST/VOID Symmetry（Frontend reminder）
 
 當前端變更會影響 POST/VOID 操作、限制條件、錯誤訊息或流程（Task Level A/B）時，仍必須滿足對稱性。  
+最小檢核（精簡）：
+- POST 與 VOID 的操作入口/限制條件/錯誤提示不可互相打架
+- 同一筆 VOID 重送不可造成額外副作用（要可重入）
+
 完整規則請見 `04-erp-post-void-symmetry.mdc`。
 

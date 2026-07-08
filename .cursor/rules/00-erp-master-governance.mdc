@@ -61,6 +61,11 @@ A 級僅限：
 - Retry test
 - 至少 1 個 relevant concurrency test（若有 shared mutation）
 
+## B 級 Gate Result（分階段）
+- 實作前（impact + 設計已清楚）：`GO FOR IMPLEMENTATION`
+- 實作後（完成最小測試矩陣）：`GO FOR TESTING`
+- 只有在必要測試完成且回滾/相容性準備到位時：`GO FOR PRODUCTION`
+
 ## Unknown 分級（避免把開發卡死）
 - UNKNOWN_BLOCKER：涉及金額、庫存、出入帳、權限、POST/VOID → 停止，先決策
 - UNKNOWN_NONBLOCKER：命名、顯示、非核心欄位 → 可繼續，但需記錄

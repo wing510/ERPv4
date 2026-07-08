@@ -7,5 +7,9 @@ globs: js/**
 # ERP Concurrency and Idempotency（Frontend reminder）
 
 當前端變更會影響重送/重複提交/並行操作結果（Task Level A/B）時，仍必須滿足競態與冪等。  
+最小檢核（精簡）：
+- double click / timeout retry 不會造成重複送出（同 key / 同 payload）
+- 同 key 不同 payload 需被拒絕（避免「同一筆操作」被覆蓋成另一筆）
+
 完整規則請見 `03-erp-concurrency-idempotency.mdc`。
 
