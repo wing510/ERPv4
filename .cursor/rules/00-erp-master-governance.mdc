@@ -1,0 +1,38 @@
+---
+description: ERP 全模組工程治理（分級 Gate：高風險才強制完整）
+alwaysApply: true
+---
+
+# ERP Master Engineering Governance（分級 Gate）
+
+本專案為跨模組交易型 ERP。任何需求不可只做到「功能可用」，但也避免小修被流程拖垮。
+
+## 分級 Gate（核心規則）
+
+### A. 高風險（**強制完整 Gate**）
+符合任一條件即啟動完整 Gate：
+- **跨模組**：牽涉 2 個以上模組/流程（例如 Shipment + AR、Dealer + 月結）
+- **金額/數量/餘額/狀態**口徑變更（pricing、rebate、payment、inventory、cumulative）
+- **POST/VOID/CANCEL/SETTLE** 交易鏈改動
+- **SQL migration / RPC / 交易邊界**改動（含 lock、UNIQUE、冪等鍵）
+- **權限/角色/審核**改動或新增
+- **資料模型**改動會影響歷史資料/報表口徑
+
+### B. 中風險（縮減 Gate）
+單模組但碰核心資料/報表口徑/作廢鏈：做「最小完整性分析」+ 目標測試。
+
+### C. 低風險（快速通道）
+純文案/樣式/顯示/不碰商業邏輯：只需影響一句話 + smoke 測試一步。
+
+## 交付物（高風險必交）
+- 影響分析（跨模組讀寫/報表/作廢鏈）
+- Source of Truth（權威、cache、snapshot、derived）
+- Invariants（不可破壞條件）
+- 交易邊界/回滾策略
+- 競態/鎖序/死鎖風險
+- 冪等策略（key/UNIQUE/request hash）
+- 權限與 actor 來源（server session）
+- POST/VOID 對稱設計
+- 相容性（UI/API contract/錯誤訊息）
+- 測試矩陣 + GO/NO-GO
+

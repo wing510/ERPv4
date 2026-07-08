@@ -1,0 +1,63 @@
+---
+description: ERP 最終審查 Gate（完成後不得直接宣告上線）
+alwaysApply: true
+---
+
+# ERP Final Gate
+
+任何功能完成後必須執行最終 Gate Review。
+
+## Gate A - Functional
+需求是否完成？
+
+## Gate B - Data Integrity
+是否可能 partial success？
+
+## Gate C - Financial Integrity
+金額是否一致？
+
+## Gate D - Inventory Integrity
+庫存是否可能負數或重複？
+
+## Gate E - Concurrency
+兩人同時操作是否安全？
+
+## Gate F - Idempotency
+重送是否安全？
+
+## Gate G - POST/VOID
+是否完整對稱？
+
+## Gate H - Permission
+是否 server-side 驗證？
+
+## Gate I - Audit
+是否可追溯？
+
+## Gate J - Compatibility
+原 UI / API / Workflow 是否維持？
+
+## Gate K - Migration
+舊資料是否相容？
+
+## Gate L - Rollback
+部署失敗能否回復？
+
+## 必須切換 Reviewer 心態
+假設自己的實作有錯，主動攻擊：
+- partial success / lost update / stale read / double submit
+- retry duplication / deadlock / oversell / over-shipment
+- wrong reversal / month-close corruption
+- permission bypass / actor spoofing
+- UI regression / API regression / report regression
+
+## 最終輸出
+- 風險分級：HIGH / MEDIUM / LOW / BLOCKER
+- Gate：GO / NO-GO（有 BLOCKER → NO-GO）
+
+## Final Result
+
+- 任一 Gate 有 Blocker：Final Result = **NO-GO**
+- 全部通過：Final Result = **GO FOR TESTING**
+- 只有完成 migration test / regression test / concurrency test / parity test / rollback test，才能：**GO FOR PRODUCTION**
+

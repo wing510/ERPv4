@@ -1,0 +1,64 @@
+---
+description: ERP 跨模組影響分析規則（高風險必做）
+alwaysApply: true
+---
+
+# ERP Impact Analysis
+
+任何需求在修改程式前，必須先分析直接與間接影響。
+
+## 必須掃描
+
+- Frontend page / component
+- API / handler
+- Bundle / service
+- RPC / SQL function
+- Trigger
+- Table / column
+- View
+- Report
+- Export / Import
+- Background job
+- Scheduler
+- Audit log
+- Downstream module
+
+## 必須回答
+
+1. 誰呼叫此功能？
+2. 此功能呼叫誰？
+3. 寫入哪些資料表？
+4. 哪些模組讀取這些資料？
+5. 是否影響歷史資料？
+6. 是否影響報表？
+7. 是否影響月結？
+8. 是否影響 POST / VOID？
+9. 是否影響權限？
+10. 是否影響 API contract？
+11. 是否影響既有 UI / Workflow？
+12. 是否存在 Legacy flow？
+
+## 禁止
+
+- 只修改使用者指定檔案而不查 downstream
+- 只搜尋函式名稱，不搜尋資料表與欄位引用
+- 只看前端，不看 DB
+- 只看 POST，不看 VOID
+- 只看新流程，不看舊資料
+
+## 輸出格式
+
+實作前輸出：
+
+- Direct Impact
+- Indirect Impact
+- Data Impact
+- Financial Impact
+- Inventory Impact
+- Permission Impact
+- Compatibility Impact
+- Unknowns
+- Blockers
+
+存在 Unknown 時不得自行猜測核心商業規則。
+

@@ -1,0 +1,62 @@
+---
+description: ERP 舊新商業規則一致性（高風險必做）
+alwaysApply: true
+---
+
+# ERP Business Rule Parity
+
+任何重構、RPC 化、SQL 化、效能優化、安全修復，不得自行改變現行商業規則。
+
+實作前必須建立：**OLD -> NEW parity matrix**。
+
+## 原則
+- 新架構/新 RPC 上線前，**先以現行正式邏輯為準**做 parity 測試
+- 任何金額/口徑差異必須先列出差異清單並對齊，不可自行改商業規則
+
+## parity matrix（至少比較）
+
+- input
+- output
+- amount
+- quantity
+- status
+- promotion
+- pricing
+- credit
+- cumulative
+- permission
+- error behavior
+
+## 必須測試（至少覆蓋）
+
+- 正常案例
+- 邊界案例
+- 歷史案例
+- 分批案例
+- 多 Lot
+- 多商品
+- 同商品多 line
+- 不同價格
+- 重送
+- 作廢
+
+## 差異處理規則
+
+任何 OLD / NEW 差異不得自行判定新版本較合理，必須：
+
+1. 列出差異
+2. 說明原因
+3. 標記 intentional / unintentional
+4. 等待確認
+
+除非明確核准，使用者操作流程不得改變。
+
+## 常見 parity 範圍（至少覆蓋）
+- pricing / promo / dealer price
+- dealer credit / rebate / cumulative
+- AR amount_due / amount_received / settlement behavior
+
+## Source of Truth
+- 每個重要資料只能有一個權威來源（其餘是 cache/snapshot/derived）
+- cache/snapshot 必須標示用途與一致性策略
+

@@ -1,0 +1,90 @@
+---
+description: ERP 實作測試 Gate（高風險必做）
+alwaysApply: true
+---
+
+# ERP Test Gate
+
+功能完成不代表可以上線。
+
+## 最小必跑（依需求增減）
+
+## Minimum Test Matrix
+
+### Happy Path
+- normal create
+- normal post
+- normal void
+
+### Boundary
+- zero
+- minimum
+- maximum
+- exact remaining qty
+- one unit over
+- date boundary
+
+### Multi-line
+- same product multiple lines
+- same SO item multiple Lots
+- multiple SO items same Lot where allowed
+- different prices
+
+### Retry
+- double click
+- same request retry
+- timeout retry
+- same key different payload
+
+### Concurrency
+- two users same Lot
+- two users same SO
+- two users same AR
+- POST vs VOID
+- payment vs VOID
+
+### Failure Injection
+- fail after first mutation
+- fail before AR
+- fail after AR
+- fail before ledger
+- fail after ledger
+
+Expected: full rollback
+
+### Permission
+- no session
+- wrong role
+- no action permission
+- forged actor
+
+### Parity（OLD vs NEW）
+- amount
+- qty
+- status
+- pricing
+- promotion
+- credit
+- cumulative
+
+### Migration
+- old data
+- duplicate data
+- null data
+- rollback
+
+## Gate Result
+
+測試輸出：
+
+- PASS
+- FAIL
+- BLOCKER
+- NOT TESTED
+
+任何核心案例 NOT TESTED：不得 GO FOR PRODUCTION。
+
+## 輸出
+- 測試清單 + 結果（PASS/FAIL）
+- 發現差異：列出差異與處理決策（保留為技術債或修正）
+

@@ -1,0 +1,60 @@
+---
+description: ERP POST/VOID/CANCEL 反向對稱規則（高風險必做）
+alwaysApply: true
+---
+
+# ERP POST / VOID Symmetry
+
+任何 POST 功能設計時，必須同步設計 VOID / CANCEL / REVERSAL。
+
+## POST（必須列出）
+
+- 寫入哪些 tables
+- 建立哪些 movements
+- 更新哪些 balances
+- 更新哪些 statuses
+- 建立哪些 AR/AP
+- 建立哪些 ledger
+- 建立哪些 adjustments
+- 建立哪些 snapshots
+
+## VOID / CANCEL（逐項回答）
+
+- 如何反向？
+- 原值從哪裡取得？（使用原始 amount / qty / snapshot）
+- 是否使用原 transaction / transaction_id？
+- 是否有 downstream transaction？是否需要禁止 VOID？
+
+## 強制規則
+
+- VOID 必須反向原 POST
+- 使用原始 amount / qty / snapshot（禁止重新計價、重新套促銷）
+- 保留 audit history（不可刪 ledger history）
+- 能用 reversal entry 就用 reversal entry
+
+## 禁止
+
+- VOID 重新計價 / 重新套促銷 / 猜原金額 / 用目前價格反算
+- 找不到資料就 silent continue（必須 fail-closed）
+
+## Downstream Guard（至少檢查）
+
+- payment exists
+- refund exists
+- return exists
+- settlement exists
+- month close
+- rebate lock
+- consignment dependency
+- subsequent inventory movement
+
+## Idempotent VOID
+
+重複 VOID 不得：
+
+- 重複還庫存
+- 重複還 credit
+- 重複 reverse ledger
+
+無完整 symmetry：**NO-GO**
+
