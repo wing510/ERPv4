@@ -114,7 +114,7 @@ async function runTraceTx(){
         "查無資料。\n\n" +
         "建議：\n" +
         "- 確認 transaction_id 是否正確（通常長得像 TX-...）。\n" +
-        "- 若你是想追「這批貨從哪來/出到哪」，請改用上方「區塊 1：查貨（Lot）」。\n" +
+        "- 若你是想追「這批貨從哪來／出到哪」，請改用上方「區塊 1：查貨（Lot）」。\n" +
         "- 若這筆是很舊的資料，可能當時尚未填入 transaction_id。";
       const rawEl = document.getElementById("traceTxRawResult");
       if(rawEl) rawEl.textContent = "";
@@ -283,7 +283,7 @@ async function renderTraceTxLinks_(bundle){
     try{
       const so = Array.isArray(base.sales_order) ? (base.sales_order[0] || null) : null;
       if(so){
-        pushRef_("原銷售/原出貨", so.reship_ref_type, so.reship_ref_id);
+        pushRef_("原銷售／原出貨", so.reship_ref_type, so.reship_ref_id);
         pushRef_("上游", so.parent_ref_type, so.parent_ref_id);
       }
     }catch(_eSo){}

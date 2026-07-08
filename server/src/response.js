@@ -6,7 +6,7 @@ function ok(body) {
   return {
     success: true,
     env: envName(),
-    erp_version: "4.1",
+    erp_version: "4.2",
     backend: "supabase",
     ...body
   };

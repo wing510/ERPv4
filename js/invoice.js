@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Commercial Invoice 商業發票（獨立模組）
  * 以 POSTED 出貨單為主；開立／編輯／PDF
  */
@@ -151,6 +151,72 @@ function invBindStandaloneDraftAutosave_(){
 function invSetV_(id, v){
   const el = document.getElementById(id);
   if(el && "value" in el) el.value = v != null ? v : "";
+}
+
+function invSetCiMoney_(id, v){
+  if(v == null || v === ""){
+    invSetV_(id, "");
+    return;
+  }
+  const n = Number(v);
+  invSetV_(id, Number.isFinite(n) ? n : "");
+}
+
+function invOpenStandaloneCiEditorFromList_(tr){
+  const id = String(tr?.getAttribute("data-row-id") || "").trim();
+  if(!id) return;
+  const cur = String(invCiLoadedId_ || "").trim();
+  const card = document.getElementById("invEditorCard");
+  const editorOpen = card && card.style.display !== "none" && invStandaloneMode_;
+  if(
+    editorOpen &&
+    typeof erpListRowToggleClose_ === "function" &&
+    erpListRowToggleClose_(cur, id)
+  ){
+    invCiLoadedId_ = "";
+    if(card) card.style.display = "none";
+    if(typeof erpSyncListRowHighlight_ === "function"){
+      erpSyncListRowHighlight_("invBlankListBody", "data-row-id", "");
+    }
+    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    return;
+  }
+  invOpenStandaloneCiEditor_(id);
+}
+
+async function invFetchBlankCiWithLines_(ciId){
+  const id = String(ciId || "").trim();
+  let ci = invCiBlankById_[id] || null;
+  let lines = [];
+  let apiWarn = "";
+  if(!id) return { ci, lines, apiWarn };
+  try{
+    const r = await callAPI({ action: "list_commercial_invoice_blank_by_ci", ci_id: id }, { method: "GET" });
+    ci = r?.data || ci;
+    lines = Array.isArray(r?.lines) ? r.lines : [];
+  }catch(_e){
+    apiWarn = "明細載入失敗，嘗試從快取補拉";
+  }
+  if(!lines.length){
+    try{
+      const all = await getAll("commercial_invoice_blank_line", { refresh: true }).catch(() => []);
+      lines = (all || []).filter(function(ln){
+        return String(ln.ci_id || "").trim() === id;
+      });
+    }catch(_e2){}
+  }
+  if(!lines.length){
+    try{
+      const legacy = await getAll("commercial_invoice_line", { refresh: true }).catch(() => []);
+      lines = (legacy || []).filter(function(ln){
+        return String(ln.ci_id || "").trim() === id;
+      });
+      if(lines.length && !apiWarn){
+        apiWarn = "明細來自舊表 commercial_invoice_line，請儲存一次寫入新表";
+      }
+    }catch(_e3){}
+  }
+  return { ci, lines, apiWarn };
 }
 
 /** select：有選項則選中；無則追加自訂 option（舊資料相容） */
@@ -1141,11 +1207,13 @@ async function invRefreshCiMap_(force){
       if(cid) invCiBlankById_[cid] = ci;
       invCiStandaloneList_.push(ci);
     });
-    invCiStandaloneList_.sort((a, b) =>
-      String(b.ci_date || b.updated_at || b.created_at || "").localeCompare(
-        String(a.ci_date || a.updated_at || a.created_at || "")
-      )
-    );
+    invCiStandaloneList_ = typeof erpSortRowsNewestFirst_ === "function"
+      ? erpSortRowsNewestFirst_(invCiStandaloneList_, ["ci_date", "updated_at", "created_at"], "ci_id")
+      : invCiStandaloneList_.sort((a, b) =>
+          String(b.ci_date || b.updated_at || b.created_at || "").localeCompare(
+            String(a.ci_date || a.updated_at || a.created_at || "")
+          )
+        );
     invCiMapLoadedAt_ = now;
   }catch(_e){}
   return invCiMap_;
@@ -1255,29 +1323,28 @@ async function invRenderBlankList_(){
   if(selectAll) selectAll.checked = false;
 
   if(!rows.length){
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#64748b;padding:20px;">尚無空白發票。按「新增」建立第一筆。</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#64748b;padding:20px;">尚無空白發票。按「新增」建立第一筆。</td></tr>';
     return;
   }
 
+  const selId = String(invCiLoadedId_ || "").trim().toUpperCase();
   rows.forEach(ci => {
     const ciId = String(ci.ci_id || "");
+    const open = selId === ciId.trim().toUpperCase();
     const ciNo = ci.ci_no || "—";
     const ciStUp = String(ci.status || "").trim().toUpperCase();
     const ciSt = invCiStatusLabel_(ciStUp);
     const canPdf = ciStUp !== "VOID";
     const pickBox = canPdf
-      ? `<input type="checkbox" class="inv-ci-pick" data-ci-id="${escapeHtml_(ciId)}">`
+      ? `<input type="checkbox" class="inv-ci-pick" data-ci-id="${escapeHtml_(ciId)}" onclick="event.stopPropagation()">`
       : "";
     tbody.innerHTML += `
-      <tr>
-        <td class="col-ci-pick">${pickBox}</td>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${escapeHtml_(ciId)}" onclick="invOpenStandaloneCiEditorFromList_(this)">
+        <td class="col-ci-pick" onclick="event.stopPropagation()">${pickBox}</td>
         <td>${escapeHtml_(String(ciNo))}</td>
         <td>${escapeHtml_(String(ci.buyer_name_en || ""))}</td>
         <td>${escapeHtml_(String(dateInputValue_(ci.ci_date) || ""))}</td>
         <td>${escapeHtml_(String(ciSt))}</td>
-        <td class="col-ci-actions">
-          <button class="btn-edit" type="button" onclick="invOpenStandaloneCiEditor_('${escapeHtml_(ciId)}')">編輯</button>
-        </td>
       </tr>
     `;
   });
@@ -1566,9 +1633,12 @@ async function invRenderShipmentList_(){
   const custMap = {};
   (invCustomers_ || []).forEach(c => { if(c?.customer_id) custMap[String(c.customer_id)] = c; });
 
-  const rows = (invShipments_ || []).slice().sort((a, b) =>
-    String(b.ship_date || b.created_at || "").localeCompare(String(a.ship_date || a.created_at || ""))
-  ).filter(sh => {
+  const rows = typeof erpSortRowsNewestFirst_ === "function"
+    ? erpSortRowsNewestFirst_(invShipments_ || [], ["ship_date", "created_at"], "shipment_id")
+    : (invShipments_ || []).slice().sort((a, b) =>
+        String(b.ship_date || b.created_at || "").localeCompare(String(a.ship_date || a.created_at || ""))
+      );
+  const filtered = rows.filter(sh => {
     const sid = String(sh.shipment_id || "").trim().toUpperCase();
     const ci = invCiMap_[sid] || null;
     const ciSt = String(ci?.status || "").trim().toUpperCase();
@@ -1587,12 +1657,12 @@ async function invRenderShipmentList_(){
   const selectAll = document.getElementById("inv_shipment_select_all");
   if(selectAll) selectAll.checked = false;
 
-  if(!rows.length){
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#64748b;padding:20px;">尚無符合條件的出貨單。</td></tr>';
+  if(!filtered.length){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#64748b;padding:20px;">尚無符合條件的出貨單。</td></tr>';
     return;
   }
 
-  rows.forEach(sh => {
+  filtered.forEach(sh => {
     const sid = String(sh.shipment_id || "");
     const ci = invCiMap_[sid.toUpperCase()] || null;
     const c = custMap[sh.customer_id] || null;
@@ -1603,11 +1673,14 @@ async function invRenderShipmentList_(){
     const pickBox = canPdf
       ? `<input type="checkbox" class="inv-ci-pick" data-shipment-id="${escapeHtml_(sid)}">`
       : "";
+    const soId = String(sh.so_id || "");
     tbody.innerHTML += `
       <tr>
         <td class="col-ci-pick">${pickBox}</td>
-        <td>${escapeHtml_(sid)}</td>
-        <td>${escapeHtml_(String(sh.so_id || ""))}</td>
+        <td class="logs-stack-cell">
+          <div class="logs-stack-main inv-list-ship-id">${escapeHtml_(sid)}</div>
+          <div class="logs-stack-sub">${escapeHtml_(soId || "—")}</div>
+        </td>
         <td>${escapeHtml_(String(c?.customer_name || sh.customer_id || ""))}</td>
         <td>${escapeHtml_(String(dateInputValue_(sh.ship_date) || ""))}</td>
         <td>${escapeHtml_(String(ciNo))}</td>
@@ -1731,15 +1804,18 @@ function invApplyCiRecordToEditor_(ci, lines){
   invSetSelectValue_("inv_ci_payment_terms", ci?.payment_terms || "");
   invSetV_("inv_ci_remark", ci?.remark || "");
   invSetV_("inv_ci_signature_date", dateInputValue_(ci?.signature_date) || dateInputValue_(ci?.ci_date));
-  invSetV_("inv_ci_subtotal", ci?.subtotal || "");
-  invSetV_("inv_ci_total", ci?.total_amount || "");
-  invRenderCiLinesTable_(lines?.length ? lines : [{
+  const hasLines = Array.isArray(lines) && lines.length > 0;
+  invRenderCiLinesTable_(hasLines ? lines : [{
     description_en: "",
     qty: 1,
     unit: "",
     unit_price: 0,
     amount: 0
   }]);
+  if(!hasLines){
+    invSetCiMoney_("inv_ci_subtotal", ci?.subtotal);
+    invSetCiMoney_("inv_ci_total", ci?.total_amount);
+  }
   invWarnCiLineDescriptions_(invCiLines_);
 }
 
@@ -1766,13 +1842,12 @@ async function invOpenStandaloneCiEditor_(ciIdOpt){
     if(curEl) curEl.disabled = false;
 
     if(ciId){
-      let ci = invCiBlankById_[ciId] || null;
-      let lines = [];
-      try{
-        const r = await callAPI({ action: "list_commercial_invoice_blank_by_ci", ci_id: ciId }, { method: "GET" });
-        ci = r?.data || ci;
-        lines = r?.lines || [];
-      }catch(_e){}
+      const pack = await invFetchBlankCiWithLines_(ciId);
+      const ci = pack.ci;
+      const lines = pack.lines;
+      if(pack.apiWarn && typeof showToast === "function"){
+        showToast(pack.apiWarn, "warn", 5000);
+      }
       if(!ci) return showToast("找不到空白 Commercial Invoice", "error");
       invApplyCiRecordToEditor_(ci, lines);
       const ciStatus = String(ci.status || "").trim().toUpperCase();
@@ -1817,6 +1892,9 @@ async function invOpenStandaloneCiEditor_(ciIdOpt){
     }
     invBindStandaloneDraftAutosave_();
     try{ card?.scrollIntoView({ behavior: "smooth", block: "start" }); }catch(_e){}
+    if(ciId && typeof erpSyncListRowHighlight_ === "function"){
+      erpSyncListRowHighlight_("invBlankListBody", "data-row-id", ciId);
+    }
   }finally{
     invLoadInFlight_ = false;
   }
@@ -1845,8 +1923,17 @@ async function invCopyBlankCiCore_(ciId){
 
   const r = await callAPI({ action: "list_commercial_invoice_blank_by_ci", ci_id: id }, { method: "GET" });
   const ci = r?.data;
-  const lines = r?.lines || [];
+  let lines = r?.lines || [];
   if(!ci) throw new Error("找不到發票");
+  if(!lines.length){
+    const legacy = await getAll("commercial_invoice_line", { refresh: true }).catch(() => []);
+    lines = (legacy || []).filter(function(ln){
+      return String(ln.ci_id || "").trim() === id;
+    });
+  }
+  if(!lines.length){
+    throw new Error("來源發票沒有明細，無法複製（請先開啟原單補明細並儲存）");
+  }
 
   const ciDate = dateInputValue_(ci.ci_date) || nowIso16().slice(0, 10);
   const newNo = await invSuggestBlankCiNo_(ciDate);
@@ -1884,7 +1971,7 @@ async function invCopyBlankCiCore_(ciId){
     lines_json: JSON.stringify(invLinesForSaveFromRecord_(lines)),
     created_by: getCurrentUser(),
     updated_by: getCurrentUser(),
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   }, { method: "POST" });
 
   return newNo;
@@ -2067,8 +2154,8 @@ function invRenderCiLinesTable_(lines){
     });
   }
   const total = Math.round(subtotal * 100) / 100;
-  invSetV_("inv_ci_subtotal", total || "");
-  invSetV_("inv_ci_total", total || "");
+  invSetCiMoney_("inv_ci_subtotal", total);
+  invSetCiMoney_("inv_ci_total", total);
 }
 
 function invCiRecalcFromTable_(){
@@ -2101,8 +2188,8 @@ function invCiRecalcFromTable_(){
     subtotal += amount;
   });
   const total = Math.round(subtotal * 100) / 100;
-  invSetV_("inv_ci_subtotal", total);
-  invSetV_("inv_ci_total", total);
+  invSetCiMoney_("inv_ci_subtotal", total);
+  invSetCiMoney_("inv_ci_total", total);
 }
 
 function invCiSyncLinesFromTable_(){
@@ -2292,9 +2379,12 @@ async function invOpenEditor_(shipmentId){
       invSetSelectValue_("inv_ci_payment_terms", ci.payment_terms || "");
       invSetV_("inv_ci_remark", ci.remark || "");
       invSetV_("inv_ci_signature_date", dateInputValue_(ci.signature_date) || dateInputValue_(ci.ci_date));
-      invSetV_("inv_ci_subtotal", ci.subtotal || "");
-      invSetV_("inv_ci_total", ci.total_amount || "");
-      invRenderCiLinesTable_(lines.length ? lines : invBuildDefaultCiLines_());
+      const hasLines = Array.isArray(lines) && lines.length > 0;
+      invRenderCiLinesTable_(hasLines ? lines : invBuildDefaultCiLines_());
+      if(!hasLines){
+        invSetCiMoney_("inv_ci_subtotal", ci.subtotal);
+        invSetCiMoney_("inv_ci_total", ci.total_amount);
+      }
       invWarnCiLineDescriptions_(invCiLines_);
     }else{
       invCiLoadedId_ = "";
@@ -2394,6 +2484,12 @@ async function invSaveCommercialInvoice(triggerEl){
     invCiSyncLinesFromTable_();
   }
   if(!invCiLines_.length) return showToast("無明細可儲存", "error");
+  if(invStandaloneMode_){
+    const badQty = invCiLines_.some(function(ln){ return !(Number(ln.qty || 0) > 0); });
+    if(badQty) return showToast("明細數量須大於 0 才能儲存", "error");
+    const badDesc = invCiLines_.some(function(ln){ return !String(ln.description_en || "").trim(); });
+    if(badDesc) return showToast("請填寫每筆明細的品名描述", "error");
+  }
 
   const hasSeller = await invSyncSellerFromProfile_();
   if(!hasSeller) return showToast("請先到「公司設定」填寫 English 公司名稱與地址", "error");
@@ -2426,7 +2522,7 @@ async function invSaveCommercialInvoice(triggerEl){
     lines_json: JSON.stringify(invCiLines_),
     created_by: getCurrentUser(),
     updated_by: getCurrentUser(),
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   };
 
   if(invStandaloneMode_){

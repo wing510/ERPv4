@@ -1,4 +1,4 @@
-/*********************************
+﻿/*********************************
  * Purchase Orders Module v2 (API 版)
  * STEP 1：PO 不產生庫存
  *********************************/
@@ -91,27 +91,8 @@ const PO_RULES = {
   idMax: 30
 };
 
-function bindUppercaseIdInput(elementId){
-  const el = document.getElementById(elementId);
-  if(!el) return;
-  if(el.dataset.uppercaseBound) return;
-  el.dataset.uppercaseBound = "1";
-
-  el.addEventListener("input", () => {
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const upper = (el.value || "").toUpperCase();
-    if(el.value !== upper){
-      el.value = upper;
-      if(start != null && end != null){
-        el.setSelectionRange(start, end);
-      }
-    }
-  });
-}
-
 async function purchaseInit(){
-  bindUppercaseIdInput("po_id");
+  bindUppercaseInput("po_id");
   await initPurchaseDropdowns();
   resetPOForm();
   syncPOItemUnitSuffix_();
@@ -476,7 +457,7 @@ async function savePOHeaderOnly_(triggerEl){
       document_link,
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     showToast("主檔已儲存");
     try{ if(typeof invalidateCache === "function") invalidateCache("purchase_order"); }catch(_eInv){}
@@ -548,7 +529,7 @@ async function savePOItemsOnly_(triggerEl){
         unit: it.unit,
         remark: it.remark || "",
         created_by: getCurrentUser(),
-        created_at: nowIso16(),
+        created_at: nowIsoTaipei(),
         updated_by: "",
         updated_at: ""
       };
@@ -603,7 +584,7 @@ async function savePOHeaderRemarkOnly_(triggerEl){
     await updateRecord("purchase_order", "po_id", po_id, {
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     try{ if(typeof invalidateCache === "function") invalidateCache("purchase_order"); }catch(_eInv){}
     showToast("備註已儲存");
@@ -817,7 +798,7 @@ async function updateSelectedPOItemRemark(triggerEl){
     await updateRecord("purchase_order_item", "po_item_id", pid, {
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     const row = poItemsDraft.find(x => x.draft_id === pid);
     if(row) row.remark = remark;
@@ -1015,7 +996,7 @@ async function createPurchaseOrder(triggerEl){
     document_link,
     remark,
     created_by: getCurrentUser(),
-    created_at: nowIso16(),
+    created_at: nowIsoTaipei(),
     updated_by: "",
     updated_at: ""
   };
@@ -1036,7 +1017,7 @@ async function createPurchaseOrder(triggerEl){
       unit: it.unit,
       remark: it.remark || "",
       created_by: getCurrentUser(),
-      created_at: nowIso16(),
+      created_at: nowIsoTaipei(),
       updated_by: "",
       updated_at: ""
     };
@@ -1057,6 +1038,12 @@ async function createPurchaseOrder(triggerEl){
 async function loadPurchaseOrder(poId){
   const id = String(poId || "").trim().toUpperCase();
   if(!id) return;
+  const curPo = String(document.getElementById("po_id")?.value || "").trim().toUpperCase();
+  if(poEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curPo, id)){
+    if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("purchase", curPo, id, "poTableBody")) return;
+  }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
+    erpClearTxnListRowCollapsed_("purchase");
+  }
   if(poLoadInFlight_){
     poPendingLoadId_ = id;
     setPOReceiptState_(`收貨：載入中 · 已排隊 ${id}（完成後自動載入）`, "warn");
@@ -1148,6 +1135,7 @@ async function loadPurchaseOrder(poId){
     }catch(_eWarnEnd){}
   }
   poUpdateToolbar_();
+  if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("poTableBody", "data-row-id", id);
   if(typeof scrollToEditorTop === "function") scrollToEditorTop();
   poLoadInFlight_ = false;
   // 若載入期間又點了其他單號，完成後自動載入最後一次點選的單號
@@ -1171,6 +1159,9 @@ async function renderPurchaseOrders(list=null){
     setTbodyLoading_(tbody, 7);
     listResolved = await getAll("purchase_order");
   }
+  if (!purchaseSort.field && typeof erpSortRowsNewestFirst_ === "function") {
+    listResolved = erpSortRowsNewestFirst_(listResolved, ["order_date", "created_at"], "po_id");
+  }
 
   tbody.innerHTML = "";
   if (!listResolved.length) {
@@ -1184,23 +1175,26 @@ async function renderPurchaseOrders(list=null){
     const sid = po.supplier_id || "";
     const s = supMap[sid] || null;
     const supplierNameOnly = (s && s.supplier_name) ? s.supplier_name : sid;
-    const btn = `
-      <button class="btn-edit" onclick="loadPurchaseOrder('${po.po_id}')">Load</button>
-      <button class="btn-secondary" onclick="gotoReceive('PO','${po.po_id}')">收貨</button>
-    `;
+    const poId = String(po.po_id || "");
+    const safePoId = poId.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("po_id")?.value || "").trim().toUpperCase();
+    const open = typeof erpListRowOpenInRender_ === "function"
+      ? erpListRowOpenInRender_("purchase", selId, poId.trim().toUpperCase())
+      : selId === poId.trim().toUpperCase();
+    const btn = `<button class="btn-secondary" type="button" onclick="event.stopPropagation();gotoReceive('PO','${safePoId}')">收貨</button>`;
     const docLink = String(po.document_link || "").trim();
     const linkCell = docLink
-      ? `<a href="${docLink.replace(/"/g, "&quot;")}" target="_blank" rel="noopener">連結</a>`
+      ? `<a href="${docLink.replace(/"/g, "&quot;")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">連結</a>`
       : "";
     tbody.innerHTML += `
-      <tr>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${poId.replace(/"/g, "&quot;")}" onclick="loadPurchaseOrder('${safePoId}')">
         <td>${po.po_id}</td>
         <td>${supplierNameOnly}</td>
         <td>${po.order_date || ""}</td>
         <td>${po.expected_arrival_date || ""}</td>
         <td>${poDocStatusZh_(po.status)}</td>
-        <td>${linkCell}</td>
-        <td>${btn}</td>
+        <td onclick="event.stopPropagation()">${linkCell}</td>
+        <td onclick="event.stopPropagation()">${btn}</td>
       </tr>
     `;
   });

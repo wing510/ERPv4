@@ -15,7 +15,7 @@
     <!-- 🔍 搜尋區 -->
     <div class="search-toolbar" style="margin-bottom:20px;">
 
-      <input type="text" id="search_lots_keyword" class="search-keyword-wide" placeholder="關鍵字（Lot／倉別／產品／規格／報單／PO／收貨…）" title="比對：Lot ID、倉別 ID／名稱、產品代碼／名稱／規格、報單／採購／收貨單號、備註等">
+      <input type="text" id="search_lots_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
 
       <select id="search_inventory_status">
         <option value="">全部庫存狀態</option>
@@ -35,33 +35,41 @@
 
     </div>
 
+    <div id="lotsActionToolbar" class="lots-action-toolbar button-group" style="margin-bottom:12px;">
+      <button type="button" id="lotsBtnApprove" class="btn-primary" disabled onclick="lotsToolbarApprove_()">QA 放行</button>
+      <button type="button" id="lotsBtnReject" class="btn-secondary" disabled onclick="lotsToolbarReject_()">QA 退回</button>
+      <button type="button" id="lotsBtnEditDates" class="btn-secondary" disabled onclick="lotsToolbarEditDates_()">補登資料</button>
+      <button type="button" id="lotsBtnLog" class="btn-secondary" disabled onclick="lotsToolbarLog_()">Log</button>
+      <button type="button" id="lotsBtnTrace" class="btn-secondary" disabled onclick="lotsToolbarTrace_()">追溯</button>
+    </div>
+
     <!-- 📋 表格（欄寬由 .table-lots-list + colgroup 控制；窄螢幕可橫向捲動） -->
-    <p class="lots-list-narrow-hint">欄位較多時，請左右滑動表格以檢視製造日、有效期與操作。</p>
+    <p class="lots-list-narrow-hint">欄位較多時，請左右滑動表格以檢視日期與操作。</p>
     <div class="table-wrapper table-wrapper-tall table-wrapper-master table-lots-list">
 
       <table class="data-table">
         <colgroup>
+          <col class="col-lots-sel" />
           <col class="col-lots-id" />
           <col class="col-lots-wh" />
           <col class="col-lots-qty" />
           <col class="col-lots-av" />
-          <col class="col-lots-mfg" />
-          <col class="col-lots-exp" />
+          <col class="col-lots-dates" />
+          <col class="col-lots-factory" />
           <col class="col-lots-inv" />
           <col class="col-lots-qa" />
-          <col class="col-lots-actions" />
         </colgroup>
         <thead>
           <tr>
-            <th>Lot ID/產品(規格)</th>
+            <th class="lots-col-select" title="單選">✓</th>
+            <th>Lot ID／產品（規格）</th>
             <th>倉別</th>
             <th title="收貨／建檔時寫入 lot.qty，僅供對照，不作扣庫依據">原始</th>
             <th title="inventory_movement 加總；無流水顯示 --">可用</th>
-            <th>製造日</th>
-            <th>有效期</th>
+            <th>製造／有效</th>
+            <th title="委外加工產出必填；寄賣收回用標籤批號">加工廠 Lot</th>
             <th>庫存狀態</th>
             <th>品檢狀態</th>
-            <th>操作</th>
           </tr>
         </thead>
 
@@ -93,9 +101,13 @@
 <div id="lotsDateModal" class="lots-qa-modal" style="display:none;" role="dialog" aria-modal="true">
   <div class="lots-qa-modal-overlay" onclick="closeLotDateModal()"></div>
   <div class="lots-qa-modal-dialog">
-    <h3 class="lots-qa-modal-title">補登批次日期</h3>
+    <h3 class="lots-qa-modal-title">補登批次資料</h3>
     <div id="lotDateBatchInfo" class="lots-qa-modal-batch"></div>
     <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:18px;">
+      <div class="form-group" style="margin:0;">
+        <label for="lotDateFactoryLot">加工廠 Lot<span id="lotDateFactoryLotReq" style="display:none;"> *</span></label>
+        <input type="text" id="lotDateFactoryLot" placeholder="委外加工產出必填；其他來源選填">
+      </div>
       <div class="form-group" style="margin:0;">
         <label for="lotDateManufacture">製造日</label>
         <input type="date" id="lotDateManufacture">
@@ -120,6 +132,23 @@
 .lots-qa-modal-batch { margin-bottom:12px; padding:12px; background:#f1f5f9; border-radius:6px; font-size:14px; line-height:1.6; color:#475569; }
 .lots-qa-modal-impact { margin-bottom:20px; font-size:14px; color:#0f766e; line-height:1.6; }
 .lots-qa-modal-actions { display:flex; gap:10px; justify-content:flex-end; }
+
+.lots-action-toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.lots-col-select{ width:36px; text-align:center; vertical-align:middle; }
+.lots-mfg-exp-cell{ line-height:1.3; min-width:0; }
+.lots-mfg-exp-mfg{ font-size:12px; color:#64748b; }
+.lots-mfg-exp-exp{ font-size:12px; color:#1e293b; }
+.table-wrapper.table-lots-list .data-table .lots-col-dates{
+  min-width:86px;
+  max-width:104px;
+  overflow:hidden;
+  vertical-align:middle;
+}
+.table-wrapper.table-lots-list .data-table .lots-col-factory{
+  min-width:64px;
+  word-break:break-all;
+  vertical-align:middle;
+}
 
 .lots-status-light{
   display:inline-flex;

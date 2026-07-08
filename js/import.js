@@ -1,4 +1,4 @@
-/*********************************
+﻿/*********************************
  * Import Module v3（API 版）
  * 海外 Supplier → 報關 → Import Receipt（含報單資料） → Lot
  *********************************/
@@ -336,7 +336,7 @@ async function persistImportItems(import_doc_id, draftItems){
       package_unit: "",
       remark: it.remark || "",
       created_by: getCurrentUser(),
-      created_at: nowIso16(),
+      created_at: nowIsoTaipei(),
       updated_by: "",
       updated_at: ""
     };
@@ -561,7 +561,7 @@ async function saveImportHeaderOnly_(triggerEl){
       remark: d.remark,
       status: header?.status || "OPEN",
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     try{ if(typeof invalidateCache === "function") invalidateCache("import_document"); }catch(_eInv){}
     await renderImportDocuments();
@@ -585,7 +585,7 @@ async function saveImportHeaderRemarkOnly_(triggerEl){
     await updateRecord("import_document","import_doc_id",docId,{
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     try{ if(typeof invalidateCache === "function") invalidateCache("import_document"); }catch(_eInv){}
     await renderImportDocuments();
@@ -777,7 +777,7 @@ function buildImportDocPayload_(){
     origin_country: importOriginCountryEn_(it.origin_country || ""),
     invoice_no: it.lot_id || it.invoice_no || "",
     remark: it.remark || "",
-    created_at: nowIso16()
+    created_at: nowIsoTaipei()
   }));
 
   const doc = {
@@ -897,9 +897,9 @@ async function saveImportDocument(triggerEl){
       // 狀態由系統自動維護：更新時保留原狀態；新建時固定 OPEN
       ...({ ...doc, status: (header?.status || doc.status || "OPEN") }),
       created_by: getCurrentUser(),
-      created_at: nowIso16(),
+      created_at: nowIsoTaipei(),
       updated_by: getCurrentUser(),
-      updated_at: nowIso16(),
+      updated_at: nowIsoTaipei(),
       items_json: JSON.stringify(items)
     }, { method: "POST" });
 
@@ -1112,7 +1112,7 @@ async function updateSelectedImportItemRemark(triggerEl){
     await updateRecord("import_item", "import_item_id", iid, {
       remark,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     const row = importItemsDraft.find(x => x.draft_id === iid);
     if(row) row.remark = remark;
@@ -1442,6 +1442,12 @@ async function cancelImportDocument(triggerEl){
 async function loadImportDocument(importDocId){
   const id = String(importDocId || "").trim().toUpperCase();
   if(!id) return;
+  const curDoc = String(document.getElementById("import_doc_id")?.value || "").trim().toUpperCase();
+  if(importEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curDoc, id)){
+    if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("import", curDoc, id, "importTableBody")) return;
+  }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
+    erpClearTxnListRowCollapsed_("import");
+  }
   if(importLoading_){
     importPendingLoadId_ = id;
     setImportReceiptState_(`收貨狀態：載入中 — 已排隊 ${id}（完成後自動載入）`, "warn");
@@ -1539,7 +1545,7 @@ async function loadImportDocument(importDocId){
         await updateRecord("import_document","import_doc_id",id,{
           status: desired,
           updated_by: getCurrentUser(),
-          updated_at: nowIso16()
+          updated_at: nowIsoTaipei()
         });
         doc.status = desired;
         importLoadedStatus_ = desired;
@@ -1567,6 +1573,7 @@ async function loadImportDocument(importDocId){
     importLoadWarnToken_ = "";
   }catch(_eWarnEnd){}
   updateImportButtons_();
+  if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("importTableBody", "data-row-id", id);
   if(typeof scrollToEditorTop === "function") scrollToEditorTop();
   // 若載入期間又點了其他單號，完成後自動載入最後一次點選的單號
   try{
@@ -1651,7 +1658,7 @@ async function createImportReceiptAndLots(){
     status,
     remark,
     created_by: getCurrentUser(),
-    created_at: nowIso16(),
+    created_at: nowIsoTaipei(),
     updated_by: "",
     updated_at: ""
   };
@@ -1682,7 +1689,7 @@ async function createImportReceiptAndLots(){
       manufacture_date: "",
       expiry_date: "",
       created_by: getCurrentUser(),
-      created_at: nowIso16(),
+      created_at: nowIsoTaipei(),
       updated_by: "",
       updated_at: "",
       remark: "",
@@ -1704,7 +1711,7 @@ async function createImportReceiptAndLots(){
       ref_id: import_receipt_id,
       remark: "",
       created_by: getCurrentUser(),
-      created_at: nowIso16(),
+      created_at: nowIsoTaipei(),
       updated_by: "",
       updated_at: "",
       system_remark: `Import IN: ${import_doc_id}`,
@@ -1721,7 +1728,7 @@ async function createImportReceiptAndLots(){
       lot_id,
       remark: it.remark || "",
       created_by: getCurrentUser(),
-      created_at: nowIso16(),
+      created_at: nowIsoTaipei(),
       updated_by: "",
       updated_at: ""
     };
@@ -1733,7 +1740,7 @@ async function createImportReceiptAndLots(){
   await updateRecord("import_document","import_doc_id",import_doc_id,{
     status: "CLOSED",
     updated_by: getCurrentUser(),
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   });
 
   showToast("收貨單已建立，已產生批次（PENDING）");
@@ -1769,6 +1776,9 @@ async function renderImportDocuments(list=null){
     ]);
   }
 
+  if (!importSort.field && typeof erpSortRowsNewestFirst_ === "function") {
+    listResolved = erpSortRowsNewestFirst_(listResolved, ["import_date", "created_at"], "import_doc_id");
+  }
   const listToShow = Array.isArray(listResolved) ? listResolved : [];
   const supMap = {};
   (importSuppliers || []).forEach(s => { if(s && s.supplier_id) supMap[s.supplier_id] = s; });
@@ -1823,22 +1833,25 @@ async function renderImportDocuments(list=null){
     const s = supMap[doc.supplier_id] || null;
     const supplierNameOnly = (s && s.supplier_name) ? s.supplier_name : (doc.supplier_id || "");
     const st = importDocDerivedStatus_(doc);
-    const btn = `
-      <button class="btn-edit" onclick="loadImportDocument('${doc.import_doc_id}')">Load</button>
-      <button class="btn-secondary" onclick="gotoReceive('IMPORT','${doc.import_doc_id}')">收貨</button>
-    `;
+    const docId = String(doc.import_doc_id || "");
+    const safeDocId = docId.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("import_doc_id")?.value || "").trim().toUpperCase();
+    const open = typeof erpListRowOpenInRender_ === "function"
+      ? erpListRowOpenInRender_("import", selId, docId.trim().toUpperCase())
+      : selId === docId.trim().toUpperCase();
+    const btn = `<button class="btn-secondary" type="button" onclick="event.stopPropagation();gotoReceive('IMPORT','${safeDocId}')">收貨</button>`;
     const docLink = doc.document_link || "";
-    const linkCell = docLink ? `<a href="${docLink}" target="_blank" rel="noopener">文件</a>` : "";
+    const linkCell = docLink ? `<a href="${docLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()">文件</a>` : "";
     tbody.innerHTML += `
-      <tr>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${docId.replace(/"/g, "&quot;")}" onclick="loadImportDocument('${safeDocId}')">
         <td>${doc.import_doc_id || ""}</td>
         <td>${doc.import_no || ""}</td>
         <td>${doc.import_date || ""}</td>
         <td>${doc.release_date || ""}</td>
         <td>${supplierNameOnly}</td>
         <td>${importDocStatusZh_(st)}</td>
-        <td>${linkCell}</td>
-        <td>${btn}</td>
+        <td onclick="event.stopPropagation()">${linkCell}</td>
+        <td onclick="event.stopPropagation()">${btn}</td>
       </tr>
     `;
   });

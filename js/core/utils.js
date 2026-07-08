@@ -1,8 +1,42 @@
 /**
  * ERP Core Utils
  * - 以「穩定可追溯」為優先：ID 由前端產生並寫入 Sheet
- * - 時間：僅保留一個共用函式 nowIso16()（台灣本地時間），各模組一律使用此函式，勿再自訂 nowTime/nowIso16
+ * - 時間：nowIsoTaipei() 寫入 API（含 +08:00）；nowIso16() 僅供表單預設日期；列表顯示用 erpFormatListDateTime_
  */
+
+/** 台灣時間 ISO（含 +08:00；與後端 nowIso 一致，供寫入 created_at） */
+function nowIsoTaipei() {
+  const d = new Date();
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    }).formatToParts(d);
+    const get = (type) => parts.find((p) => p.type === type)?.value || "00";
+    return (
+      get("year") +
+      "-" +
+      get("month") +
+      "-" +
+      get("day") +
+      "T" +
+      get("hour") +
+      ":" +
+      get("minute") +
+      ":" +
+      get("second") +
+      "+08:00"
+    );
+  } catch (_e) {
+    return nowIso16();
+  }
+}
 
 /** 唯一共用：台灣本地時間 YYYY-MM-DDTHH:mm（供 datetime-local 與 created_at/updated_at 儲存用） */
 function nowIso16(){
@@ -208,6 +242,166 @@ function erpCanChangeMasterStatus_(){
   }
 }
 
+/** 操作人／登入者顯示：超管帳號 adminerp → 開發管理（全站 UI 用；API 仍送 adminerp） */
+function erpDisplayOperatorName_(userIdOrName){
+  const s = String(userIdOrName || "").trim();
+  if(!s) return "";
+  if(s.toLowerCase() === "adminerp") return "開發管理";
+  return s;
+}
+
+/** 角色代碼 → 中文（頂欄、Users 等共用） */
+function erpRoleLabelZh_(role){
+  const r = String(role || "").trim().toUpperCase();
+  if(!r) return "";
+  const map = {
+    CEO: "CEO",
+    FN: "財務",
+    GA: "總務",
+    OP: "作業",
+    QA: "品保",
+    SL: "業務",
+    AS: "助理",
+    WH: "倉管",
+    ADMIN: "管理者"
+  };
+  return map[r] || r;
+}
+
+/** 頂欄登入者：畫面中文名；title 保留原始 user_id */
+function erpTopbarUserText_(userId, role){
+  const uid = String(userId || "").trim();
+  if(!uid) return { label: "—", title: "" };
+  const display = erpDisplayOperatorName_(uid);
+  const roleZh = erpRoleLabelZh_(role);
+  const label = roleZh ? roleZh + " - " + display : display;
+  const title = "目前登入：" + (roleZh ? roleZh + " - " + uid : uid);
+  return { label, title };
+}
+
+/** v4.2 應收/收款：CEO、財務角色，或 Users 勾選 ar */
+function erpCanManageAr_(){
+  try{
+    var r = (typeof getCurrentUserRole === "function") ? String(getCurrentUserRole() || "").trim().toUpperCase() : "";
+    if(r === "CEO" || r === "FN" || r === "FINANCE") return true;
+    return erpHasModule_("ar");
+  }catch(_e){
+    return false;
+  }
+}
+
+/** Users 勾選模組（空白=全關；* / ALL=全開） */
+function erpReadAllowedModuleSet_(){
+  try{
+    var raw = "";
+    if(typeof getCurrentUserAllowedModules === "function"){
+      raw = String(getCurrentUserAllowedModules() || "").trim();
+    }else{
+      raw = String(localStorage.getItem("erp_allowed_modules") || sessionStorage.getItem("erp_allowed_modules") || "").trim();
+    }
+    if(!raw) return {};
+    if(raw === "*" || raw.toUpperCase() === "ALL") return null;
+    var set = {};
+    raw.split(",").map(function(s){ return String(s||"").trim(); }).filter(Boolean).forEach(function(k){ set[k] = true; });
+    return set;
+  }catch(_e){
+    return null;
+  }
+}
+
+function erpHasModule_(moduleKey){
+  var k = String(moduleKey || "").trim();
+  if(!k) return true;
+  var set = erpReadAllowedModuleSet_();
+  if(set === null) return true;
+  if(!set || !Object.keys(set).length) return false;
+  return !!set[k];
+}
+
+/** Dealer 方案客戶：綁定客戶與經銷／月結方案（不需會計角色） */
+function erpCanOperateCommercialDealerCustomer_(){
+  return erpHasModule_("commercial_dealer_customer");
+}
+
+/** Dealer 方案寫入：模組 commercial_dealer + 會計角色 */
+function erpCanOperateCommercialDealer_(){
+  return erpCanManageAr_() && erpHasModule_("commercial_dealer");
+}
+
+/** 月結回饋寫入：模組 dealer_rebate 或 commercial_dealer + 會計角色 */
+function erpCanOperateDealerRebate_(){
+  return erpCanManageAr_() && (erpHasModule_("dealer_rebate") || erpHasModule_("commercial_dealer"));
+}
+
+/** 列表排序：依欄位順序取第一個非空值（通常業務日期 → created_at） */
+function erpRowSortKey_(row, fields){
+  var list = fields || ["created_at"];
+  for(var i = 0; i < list.length; i++){
+    var v = String(row && row[list[i]] != null ? row[list[i]] : "").trim();
+    if(v) return v;
+  }
+  return "";
+}
+
+/** 新→舊比較（依序比各日期欄；最後比單號） */
+function erpCompareNewestFirst_(a, b, dateFields, idField){
+  var fields = dateFields || ["created_at"];
+  var idKey = String(idField || "id");
+  for(var i = 0; i < fields.length; i++){
+    var fa = String(a && a[fields[i]] != null ? a[fields[i]] : "").trim();
+    var fb = String(b && b[fields[i]] != null ? b[fields[i]] : "").trim();
+    if(fa !== fb) return fb.localeCompare(fa);
+  }
+  var ida = String(a && a[idKey] != null ? a[idKey] : "").trim();
+  var idb = String(b && b[idKey] != null ? b[idKey] : "").trim();
+  if(ida !== idb) return idb.localeCompare(ida);
+  return 0;
+}
+
+function erpSortRowsNewestFirst_(rows, dateFields, idField){
+  return (rows || []).slice().sort(function(a, b){
+    return erpCompareNewestFirst_(a, b, dateFields, idField);
+  });
+}
+
+/** v4.2 FINANCE 選單可見：ADMIN / CEO / 總務 / 財務 */
+function erpCanViewFinanceByRole_(){
+  try{
+    var r = (typeof getCurrentUserRole === "function") ? String(getCurrentUserRole() || "").trim().toUpperCase() : "";
+    return r === "CEO" || r === "FN" || r === "FINANCE";
+  }catch(_e){
+    return false;
+  }
+}
+
+/** FINANCE 選單：CEO／財務角色，或已勾選任一財務模組 */
+function erpCanViewFinanceModule_(){
+  try{
+    if(erpCanViewFinanceByRole_()) return true;
+    var set = erpReadAllowedModuleSet_();
+    if(set === null) return true;
+    return !!(set.ar || set.dealer_rebate || set.invoice || set.invoice_blank);
+  }catch(_e){
+    return false;
+  }
+}
+try{
+  window.erpDisplayOperatorName_ = erpDisplayOperatorName_;
+  window.erpRoleLabelZh_ = erpRoleLabelZh_;
+  window.erpTopbarUserText_ = erpTopbarUserText_;
+  window.erpCanManageAr_ = erpCanManageAr_;
+  window.erpCanViewFinanceModule_ = erpCanViewFinanceModule_;
+  window.erpCanViewFinanceByRole_ = erpCanViewFinanceByRole_;
+  window.erpReadAllowedModuleSet_ = erpReadAllowedModuleSet_;
+  window.erpHasModule_ = erpHasModule_;
+  window.erpCanOperateCommercialDealer_ = erpCanOperateCommercialDealer_;
+  window.erpCanOperateCommercialDealerCustomer_ = erpCanOperateCommercialDealerCustomer_;
+  window.erpCanOperateDealerRebate_ = erpCanOperateDealerRebate_;
+  window.erpRowSortKey_ = erpRowSortKey_;
+  window.erpCompareNewestFirst_ = erpCompareNewestFirst_;
+  window.erpSortRowsNewestFirst_ = erpSortRowsNewestFirst_;
+}catch(_eAr){}
+
 function erpLockStatusSelect_(selectId){
   var el = document.getElementById(String(selectId || ""));
   if(!el) return;
@@ -248,6 +442,7 @@ var TERM_LABELS = {
   INTERNAL_USE: "INTERNAL_USE（內部領用）",
   SAMPLE: "SAMPLE（樣品）",
   NORMAL: "NORMAL（正常訂單）",
+  CONSIGNMENT: "CONSIGNMENT（寄賣）",
   GIFT: "GIFT（贈品）",
   PR: "PR（公關）",
   RESHIP: "RESHIP（補寄）",
@@ -261,15 +456,100 @@ var TERM_LABELS = {
   ,FG: "FG（成品）"
 };
 
-/** 列表時間：YYYY-MM-DD HH:mm（去掉 T、秒、時區） */
+/** ISO 字串是否含時區（Z 或 ±HH:MM） */
+function erpHasTimezoneSuffix_(s) {
+  return /[Zz]$|[+-]\d{2}:\d{2}$/.test(String(s || "").trim());
+}
+
+/** nowIso16 風格（無時區尾碼）→ 顯示用 parts；含時區則回 null */
+function erpParseIsoNoTzParts_(raw) {
+  const s = String(raw || "").trim();
+  if (!s || erpHasTimezoneSuffix_(s)) return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+  if (!m) return null;
+  return { yyyy: m[1], mm: m[2], dd: m[3], hh: m[4], mi: m[5] };
+}
+
+/** Date → 台灣時間 YYYY-MM-DD HH:mm */
+function erpFormatDateTaipeiYmdHm_(d) {
+  if (!d || Number.isNaN(d.getTime())) return "";
+  try {
+    const s = d.toLocaleString("sv-SE", { timeZone: "Asia/Taipei" });
+    return s.length >= 16 ? s.slice(0, 16) : s;
+  } catch (_e) {
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+}
+
+/** 列表時間：YYYY-MM-DD HH:mm（台灣；無時區尾碼視為已是本地） */
 function erpFormatListDateTime_(v) {
   const s = String(v || "").trim();
   if (!s) return "";
+  const parts = erpParseIsoNoTzParts_(s);
+  if (parts) return `${parts.yyyy}-${parts.mm}-${parts.dd} ${parts.hh}:${parts.mi}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return erpFormatDateTaipeiYmdHm_(d);
   const m = s.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
   if (m) return m[1] + " " + m[2];
-  const d = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (d) return d[1];
-  return s;
+  const dOnly = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return dOnly ? dOnly[1] : s;
+}
+
+/** 時間部分 HH:mm（台灣；供列表灰字） */
+function erpFormatLocalTimeHm_(v) {
+  const full = erpFormatListDateTime_(v);
+  if (!full) return "";
+  const m = full.match(/(\d{2}:\d{2})$/);
+  return m ? m[1] : "";
+}
+
+/**
+ * 搭配業務日期（如 AR 起算日）顯示時間。
+ * 舊資料若無時區被 PG 當 UTC 儲存，台灣日期會與起算日差一天 → 改取 UTC 牆鐘時分。
+ */
+function erpFormatLocalTimeHmForBizDate_(v, bizDateYmd) {
+  const raw = String(v || "").trim();
+  const bizDate = String(bizDateYmd || "").slice(0, 10);
+  if (!raw || !bizDate) return erpFormatLocalTimeHm_(v);
+  if (erpHasTimezoneSuffix_(raw)) {
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) {
+      const taipeiFull = erpFormatDateTaipeiYmdHm_(d);
+      if (taipeiFull.slice(0, 10) !== bizDate) {
+        const wm = raw.match(/T(\d{2}):(\d{2})/);
+        if (wm) return wm[1] + ":" + wm[2];
+      }
+    }
+  }
+  return erpFormatLocalTimeHm_(v);
+}
+
+/** 全站列表／Logs 共用：台灣本地時間 YYYY-MM-DD HH:mm */
+function formatLocalTime(dateStr) {
+  return erpFormatListDateTime_(dateStr);
+}
+
+/** 解析時間戳供排序（無 TZ 當本地；有 TZ 依 Date） */
+function erpParseLocalDateTime_(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  const parts = erpParseIsoNoTzParts_(s);
+  if (parts) {
+    const d = new Date(
+      Number(parts.yyyy),
+      Number(parts.mm) - 1,
+      Number(parts.dd),
+      Number(parts.hh),
+      Number(parts.mi),
+      0,
+      0
+    );
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function termLabel(code) {
@@ -431,6 +711,26 @@ function erpCopyToastText_(btn){
   erpCopyToastTextFallback_(msg, finish);
 }
 
+/**
+ * 同步輸入框唯讀狀態與全站灰底樣式（readonly 屬性 + .erp-input-readonly）
+ * @param {HTMLElement|null} el
+ * @param {boolean} [readOnly] 若省略則依目前 el.readOnly / readonly 屬性
+ */
+function erpSyncInputReadonlyStyle_(el, readOnly){
+  if(!el) return;
+  const ro =
+    readOnly != null
+      ? !!readOnly
+      : !!(el.readOnly || el.hasAttribute("readonly") || el.classList.contains("erp-input-readonly"));
+  try{
+    el.readOnly = ro;
+  }catch(_e){}
+  if(ro) el.setAttribute("readonly", "readonly");
+  else el.removeAttribute("readonly");
+  el.classList.toggle("erp-input-readonly", ro);
+}
+window.erpSyncInputReadonlyStyle_ = erpSyncInputReadonlyStyle_;
+
 function showToast(message, type="success", durationMsOverride){
   const toast = document.getElementById("toast");
   if(!toast) return alert(message);
@@ -527,13 +827,18 @@ function erpEndLoadWarnToast_(token){
   }catch(_e){}
 }
 
+/**
+ * 輸入時自動轉大寫。僅用於代碼／單號欄位（如 c_id、po_id），勿綁中文名稱或備註。
+ */
 function bindUppercaseInput(elementId){
   const el = document.getElementById(elementId);
   if(!el) return;
   if(el.dataset.uppercaseBound) return;
   el.dataset.uppercaseBound = "1";
 
-  el.addEventListener("input", () => {
+  let composing = false;
+
+  function applyUppercase_(){
     const start = el.selectionStart;
     const end = el.selectionEnd;
     const upper = (el.value || "").toUpperCase();
@@ -543,6 +848,19 @@ function bindUppercaseInput(elementId){
         el.setSelectionRange(start, end);
       }
     }
+  }
+
+  el.addEventListener("compositionstart", function () {
+    composing = true;
+  });
+  el.addEventListener("compositionend", function () {
+    composing = false;
+    applyUppercase_();
+  });
+
+  el.addEventListener("input", () => {
+    if (composing) return;
+    applyUppercase_();
   });
 }
 
@@ -568,6 +886,167 @@ function scrollToEditorTop(){
   }
 }
 
+/** 主檔版型 A：展開下方明細卡片 */
+function showMasterEditCard_(formCardIdOrEl){
+  try{
+    const el =
+      typeof formCardIdOrEl === "string"
+        ? document.getElementById(formCardIdOrEl)
+        : formCardIdOrEl;
+    if(el) el.classList.remove("master-edit-collapsed");
+  }catch(_e){}
+}
+
+/** 主檔版型 A：隱藏明細卡片 */
+function hideMasterEditCard_(formCardIdOrEl){
+  try{
+    const el =
+      typeof formCardIdOrEl === "string"
+        ? document.getElementById(formCardIdOrEl)
+        : formCardIdOrEl;
+    if(el) el.classList.add("master-edit-collapsed");
+  }catch(_e){}
+}
+
+/** 主檔列表「新增」：清空表單 → 展開明細 → 捲動 */
+function newMasterFromList_(formCardId, clearFn){
+  try{
+    if(typeof clearFn === "function") clearFn();
+  }catch(_e){}
+  showMasterEditCard_(formCardId);
+  if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_(formCardId);
+}
+
+/** 主檔列表「重設」：還原搜尋後收合明細、回列表頂 */
+/** 主檔列表搜尋：狀態預設 ACTIVE（使用中） */
+function masterSearchStatusDefault_(selectId){
+  const el = document.getElementById(String(selectId || ""));
+  if(el) el.value = "ACTIVE";
+}
+
+function resetMasterListView_(formCardId, clearFn){
+  try{
+    if(typeof clearFn === "function") clearFn();
+  }catch(_e){}
+  hideMasterEditCard_(formCardId);
+  if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+}
+
+function masterListEsc_(s){
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** 主檔列表：ID 上（灰小字）＋名稱下（單格 HTML，非 table cell） */
+function masterListIdNameHtml_(id, name){
+  const i = String(id ?? "").trim();
+  const n = String(name ?? "").trim();
+  if(!i && !n) return '<span class="text-muted">—</span>';
+  if(!i) return '<div class="master-list-name">' + masterListEsc_(n) + "</div>";
+  if(!n) return '<div class="master-list-id">' + masterListEsc_(i) + "</div>";
+  return (
+    '<div class="master-list-id">' +
+    masterListEsc_(i) +
+    '</div><div class="master-list-name">' +
+    masterListEsc_(n) +
+    "</div>"
+  );
+}
+
+/** 主檔列表：ID 上（灰小字）＋名稱下（桌機／手機共用） */
+function masterListIdNameCells_(id, name){
+  const i = masterListEsc_(id);
+  const n = masterListEsc_(name);
+  return (
+    '<td class="col-master-idname"><div class="master-list-id">' +
+    i +
+    '</div><div class="master-list-name">' +
+    n +
+    "</div></td><td class=\"col-master-name-desk\">" +
+    n +
+    "</td>"
+  );
+}
+
+/** 主檔列表：僅名稱（桌機／手機共用，不顯示 ID） */
+function masterListNameOnlyCells_(name) {
+  const n = masterListEsc_(name);
+  return (
+    '<td class="col-master-idname"><div class="master-list-name">' +
+    n +
+    "</div></td><td class=\"col-master-name-desk\">" +
+    n +
+    "</td>"
+  );
+}
+
+/** 主檔列表：桌機類型／流程兩欄；手機合併為類型上＋流程下（皆小字） */
+function masterListTypeFlowCells_(type, flow){
+  const t = masterListEsc_(type);
+  const f = masterListEsc_(flow);
+  const tTitle = t ? ' title="' + t + '"' : "";
+  const fTitle = f ? ' title="' + f + '"' : "";
+  return (
+    '<td class="col-master-typeflow">' +
+    '<div class="master-list-type"' + tTitle + ">" +
+    t +
+    '</div><div class="master-list-flow"' + fTitle + ">" +
+    f +
+    '</div></td><td class="col-master-flow-desk">' +
+    f +
+    "</td>"
+  );
+}
+
+/** 主檔列表：桌機聯絡人／電話兩欄；手機合併為聯絡人上＋電話下（灰小字） */
+function masterListContactPhoneCells_(contact, phone){
+  const c = masterListEsc_(contact);
+  const p = masterListEsc_(phone);
+  const cTitle = c ? ' title="' + c + '"' : "";
+  const pTitle = p ? ' title="' + p + '"' : "";
+  return (
+    '<td class="col-master-contact">' +
+    '<div class="master-list-contact"' + cTitle + ">" +
+    c +
+    '</div><div class="master-list-phone"' + pTitle + ">" +
+    p +
+    '</div></td><td class="col-master-phone col-master-phone-desk">' +
+    p +
+    "</td>"
+  );
+}
+
+/** 主檔版型 A：Load 後捲到下方編輯卡片 */
+function scrollToMasterForm_(formCardIdOrEl){
+  showMasterEditCard_(formCardIdOrEl);
+  try{
+    const el =
+      typeof formCardIdOrEl === "string"
+        ? document.getElementById(formCardIdOrEl)
+        : formCardIdOrEl;
+    if(!el) return;
+    const content = document.getElementById("content");
+    if(content && typeof content.scrollTo === "function"){
+      const contentRect = content.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const top = content.scrollTop + (elRect.top - contentRect.top) - 8;
+      content.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      return;
+    }
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }catch(_e){
+    try{
+      const el =
+        typeof formCardIdOrEl === "string"
+          ? document.getElementById(formCardIdOrEl)
+          : formCardIdOrEl;
+      if(el) el.scrollIntoView(true);
+    }catch(_e2){}
+  }
+}
+
 /* =========================================================
    UX：資料表 tbody 載入中（與收貨「已收列表」同風格）
 ========================================================= */
@@ -581,6 +1060,88 @@ function setTbodyLoading_(tbodyOrId, colspan, message){
   tbody.innerHTML =
     `<tr><td colspan="${n}" style="text-align:center;color:#64748b;padding:18px;">${esc}</td></tr>`;
 }
+
+function erpSyncListRowHighlight_(tbodyId, attrName, selectedId){
+  const tbody = document.getElementById(tbodyId);
+  if(!tbody) return;
+  const sel = String(selectedId || "").trim().toUpperCase();
+  const attr = String(attrName || "data-row-id");
+  tbody.querySelectorAll("tr[" + attr + "]").forEach(function(tr){
+    const id = String(tr.getAttribute(attr) || "").trim().toUpperCase();
+    tr.classList.toggle("erp-list-row-open", id === sel);
+  });
+}
+window.erpSyncListRowHighlight_ = erpSyncListRowHighlight_;
+
+/** 列表列：再點同一列（ID 不分大小寫） */
+function erpListRowToggleClose_(selectedId, clickedId){
+  const a = String(selectedId || "").trim().toUpperCase();
+  const b = String(clickedId || "").trim().toUpperCase();
+  return !!(a && b && a === b);
+}
+
+/** 主檔版型 A：下方明細卡片是否已展開 */
+function erpMasterEditCardIsOpen_(formCardId){
+  const el = document.getElementById(String(formCardId || ""));
+  if(!el) return false;
+  return !el.classList.contains("master-edit-collapsed");
+}
+
+/**
+ * 主檔列表：已載入且明細已展開時，再點同一列 → 清空、收合、取消 highlight
+ * @returns {boolean} true 表示已收合（呼叫端應 return）
+ */
+function erpTryToggleCloseMasterListRow_(selectedId, clickedId, formCardId, clearFn, tbodyId, attrName){
+  if(!erpListRowToggleClose_(selectedId, clickedId)) return false;
+  if(!erpMasterEditCardIsOpen_(formCardId)) return false;
+  try{
+    if(typeof clearFn === "function") clearFn();
+  }catch(_e){}
+  hideMasterEditCard_(formCardId);
+  if(tbodyId && typeof erpSyncListRowHighlight_ === "function"){
+    erpSyncListRowHighlight_(tbodyId, attrName || "data-row-id", "");
+  }
+  if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+  return true;
+}
+
+window.__erpListRowCollapsed_ = window.__erpListRowCollapsed_ || {};
+
+function erpClearTxnListRowCollapsed_(moduleKey){
+  if(moduleKey) window.__erpListRowCollapsed_[moduleKey] = false;
+}
+
+/** 交易單列表 render：是否顯示 erp-list-row-open */
+function erpListRowOpenInRender_(moduleKey, selId, rowId){
+  if(window.__erpListRowCollapsed_[moduleKey]) return false;
+  return String(selId || "").trim().toUpperCase() === String(rowId || "").trim().toUpperCase();
+}
+
+/**
+ * 交易單列表：再點同一列 → 收合／展開 highlight（不清表單）
+ * @returns {boolean} true 表示已處理 toggle（呼叫端應 return）
+ */
+function erpTryToggleCloseTxnListRow_(moduleKey, selectedId, clickedId, tbodyId){
+  if(!erpListRowToggleClose_(selectedId, clickedId)) return false;
+  const collapsed = !!window.__erpListRowCollapsed_[moduleKey];
+  if(!collapsed){
+    window.__erpListRowCollapsed_[moduleKey] = true;
+    if(tbodyId) erpSyncListRowHighlight_(tbodyId, "data-row-id", "");
+    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    return true;
+  }
+  window.__erpListRowCollapsed_[moduleKey] = false;
+  if(tbodyId) erpSyncListRowHighlight_(tbodyId, "data-row-id", clickedId);
+  if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+  return true;
+}
+
+window.erpListRowToggleClose_ = erpListRowToggleClose_;
+window.erpMasterEditCardIsOpen_ = erpMasterEditCardIsOpen_;
+window.erpTryToggleCloseMasterListRow_ = erpTryToggleCloseMasterListRow_;
+window.erpClearTxnListRowCollapsed_ = erpClearTxnListRowCollapsed_;
+window.erpListRowOpenInRender_ = erpListRowOpenInRender_;
+window.erpTryToggleCloseTxnListRow_ = erpTryToggleCloseTxnListRow_;
 
 /* =========================================================
    參考關聯檢查（停用策略用）

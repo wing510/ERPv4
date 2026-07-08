@@ -286,10 +286,10 @@ async function cleanupFixtures(page: Page, cfg: SmokeConfig, tag: string) {
   }).catch(() => {});
 }
 
-test("ERP v4.1 上線冒煙：登入 + 核心頁面可開啟", async ({ page }) => {
+test("ERP v4.2 上線冒煙：登入 + 核心頁面可開啟", async ({ page }) => {
   const cfg = readConfig();
   const siteUrl = String(cfg.siteUrl || "").replace(/\/+$/, "");
-  const expectedVersion = String(cfg.expectedVersion || "4.1").trim();
+  const expectedVersion = String(cfg.expectedVersion || "4.2").trim();
 
   await page.goto(`${siteUrl}/index.html`, { waitUntil: "domcontentloaded" });
 
@@ -309,6 +309,12 @@ test("ERP v4.1 上線冒煙：登入 + 核心頁面可開啟", async ({ page }) 
     { key: "receive", expectText: "Goods Receipt" },
     { key: "lots", expectText: "Lots" },
     { key: "shipping", expectText: "Shipment" },
+    { key: "consignment_case", expectText: "Case 案件" },
+    { key: "consignment_settlement", expectText: "Settlement 結算" },
+    { key: "consignment_return", expectText: "Return 收回" },
+    { key: "commercial_dealer", expectText: "Dealer 經銷方案" },
+    { key: "dealer_rebate", expectText: "月結回饋" },
+    { key: "ar", expectText: "AR 應收帳款／收款" },
     { key: "trace", expectText: "Lot Traceability", expectAltText: "區塊 1：查貨（Lot）— 批次追溯" }
   ];
 
@@ -419,5 +425,90 @@ test("ERP 第8項併發防誤按：收貨/出貨載入中鎖定關鍵按鈕", as
   await loadBtn.click();
   await expect(page.locator("#ship_cancel_btn")).toBeDisabled();
   await expect(page.locator("#shipStatusHint")).toContainText("載入中");
+});
+
+test("AR 模組：篩選工具與批次勾選按鈕", async ({ page }) => {
+  const cfg = readConfig();
+  const siteUrl = String(cfg.siteUrl || "").replace(/\/+$/, "");
+
+  await page.goto(`${siteUrl}/index.html`, { waitUntil: "domcontentloaded" });
+  await loginIfNeeded(page, cfg);
+  await navigateModule(page, "ar");
+  await page.waitForSelector("#ar_list_tbody", { state: "attached" });
+
+  await expect(page.locator("#ar_filter_date_from")).toBeVisible();
+  await expect(page.locator("#ar_filter_date_to")).toBeVisible();
+  await expect(page.locator("#ar_view_mode_btn")).toContainText("批次收款紀錄");
+
+  const canOperate = await page.evaluate(() => {
+    return typeof (window as any).erpCanManageAr_ === "function" && (window as any).erpCanManageAr_();
+  });
+  if (canOperate) {
+    await expect(page.locator("#ar_batch_toolbar")).toBeVisible();
+    await expect(page.locator("#ar_batch_select_month_btn")).toContainText("本月起算日");
+  }
+});
+
+test("AR 批次分配：匯款不可大於未收合計", async ({ page }) => {
+  const cfg = readConfig();
+  const siteUrl = String(cfg.siteUrl || "").replace(/\/+$/, "");
+
+  await page.goto(`${siteUrl}/index.html`, { waitUntil: "domcontentloaded" });
+  await loginIfNeeded(page, cfg);
+  await navigateModule(page, "ar");
+  await page.waitForSelector("#ar_list_tbody", { state: "attached" });
+
+  const result = await page.evaluate(() => {
+    const fn = (window as any).arComputeBatchAllocation_;
+    if (typeof fn !== "function") return null;
+    const rows = [
+      {
+        ar_id: "AR-UAT-1",
+        customer_id: "CUST-A",
+        status: "OPEN",
+        amount_due: 1000,
+        amount_received: 0,
+        ar_date: "2026-07-01",
+        created_at: "2026-07-01T10:00:00+08:00"
+      },
+      {
+        ar_id: "AR-UAT-2",
+        customer_id: "CUST-A",
+        status: "OPEN",
+        amount_due: 2000,
+        amount_received: 0,
+        ar_date: "2026-07-02",
+        created_at: "2026-07-02T10:00:00+08:00"
+      },
+      {
+        ar_id: "AR-UAT-3",
+        customer_id: "CUST-A",
+        status: "OPEN",
+        amount_due: 3000,
+        amount_received: 0,
+        ar_date: "2026-07-03",
+        created_at: "2026-07-03T10:00:00+08:00"
+      }
+    ];
+    const full = fn(rows, 6000);
+    const partial = fn(rows, 2500);
+    const over = fn(rows, 7000);
+    return {
+      fullLines: full.lines.length,
+      fullAllocated: full.lines.reduce((s: number, x: { alloc: number }) => s + Number(x.alloc || 0), 0),
+      partialFirst: partial.lines[0]?.alloc,
+      partialSecond: partial.lines[1]?.alloc,
+      overTotal: over.lines.reduce((s: number, x: { alloc: number }) => s + Number(x.alloc || 0), 0),
+      overRemaining: over.remaining
+    };
+  });
+
+  test.skip(result === null, "arComputeBatchAllocation_ 未載入");
+  expect(result!.fullLines).toBe(3);
+  expect(result!.fullAllocated).toBeCloseTo(6000, 2);
+  expect(result!.partialFirst).toBeCloseTo(1000, 2);
+  expect(result!.partialSecond).toBeCloseTo(1500, 2);
+  expect(result!.overTotal).toBeCloseTo(6000, 2);
+  expect(result!.overRemaining).toBeCloseTo(1000, 2);
 });
 

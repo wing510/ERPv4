@@ -20,7 +20,8 @@
       <div class="form-group">
         <label>用途 *</label>
         <select id="so_type">
-          <option value="NORMAL">正常訂單</option>
+          <option value="NORMAL">一般</option>
+          <option value="CONSIGNMENT">寄賣</option>
           <option value="SAMPLE">樣品</option>
           <option value="GIFT">贈品</option>
           <option value="PR">公關</option>
@@ -36,7 +37,7 @@
 
       <div class="form-group">
         <label>下單日期 *</label>
-        <input type="date" id="so_order_date">
+        <input type="date" id="so_order_date" onchange="void soRefreshPromoPreview_()">
       </div>
 
       <div class="form-group">
@@ -60,7 +61,7 @@
       </div>
 
       <div id="soReshipRefBlock" class="form-group" style="display:none;grid-column:span 3;">
-        <label>補寄參考（原 SO / 原出貨） *</label>
+        <label>補寄參考（原 SO／原出貨） *</label>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
           <select id="so_reship_ref_type" style="min-width:180px;">
             <option value="">請選擇</option>
@@ -101,17 +102,29 @@
       </div>
 
       <div class="form-group">
+        <label>可用量</label>
+        <input type="text" id="so_item_available_qty" readonly placeholder="選產品後帶入" title="全倉可出貨合計（ACTIVE＋QA已放行＋未過期）">
+      </div>
+
+      <div class="form-group">
         <label>訂購數量 *</label>
-        <div class="erp-input-with-suffix">
-          <input type="number" id="so_item_order_qty" min="0" step="0.01" oninput="calcSOAmount()">
-          <span id="so_item_unit_suffix" class="erp-input-suffix"></span>
-        </div>
+        <input type="number" id="so_item_order_qty" min="0" step="0.01" oninput="soOnSOItemOrderQtyInput_()">
         <input type="hidden" id="so_item_unit" value="">
       </div>
 
       <div class="form-group">
-        <label>單價</label>
-        <input type="number" id="so_item_unit_price" min="0" step="0.01" oninput="calcSOAmount()">
+        <label>牌價</label>
+        <input type="text" id="so_item_list_price" readonly placeholder="選產品後帶入">
+      </div>
+
+      <div class="form-group">
+        <label>折數(%)</label>
+        <input type="number" id="so_item_discount_pct" min="0" max="100" step="0.01" placeholder="如 85" oninput="soApplyDiscountToUnitPrice_()">
+      </div>
+
+      <div class="form-group">
+        <label id="so_item_unit_price_label">單價</label>
+        <input type="number" id="so_item_unit_price" min="0" step="0.01" oninput="soOnSOItemUnitPriceInput_()">
       </div>
 
       <div class="form-group">
@@ -119,7 +132,12 @@
         <input type="text" id="so_item_amount" value="0.00" readonly>
       </div>
 
-      <div class="form-group full-width">
+      <div class="form-group">
+        <label>促銷預覽</label>
+        <input type="text" id="so_item_promo_preview" value="" readonly placeholder="（無符合促銷）">
+      </div>
+
+      <div class="form-group" style="grid-column:span 2;">
         <label>備註</label>
         <input type="text" id="so_item_remark">
       </div>
@@ -136,11 +154,11 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>項次</th>
+            <th>#</th>
             <th>產品（規格）</th>
             <th>訂購數量</th>
             <th>已出貨</th>
-            <th>單價</th>
+            <th id="so_item_unit_price_th">單價</th>
             <th>金額</th>
             <th>狀態</th>
             <th>操作</th>
@@ -170,7 +188,7 @@
   </div>
   <div class="card-body">
     <div class="search-toolbar" style="margin-bottom:12px;">
-      <input type="text" id="so_search_keyword" placeholder="關鍵字（銷售單／客戶／銷售人員）" style="min-width:260px;" title="比對銷售單ID、客戶ID／名稱、銷售人員ID／姓名">
+      <input type="text" id="so_search_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <select id="so_search_status">
         <option value="">全部狀態</option>
         <option value="OPEN">OPEN（未出貨）</option>

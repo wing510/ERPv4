@@ -12,6 +12,7 @@ let wsMovementLoadFailed = false;
 let wsAvailableByLotIdMap_ = {};
 let wsLoadedAt_ = 0;
 let wsReloading_ = false;
+let wsExpandedDetailId_ = "";
 
 function wsSetV_(id, v){
   try{
@@ -62,6 +63,48 @@ function wsProductDisplay_(productId){
   const name = p?.product_name || productId || "";
   const spec = String(p?.spec || "").trim();
   return spec ? `${name}（${spec}）` : name;
+}
+
+function wsExpiryLotReminder_(exp, windowDays, fontWeight) {
+  const fw = fontWeight || 700;
+  const win = windowDays || 30;
+  if (exp.expired) return { text: "已過期", style: `color:#b91c1c;font-weight:${fw};` };
+  if (exp.days != null && exp.days <= win) {
+    return { text: `即將到期（${exp.days}天）`, style: `color:#b45309;font-weight:${fw};` };
+  }
+  return { text: "", style: "" };
+}
+
+function wsFormatLotCell_(lot) {
+  const lotId = wsEscapeHtml_(String(lot?.lot_id || "").trim() || "—");
+  const fl = String(lot?.factory_lot || "").trim();
+  const flDisplay = fl ? wsEscapeHtml_(fl) : "—";
+  return (
+    '<div style="line-height:1.35;min-width:0;">' +
+    '<div style="font-size:12px;color:#64748b;line-height:1.2;">' +
+    lotId +
+    "</div>" +
+    '<div style="line-height:1.25;margin-top:2px;">' +
+    flDisplay +
+    "</div>" +
+    "</div>"
+  );
+}
+
+function wsFormatProductCell_(productId) {
+  const pid = String(productId || "").trim();
+  const prod = wsEscapeHtml_(wsProductDisplay_(pid));
+  const pidEsc = wsEscapeHtml_(pid);
+  return (
+    '<div style="line-height:1.35;min-width:0;">' +
+    '<div style="line-height:1.25;">' +
+    prod +
+    "</div>" +
+    (pidEsc
+      ? '<div style="font-size:12px;color:#64748b;margin-top:2px;">' + pidEsc + "</div>"
+      : "") +
+    "</div>"
+  );
 }
 
 function wsWarehouseLabel_(w){
@@ -153,10 +196,11 @@ function wsFilterLots_(){
   if(!kw) return source;
   return source.filter(l=>{
     const lotId = String(l.lot_id||"").toLowerCase();
+    const factoryLot = String(l.factory_lot||"").toLowerCase();
     const pid = String(l.product_id||"").toLowerCase();
     const prodText = String(wsProductDisplay_(l.product_id)||"").toLowerCase();
     const spec = String((wsProducts||[]).find(p=>p.product_id===l.product_id)?.spec || "").toLowerCase();
-    return lotId.includes(kw) || pid.includes(kw) || prodText.includes(kw) || spec.includes(kw);
+    return lotId.includes(kw) || factoryLot.includes(kw) || pid.includes(kw) || prodText.includes(kw) || spec.includes(kw);
   });
 }
 
@@ -215,20 +259,21 @@ function wsRender_(){
     ? rows.filter(x => !x.exp.has || x.exp.expired || (x.exp.days != null && x.exp.days <= windowDays))
     : rows;
 
+  const nearWindow = windowDays || 30;
   const expiredCount = windowed.filter(x => x.exp.expired).length;
-  const nearCount = windowed.filter(x => !x.exp.expired && x.exp.days != null && x.exp.days <= (windowDays || 30)).length;
+  const nearCount = windowed.filter(x => !x.exp.expired && x.exp.days != null && x.exp.days <= nearWindow).length;
   const noDateCount = windowed.filter(x => !x.exp.has).length;
   summary.innerHTML =
     `倉別：<strong>${wsEscapeHtml_(wsWarehouseLabel_((wsWarehouses||[]).find(w=>String(w.warehouse_id||"").toUpperCase()===warehouseId)))}</strong>` +
     `　|　有可用量 Lot：<strong>${windowed.length}</strong>` +
     `　|　已過期：<strong style="color:#b91c1c;">${expiredCount}</strong>` +
-    `　|　${expWindowOn ? `${windowDays} 天內到期` : "到期日有填"}：<strong style="color:#b45309;">${nearCount}</strong>` +
+    `　|　即將到期（${nearWindow}天內）：<strong style="color:#b45309;">${nearCount}</strong>` +
     `　|　未填到期：<strong>${noDateCount}</strong>`;
 
   if(view === "lot"){
     thead.innerHTML = `
       <tr>
-        <th>Lot</th>
+        <th>Lot／加工廠 Lot</th>
         <th>產品（規格）</th>
         <th>可用量</th>
         <th>有效期</th>
@@ -248,15 +293,14 @@ function wsRender_(){
     }
     sorted.forEach(x=>{
       const exp = x.exp;
-      const statusText = exp.expired ? "已過期" : (exp.days != null && exp.days <= (windowDays||30) ? `即將到期（${exp.days}天）` : "OK");
-      const color = exp.expired ? "#b91c1c" : (exp.days != null && exp.days <= (windowDays||30) ? "#b45309" : "#0f172a");
+      const rem = wsExpiryLotReminder_(exp, windowDays, 600);
       tbody.innerHTML += `
         <tr>
-          <td>${wsEscapeHtml_(x.lot.lot_id || "")}</td>
-          <td>${wsEscapeHtml_(wsProductDisplay_(x.lot.product_id))}</td>
+          <td>${wsFormatLotCell_(x.lot)}</td>
+          <td>${wsFormatProductCell_(x.lot.product_id)}</td>
           <td>${wsEscapeHtml_(String(Math.round(Number(x.av||0)*10000)/10000))} ${wsEscapeHtml_(x.lot.unit || "")}</td>
           <td>${wsEscapeHtml_(x.lot.expiry_date || "—")}</td>
-          <td style="color:${color};font-weight:600;">${wsEscapeHtml_(statusText)}</td>
+          <td style="${rem.style}">${wsEscapeHtml_(rem.text)}</td>
         </tr>
       `;
     });
@@ -303,67 +347,59 @@ function wsRender_(){
     const hint =
       expiredLots ? `已過期 ${expiredLots}` :
       nearLots ? `${expWindowOn ? windowDays : 30} 天內到期 ${nearLots}` :
-      (withExpiry.length ? "OK" : "未填到期");
-    const hintColor = expiredLots ? "#b91c1c" : (nearLots ? "#b45309" : "#0f172a");
+      (withExpiry.length ? "" : "未填到期");
+    const hintStyle =
+      expiredLots ? "color:#b91c1c;font-weight:700;" :
+      nearLots ? "color:#b45309;font-weight:700;" :
+      (withExpiry.length ? "" : "color:#0f172a;font-weight:700;");
 
     const detailId = `ws_${pid.replace(/[^a-zA-Z0-9]/g,"_")}`;
+    const safeDetailId = detailId.replace(/'/g, "\\'");
+    const open = wsExpandedDetailId_ === detailId;
+    const sortedItems = items
+      .slice()
+      .sort((a,b)=>String(a.lot.expiry_date||"").localeCompare(String(b.lot.expiry_date||"")));
+    const detailRowsHtml = sortedItems
+      .map(function(x){
+        const rem = wsExpiryLotReminder_(x.exp, windowDays, 700);
+        return (
+          `<tr class="ws-detail-row" data-ws-detail="${detailId}" style="display:${open ? "table-row" : "none"};">` +
+          `<td style="background:#fff;">${wsFormatLotCell_(x.lot)}</td>` +
+          `<td style="background:#fff;">${wsEscapeHtml_(String(Math.round(Number(x.av||0)*10000)/10000))} ${wsEscapeHtml_(x.lot.unit||"")}</td>` +
+          `<td style="background:#fff;">${wsEscapeHtml_(x.lot.expiry_date||"—")}</td>` +
+          `<td style="background:#fff;"></td>` +
+          `<td style="background:#fff;${rem.style}">${wsEscapeHtml_(rem.text)}</td>` +
+          `</tr>`
+        );
+      })
+      .join("");
+
     tbody.innerHTML += `
-      <tr style="background:#f8fafc;">
-        <td>
-          <button class="btn-secondary" type="button" onclick="wsToggleDetail('${detailId}')">明細</button>
-          <span style="margin-left:8px;font-weight:600;">${wsEscapeHtml_(wsProductDisplay_(pid))}</span>
-          <div style="color:#64748b;font-size:12px;">${wsEscapeHtml_(pid)}</div>
-        </td>
+      <tr class="erp-list-row-selectable ws-product-summary${open ? " erp-list-row-open" : ""}" data-ws-summary="${detailId}" onclick="wsToggleDetail('${safeDetailId}')" title="點擊展開／收合 Lot 明細">
+        <td>${wsFormatProductCell_(pid)}</td>
         <td style="font-weight:700;">${wsEscapeHtml_(String(Math.round(total*10000)/10000))} ${wsEscapeHtml_(unit)}</td>
         <td>${wsEscapeHtml_(nearest)}${exp0.days!=null && nearest!=="—" ? ` <span style="color:#64748b;font-size:12px;">(${exp0.expired ? "已過期" : exp0.days + "天"})</span>` : ""}</td>
         <td>${items.length}</td>
-        <td style="color:${hintColor};font-weight:700;">${wsEscapeHtml_(hint)}</td>
+        <td style="${hintStyle}">${wsEscapeHtml_(hint)}</td>
       </tr>
-      <tr id="${detailId}" style="display:none;">
-        <td colspan="5" style="padding:10px 10px 14px 10px;">
-          <div style="overflow:auto;">
-            <table class="data-table" style="min-width:760px;">
-              <thead>
-                <tr>
-                  <th>Lot</th>
-                  <th>可用量</th>
-                  <th>有效期</th>
-                  <th>提醒</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${
-                  items
-                    .slice()
-                    .sort((a,b)=>String(a.lot.expiry_date||"").localeCompare(String(b.lot.expiry_date||"")))
-                    .map(x=>{
-                      const exp = x.exp;
-                      const statusText = exp.expired ? "已過期" : (exp.days != null && exp.days <= (windowDays||30) ? `即將到期（${exp.days}天）` : "OK");
-                      const color = exp.expired ? "#b91c1c" : (exp.days != null && exp.days <= (windowDays||30) ? "#b45309" : "#0f172a");
-                      return `
-                        <tr>
-                          <td>${wsEscapeHtml_(x.lot.lot_id||"")}</td>
-                          <td>${wsEscapeHtml_(String(Math.round(Number(x.av||0)*10000)/10000))} ${wsEscapeHtml_(x.lot.unit||"")}</td>
-                          <td>${wsEscapeHtml_(x.lot.expiry_date||"—")}</td>
-                          <td style="color:${color};font-weight:700;">${wsEscapeHtml_(statusText)}</td>
-                        </tr>
-                      `;
-                    })
-                    .join("")
-                }
-              </tbody>
-            </table>
-          </div>
-        </td>
-      </tr>
+      ${detailRowsHtml}
     `;
   });
 }
 
 function wsToggleDetail(id){
-  const el = document.getElementById(id);
-  if(!el) return;
-  el.style.display = (el.style.display === "none" || !el.style.display) ? "table-row" : "none";
+  const key = String(id || "").trim();
+  if(!key) return;
+  wsExpandedDetailId_ = wsExpandedDetailId_ === key ? "" : key;
+  document.querySelectorAll("#ws_tbody tr.ws-product-summary").forEach(function(tr){
+    const sid = String(tr.getAttribute("data-ws-summary") || "");
+    const on = sid === wsExpandedDetailId_;
+    tr.classList.toggle("erp-list-row-open", on);
+  });
+  document.querySelectorAll("#ws_tbody tr.ws-detail-row").forEach(function(r){
+    const did = String(r.getAttribute("data-ws-detail") || "");
+    r.style.display = did === wsExpandedDetailId_ ? "table-row" : "none";
+  });
 }
 
 async function refreshWarehouseStock(triggerEl){

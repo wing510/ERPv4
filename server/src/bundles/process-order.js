@@ -2,6 +2,7 @@ const { getSupabase } = require("../supabase");
 const { ok, fail } = require("../response");
 const {
   nowIso,
+  timestamptzFromClient_,
   buildTxId,
   buildId_,
   parseJsonArray,
@@ -89,7 +90,7 @@ async function createProcessOrderCmd(p) {
     status: "OPEN",
     remark: String(p.remark || ""),
     created_by: actor,
-    created_at: p.created_at || nowIso(),
+    created_at: timestamptzFromClient_(p.created_at),
     updated_by: "",
     updated_at: null
   });
@@ -306,6 +307,9 @@ async function receiveProcessOutputBundle(p) {
     if (!(qty > 0)) return fail("receive_qty must be > 0 (outputs[" + i + "])");
     const unit = String(out.unit || "").trim();
     if (!unit) return fail("unit required (outputs[" + i + "])");
+    const factoryLot = String(out.factory_lot || "").trim().toUpperCase();
+    if (!factoryLot) return fail("factory_lot required (outputs[" + i + "])");
+    const expiryDate = String(out.expiry_date || "").trim();
 
     const outSeq = existedOutputs.length + i + 1;
     const outLotId = buildId_("LOT");
@@ -325,7 +329,8 @@ async function receiveProcessOutputBundle(p) {
       inventory_status: "ACTIVE",
       received_date: ts.slice(0, 10),
       manufacture_date: null,
-      expiry_date: null,
+      expiry_date: expiryDate || null,
+      factory_lot: factoryLot,
       remark: String(out.remark || ""),
       created_by: actor,
       created_at: ts,

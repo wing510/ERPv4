@@ -2,6 +2,7 @@ const { getSupabase } = require("../supabase");
 const { ok, fail } = require("../response");
 const {
   nowIso,
+  timestamptzFromClient_,
   buildTxId,
   buildId_,
   parseJsonArray,
@@ -11,6 +12,18 @@ const {
 } = require("./shared");
 const { createInventoryMovementUnlocked_ } = require("../inventory-movement-core");
 const { ensureSalesOrderTx_, calcSalesOrderStatus_ } = require("./sales-order");
+const { assertNoArForShipmentCancel_, voidArForCancelledShipment_ } = require("./ar");
+const { createGeneralShipmentArWithCommercial_ } = require("./consignment-promo");
+const {
+  assertNoLockedDealerRebateForShipmentVoid_,
+  reverseCumulativeOnGeneralShipmentVoid_,
+  syncCustomerCumulativeFromSources_
+} = require("./commercial-dealer");
+const {
+  addConsignmentCasePoolFromShipment_,
+  assertNoConsignmentForShipmentCancel_,
+  removeConsignmentCasePoolFromShipmentCancel_
+} = require("./consignment-case");
 
 async function postShipmentBundle(p) {
   const shipmentId = String(p.shipment_id || "").trim().toUpperCase();
@@ -99,7 +112,8 @@ async function postShipmentBundle(p) {
   if (!recipientName && !recipientNameEn) return fail("recipient_name or recipient_name_en required");
 
   const txId = await ensureSalesOrderTx_(soId, actor);
-  const ts = p.created_at || nowIso();
+  const ts = timestamptzFromClient_(p.created_at);
+  const consignmentCaseId = String(p.consignment_case_id || "").trim().toUpperCase();
 
   const { error: shInsErr } = await sb.from("shipment").insert({
     shipment_id: shipmentId,
@@ -117,6 +131,7 @@ async function postShipmentBundle(p) {
     recipient_name_en: recipientNameEn,
     recipient_address: recipientAddress,
     recipient_phone: recipientPhone,
+    consignment_case_id: consignmentCaseId,
     created_by: actor,
     created_at: ts,
     updated_by: "",
@@ -221,6 +236,47 @@ async function postShipmentBundle(p) {
     .eq("so_id", soId);
   if (soErr) return fail(soErr.message || String(soErr));
 
+  const { data: soRow, error: soLoadErr } = await sb
+    .from("sales_order")
+    .select("so_type, currency")
+    .eq("so_id", soId)
+    .maybeSingle();
+  if (soLoadErr) return fail(soLoadErr.message || String(soLoadErr));
+  const soType = String(soRow?.so_type || "NORMAL").trim().toUpperCase();
+
+  if (soType === "NORMAL") {
+    const arRes = await createGeneralShipmentArWithCommercial_({
+      sb,
+      shipmentId,
+      soId,
+      customerId,
+      txId,
+      shipDate,
+      items,
+      currency: soRow?.currency,
+      actor,
+      ts,
+      session: p._session
+    });
+    if (arRes && arRes.success === false) return arRes;
+  } else if (soType === "CONSIGNMENT") {
+    if (!consignmentCaseId) {
+      return fail("consignment_case_id required for CONSIGNMENT shipment");
+    }
+    const poolRes = await addConsignmentCasePoolFromShipment_({
+      sb,
+      caseId: consignmentCaseId,
+      shipmentId,
+      soId,
+      customerId,
+      txId,
+      shipDate,
+      actor,
+      ts
+    });
+    if (poolRes && poolRes.success === false) return poolRes;
+  }
+
   await writeAuditLog_(
     "shipment",
     shipmentId,
@@ -272,6 +328,74 @@ async function cancelShipmentBundle(p) {
   if (await hasCancelMovement_("SHIPMENT_CANCEL", shipmentId)) {
     return fail("Shipment cancel movement already exists");
   }
+
+  const { data: soRowCancel, error: soCancelErr } = await sb
+    .from("sales_order")
+    .select("so_type")
+    .eq("so_id", soId)
+    .maybeSingle();
+  if (soCancelErr) return fail(soCancelErr.message || String(soCancelErr));
+  const cancelSoType = String(soRowCancel?.so_type || "NORMAL").trim().toUpperCase();
+  if (cancelSoType === "NORMAL") {
+    const rebateBlock = await assertNoLockedDealerRebateForShipmentVoid_(sb, {
+      customerId: String(sh.customer_id || "").trim().toUpperCase(),
+      shipDate: sh.ship_date
+    });
+    if (rebateBlock && rebateBlock.err) return fail(rebateBlock.err);
+  }
+
+  const arBlock = await assertNoArForShipmentCancel_(sb, shipmentId);
+  if (arBlock && arBlock.success === false) return arBlock;
+
+  if (cancelSoType === "NORMAL") {
+    const arId = typeof arBlock === "string" ? arBlock : "AR-" + shipmentId;
+    let cumulativeAdded = 0;
+    if (arId) {
+      const { data: arRow, error: arLoadErr } = await sb
+        .from("ar_receivable")
+        .select("dealer_cumulative_added, amount_system")
+        .eq("ar_id", arId)
+        .maybeSingle();
+      if (arLoadErr) return fail(arLoadErr.message || String(arLoadErr));
+      cumulativeAdded = Math.round(Number(arRow?.dealer_cumulative_added || 0) * 100) / 100;
+      if (cumulativeAdded <= 1e-9) cumulativeAdded = Math.round(Number(arRow?.amount_system || 0) * 100) / 100;
+    }
+    try {
+      await reverseCumulativeOnGeneralShipmentVoid_(sb, {
+        customerId: String(sh.customer_id || "").trim().toUpperCase(),
+        arId,
+        shipmentId,
+        cumulativeAdded,
+        actor,
+        ts: nowIso()
+      });
+    } catch (cumRevErr) {
+      return fail("累積採購扣回失敗：" + (cumRevErr?.message || String(cumRevErr)));
+    }
+  }
+
+  // 一般出貨：取消出貨時同步作廢該筆 AR（避免重出貨後 AR 殘留）
+  if (cancelSoType === "NORMAL") {
+    const voidRes = await voidArForCancelledShipment_(
+      sb,
+      shipmentId,
+      "作廢出貨",
+      actor,
+      nowIso()
+    );
+    if (voidRes && voidRes.success === false) return voidRes;
+
+    const custId = String(sh.customer_id || "").trim().toUpperCase();
+    if (custId) {
+      const recalc = await syncCustomerCumulativeFromSources_(sb, custId, actor, nowIso());
+      if (recalc && recalc.err) {
+        return fail("月結累積重算失敗：" + recalc.err);
+      }
+    }
+  }
+
+  const consBlock = await assertNoConsignmentForShipmentCancel_(sb, shipmentId);
+  if (consBlock && consBlock.success === false) return consBlock;
 
   const { data: items, error: itemsErr } = await sb
     .from("shipment_item")
@@ -335,6 +459,9 @@ async function cancelShipmentBundle(p) {
     })
     .eq("shipment_id", shipmentId);
   if (updShErr) return fail(updShErr.message || String(updShErr));
+
+  const poolRemoveRes = await removeConsignmentCasePoolFromShipmentCancel_(sb, shipmentId, actor);
+  if (poolRemoveRes && poolRemoveRes.success === false) return poolRemoveRes;
 
   const soItemIds = Object.keys(shippedDeltaBySoItem);
   for (let k = 0; k < soItemIds.length; k++) {

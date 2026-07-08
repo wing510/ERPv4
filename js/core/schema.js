@@ -19,6 +19,7 @@ const SCHEMA = {
     "type",
     "spec",
     "unit",
+    "suggested_retail_price",
     // 多單位換算 JSON：{"base_unit":"KG","map":{"BOX":0.01,...}}（1 產生單位 = map[U] 基準單位）
     "uom_config",
     "status",
@@ -84,6 +85,19 @@ const SCHEMA = {
     "invoice_address_en",
     "consignee_id_no",
     "consignee_usci",
+    "consignment_allocation_policy",
+    "dealer_scheme_id",
+    "dealer_rebate_scheme_id",
+    "dealer_cumulative_scheme_id",
+    "dealer_rebate_settle_mode",
+    "dealer_rebate_excluded",
+    "dealer_rebate_credit_balance",
+    "dealer_cumulative_amount",
+    "dealer_cumulative_tier_label",
+    "dealer_cumulative_price_rate",
+    "dealer_cumulative_pending_tier_label",
+    "dealer_cumulative_pending_price_rate",
+    "dealer_cumulative_started_at",
     "status",
     "remark",
     "created_by",
@@ -151,7 +165,6 @@ const SCHEMA = {
     "import_no",
     "declaration_no",
     "supplier_id",
-    "order_date",
     "import_date",
     "release_date",
     "inspection_no",   // 查驗案號（輸入查驗申請書號碼）
@@ -269,6 +282,7 @@ const SCHEMA = {
     "received_date",
     "manufacture_date",
     "expiry_date",
+    "factory_lot",
     "remark",
     "created_by",
     "created_at",
@@ -462,7 +476,7 @@ const SCHEMA = {
     "transaction_id",
     "parent_ref_type",
     "parent_ref_id",
-    // NORMAL / SAMPLE / GIFT / RESHIP / OTHER
+    // NORMAL / SAMPLE / GIFT / CONSIGNMENT / RESHIP / OTHER
     "so_type",
     // 當 so_type=RESHIP 時，必填原單參考（SO / SHIPMENT）
     "reship_ref_type",
@@ -490,6 +504,15 @@ const SCHEMA = {
     "unit",
     "unit_price",
     "amount",
+    "billable_qty",
+    "free_qty",
+    "promo_scheme_id",
+    "promo_scheme_name",
+    "promo_type",
+    "promo_price_basis",
+    "base_unit_price",
+    "promo_buy_qty",
+    "promo_scheme_free_qty",
     "remark",
     "created_by",
     "created_at",
@@ -517,6 +540,7 @@ const SCHEMA = {
     "recipient_name_en",
     "recipient_address",
     "recipient_phone",
+    "consignment_case_id",
     "status",
     "remark",
     "created_by",
@@ -606,8 +630,278 @@ const SCHEMA = {
     "default_incoterms",
     "declaration_text",
     "remark",
+    "ar_overdue_days_normal",
+    "ar_overdue_days_consignment",
+    "ar_reminder_days_before_overdue",
     "updated_by",
     "updated_at"
+  ],
+
+  consignment_case: [
+    "case_id",
+    "customer_id",
+    "status",
+    "allocation_policy",
+    "open_date",
+    "close_date",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  consignment_case_pool_item: [
+    "pool_item_id",
+    "case_id",
+    "shipment_id",
+    "shipment_item_id",
+    "so_id",
+    "so_item_id",
+    "product_id",
+    "lot_id",
+    "factory_lot",
+    "warehouse_id",
+    "ship_qty",
+    "settled_qty",
+    "returned_qty",
+    "unit",
+    "unit_price",
+    "ship_date",
+    "transaction_id",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  consignment_case_settlement: [
+    "settlement_id",
+    "case_id",
+    "customer_id",
+    "transaction_id",
+    "settlement_date",
+    "amount_system",
+    "ar_id",
+    "status",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  consignment_case_settlement_item: [
+    "settlement_item_id",
+    "settlement_id",
+    "pool_item_id",
+    "shipment_item_id",
+    "so_item_id",
+    "product_id",
+    "settle_qty",
+    "billable_qty",
+    "free_qty",
+    "unit",
+    "list_unit_price",
+    "settle_unit_price",
+    "unit_price",
+    "amount",
+    "promo_scheme_id",
+    "promo_type",
+    "promo_scheme_name",
+    "promo_discount_pct",
+    "promo_buy_qty",
+    "promo_scheme_free_qty",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  consignment_promo_scheme: [
+    "scheme_id",
+    "scheme_name",
+    "status",
+    "date_from",
+    "date_to",
+    "scope_type",
+    "channel",
+    "price_basis",
+    "case_id",
+    "customer_id",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  consignment_promo_scheme_line: [
+    "line_id",
+    "scheme_id",
+    "product_id",
+    "promo_type",
+    "promo_unit_price",
+    "discount_pct",
+    "buy_qty",
+    "free_qty",
+    "sort_order",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  commercial_dealer_scheme: [
+    "scheme_id",
+    "scheme_name",
+    "status",
+    "date_from",
+    "date_to",
+    "scheme_type",
+    "stat_source",
+    "mutex_group",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  commercial_dealer_scheme_tier: [
+    "tier_id",
+    "scheme_id",
+    "line_no",
+    "amount_from",
+    "amount_to",
+    "rebate_pct",
+    "tier_label",
+    "price_rate",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at"
+  ],
+
+  commercial_dealer_rebate: [
+    "rebate_id",
+    "customer_id",
+    "period_ym",
+    "scheme_id",
+    "scheme_name_snapshot",
+    "billing_net",
+    "rebate_pct",
+    "rebate_amount",
+    "tier_snapshot_json",
+    "settle_mode",
+    "status",
+    "ar_id",
+    "credit_applied",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  consignment_case_return: [
+    "return_id",
+    "case_id",
+    "customer_id",
+    "transaction_id",
+    "return_reason",
+    "return_date",
+    "return_warehouse_id",
+    "filter_unit_price",
+    "status",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  consignment_case_return_item: [
+    "return_item_id",
+    "return_id",
+    "factory_lot",
+    "product_id",
+    "return_qty",
+    "pool_item_id",
+    "shipment_item_id",
+    "so_item_id",
+    "lot_id",
+    "recognized_unit_price",
+    "unit",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  ar_receivable: [
+    "ar_id",
+    "source_type",
+    "source_id",
+    "customer_id",
+    "so_id",
+    "shipment_id",
+    "settlement_id",
+    "transaction_id",
+    "ar_date",
+    "currency",
+    "amount_system",
+    "amount_due",
+    "amount_received",
+    "status",
+    "close_mode",
+    "close_reason",
+    "closed_by",
+    "closed_at",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  ar_payment: [
+    "payment_id",
+    "ar_id",
+    "payment_date",
+    "amount",
+    "remark",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "system_remark"
+  ],
+
+  ar_amount_adjustment_log: [
+    "adjust_id",
+    "ar_id",
+    "amount_before",
+    "amount_after",
+    "reason",
+    "adjusted_by",
+    "adjusted_at"
   ],
 
   commercial_invoice: [
@@ -781,9 +1075,40 @@ const ENUMS = {
   commercial_invoice_blank: {
     status: ["DRAFT", "ISSUED", "VOID"]
   },
+  consignment_case: {
+    status: ["OPEN", "CLOSED"],
+    allocation_policy: ["FIFO", "HIGH_PRICE_FIRST", "PRICE_IF_GIVEN"]
+  },
+  consignment_case_return: {
+    return_reason: ["UNSOLD", "CASE_CLOSE", "DAMAGED", "EXPIRED", "WRONG_GOODS", "OTHER"],
+    status: ["POSTED"]
+  },
+  consignment_promo_scheme: {
+    status: ["DRAFT", "ACTIVE", "ENDED"],
+    scope_type: ["CASE", "CUSTOMER", "GLOBAL"]
+  },
+  consignment_promo_scheme_line: {
+    promo_type: ["FIXED_PRICE", "DISCOUNT_PCT", "BUY_N_GET_M"]
+  },
+  commercial_dealer_scheme: {
+    status: ["DRAFT", "ACTIVE", "ENDED"],
+    scheme_type: ["MONTHLY_REBATE", "CUMULATIVE_AMOUNT"],
+    stat_source: ["CONSIGNMENT", "GENERAL", "ALL"]
+  },
+  commercial_dealer_rebate: {
+    settle_mode: ["CREDIT_NOTE", "CARRY_FORWARD"],
+    status: ["POSTED", "VOID"]
+  },
+  ar_receivable: {
+    source_type: ["SHIPMENT", "CONSIGNMENT_SETTLEMENT", "CONSIGNMENT_CASE_SETTLEMENT"],
+    status: ["OPEN", "PARTIAL", "SETTLED"],
+    close_mode: ["", "NORMAL", "FORCE"]
+  },
   customer: {
     invoice_type_default: ["B2B", "B2C"],
-    customer_type: ["PERSON", "COMPANY"]
+    customer_type: ["PERSON", "COMPANY"],
+    consignment_allocation_policy: ["FIFO", "HIGH_PRICE_FIRST", "PRICE_IF_GIVEN"],
+    dealer_rebate_settle_mode: ["CREDIT_NOTE", "CARRY_FORWARD"]
   },
   user: {
     // 角色代碼（新：兩字母縮寫；舊代碼保留相容歷史資料）

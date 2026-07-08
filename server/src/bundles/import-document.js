@@ -1,6 +1,6 @@
 const { getSupabase } = require("../supabase");
 const { ok, fail } = require("../response");
-const { nowIso, appendSystemRemark_, parseJsonArray, writeAuditLog_ } = require("./shared");
+const { nowIso, normalizeTaipeiTimestamp_, appendSystemRemark_, parseJsonArray, writeAuditLog_ } = require("./shared");
 
 const IMPORT_DOC_FIELDS = [
   "import_doc_id",
@@ -27,6 +27,10 @@ function pickImportHeader_(p, mode) {
   });
   if (mode === "create") {
     if (!row.status) row.status = "OPEN";
+    if (row.created_at) {
+      const norm = normalizeTaipeiTimestamp_(row.created_at);
+      if (norm) row.created_at = norm;
+    }
     if (!row.created_at) row.created_at = nowIso();
     if (!row.created_by && actor) row.created_by = actor;
   }

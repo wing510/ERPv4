@@ -32,15 +32,15 @@
 
       <div class="form-group full-width">
         <label id="rcv_source_label">選擇 PO *</label>
-        <div style="display:flex;gap:10px;align-items:center;">
-          <select id="rcv_source_id" style="min-width:0;flex:1 1 auto;"></select>
-          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:500;color:#64748b;font-size:12px;white-space:nowrap;flex:0 0 auto;">
+        <div class="rcv-source-row">
+          <select id="rcv_source_id" class="rcv-source-select"></select>
+          <label class="rcv-show-closed-label" for="rcv_show_closed">
             <input type="checkbox" id="rcv_show_closed">
             顯示已收完（CLOSED）
           </label>
         </div>
       </div>
-      <div class="form-group full-width">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="rcv_remark">
       </div>
@@ -53,7 +53,7 @@
   </div>
 </div>
 
-<!-- ===== 收貨明細：「本次收貨」欄內含單位後綴 ===== -->
+<!-- ===== 收貨明細 ===== -->
 <div class="card">
   <div class="card-header card-header-flex">
     <span>
@@ -67,27 +67,29 @@
     <p class="rcv-lines-narrow-hint">欄位較多時，請左右滑動表格以填寫「本次收貨」與日期。</p>
     <div class="table-wrapper table-rcv-lines" style="height:220px;">
       <table class="data-table">
-        <!-- 9 欄與 thead 一一對應；勿用單一 span 均分剩餘寬度，否則數量/已收/剩餘會被拉太寬 -->
+        <!-- 10 欄與 thead 一一對應；勿用單一 span 均分剩餘寬度，否則數量/已收/剩餘會被拉太寬 -->
         <colgroup>
           <col class="rcv-col-item-no" />
           <col class="rcv-col-product" />
-          <col class="rcv-col-num" />
+          <col class="rcv-col-order-qty" />
           <col class="rcv-col-num" />
           <col class="rcv-col-num" />
           <col class="rcv-col-qty-input" />
           <col class="rcv-col-wh" />
+          <col class="rcv-col-factory-lot" />
           <col class="rcv-col-date" />
           <col class="rcv-col-date" />
         </colgroup>
         <thead>
           <tr>
-            <th class="col-rcv-item-no">項次</th>
+            <th class="col-rcv-item-no">#</th>
             <th>產品（規格）</th>
-            <th>數量</th>
-            <th>已收</th>
-            <th>剩餘</th>
+            <th class="col-rcv-order-qty">數量</th>
+            <th class="col-rcv-num">已收</th>
+            <th class="col-rcv-num">剩餘</th>
             <th class="col-rcv-qty-cell">本次收貨</th>
             <th>倉別</th>
+            <th title="標籤批號；寄賣收回用，選填">加工廠 Lot</th>
             <th>製造日</th>
             <th>有效期</th>
           </tr>
@@ -108,21 +110,20 @@
           <span style="color:#94a3b8;font-weight:500;margin-left:10px;">作廢：若已被出庫、加工或調整扣減，導致可用量不足以沖銷入庫，則無法作廢。</span>
         </summary>
         <div style="margin-top:10px;">
-          <div class="table-wrapper" style="max-height:220px;">
+          <div class="table-wrapper table-rcv-posted" style="max-height:320px;">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>收貨單</th>
                   <th>收貨日期</th>
                   <th>倉別</th>
-                  <th>明細</th>
                   <th>總量</th>
                   <th>狀態</th>
                   <th>操作</th>
                 </tr>
               </thead>
               <tbody id="rcvPostedBody">
-                <tr><td colspan="7" style="text-align:center;color:#64748b;padding:18px;">點開後載入</td></tr>
+                <tr><td colspan="6" style="text-align:center;color:#64748b;padding:18px;">點開後載入</td></tr>
               </tbody>
             </table>
           </div>
@@ -140,6 +141,9 @@
 .rcv-void-modal-dialog .form-group { margin-bottom:14px; }
 .rcv-void-modal-dialog label { display:block; font-size:13px; margin-bottom:6px; color:#334155; }
 .rcv-void-modal-dialog select, .rcv-void-modal-dialog textarea { width:100%; box-sizing:border-box; border:1px solid #ddd; border-radius:6px; padding:8px 10px; font-size:13px; }
+.table-rcv-posted .rcv-posted-summary { cursor:pointer; }
+.table-rcv-posted .rcv-posted-summary:hover td { background:#f8fafc; }
+.table-rcv-posted .rcv-posted-detail td { vertical-align:top; }
 </style>
 <div id="rcvVoidModal" class="rcv-void-modal" role="dialog" aria-modal="true" aria-labelledby="rcvVoidModalTitle">
   <div class="rcv-void-modal-overlay" onclick="rcvCloseVoidModal()"></div>

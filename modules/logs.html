@@ -19,6 +19,7 @@
       <button class="btn-secondary" id="logs_tab_process" onclick="setLogsTab('process')">PROCESS 加工</button>
       <button class="btn-secondary" id="logs_tab_sales" onclick="setLogsTab('sales')">SALES 銷售</button>
       <button class="btn-secondary" id="logs_tab_shipment" onclick="setLogsTab('shipment')">SHIPMENT 出貨</button>
+      <button class="btn-secondary" id="logs_tab_finance" onclick="setLogsTab('finance')">FINANCE 財務</button>
     </div>
 
     <!-- 篩選器 -->
@@ -43,7 +44,9 @@
 
       <input id="logs_search_keyword"
              type="text"
-             placeholder="關鍵字搜尋">
+             class="search-keyword"
+             placeholder="搜尋關鍵字"
+             aria-label="搜尋關鍵字">
 
       <button class="btn-secondary" onclick="resetLogsFilters()">重設</button>
     </div>
@@ -53,23 +56,17 @@
       <table class="data-table logs-table">
 
         <colgroup>
-          <col class="logs-col-id">
-          <col class="logs-col-table">
-          <col class="logs-col-ref">
-          <col class="logs-col-action">
-          <col class="logs-col-user">
-          <col class="logs-col-time">
+          <col class="logs-col-meta">
+          <col class="logs-col-ref-act">
+          <col class="logs-col-user-time">
           <col class="logs-col-view">
         </colgroup>
 
         <thead>
           <tr>
-            <th>紀錄編號</th>
-            <th>資料表</th>
-            <th>參考ID</th>
-            <th>操作類型</th>
-            <th>操作人</th>
-            <th>時間</th>
+            <th>紀錄／資料表</th>
+            <th>參考ID／操作</th>
+            <th>操作人／時間</th>
             <th>明細</th>
           </tr>
         </thead>

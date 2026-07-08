@@ -5,7 +5,7 @@
  */
 (function () {
   var defaults = {
-    ERP_VERSION: "4.1",
+    ERP_VERSION: "4.2",
     // 方案 B（建議）：同時記錄 DEV/PROD 兩個後端
     // - 你只要填好 API_BASE_PROD / API_BASE_DEV
     // - 前端會依網址自動選擇（或用 ?env=DEV|PROD 強制）

@@ -38,7 +38,7 @@
         <input type="text" id="po_document_link" placeholder="URL 或檔案連結">
       </div>
 
-      <div class="form-group full-width">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="po_remark" placeholder="例如：交期、對帳備註、特殊要求">
       </div>
@@ -82,7 +82,7 @@
         <input type="hidden" id="po_item_unit" value="">
       </div>
 
-      <div class="form-group full-width">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="po_item_remark" placeholder="例如：包材、規格、交期備註">
       </div>
@@ -99,7 +99,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>項次</th>
+            <th>#</th>
             <th>產品（規格）</th>
             <th>數量</th>
             <th>狀態</th>
@@ -130,7 +130,7 @@
   </div>
   <div class="card-body">
     <div class="search-toolbar">
-      <input type="text" id="search_po_keyword" placeholder="關鍵字（採購單號／供應商）" style="min-width:260px;" title="比對採購單號、供應商ID、供應商名稱">
+      <input type="text" id="search_po_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <select id="search_po_status">
         <option value="">全部狀態</option>
         <option value="OPEN">OPEN（未收貨）</option>

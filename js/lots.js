@@ -1,4 +1,4 @@
-/*********************************
+﻿/*********************************
  * Lots Module（API 版）
  * - QA：PENDING → APPROVED / REJECTED
  * - 庫存：以 inventory_movement 加總計算（不再直接改 lot.available）
@@ -18,6 +18,7 @@ let goodsReceiptIdToPoId = {};
 /** import_doc_id -> import_no（報單號） */
 let importDocIdToImportNo = {};
 let lotsQaTriggerEl_ = null;
+let lotsSelectedLotId_ = "";
 let lotsWarehouses_ = [];
 let lotsAvailableByLotId_ = {};
 let lotsLoadInFlight_ = false;
@@ -66,6 +67,19 @@ function setLotsQaHint_(text, type = ""){
 
 function escapeLotsHtml_(s){
   return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function lotsFormatMfgExpiryCell_(lot){
+  const mfg = String(lot?.manufacture_date || "").trim();
+  const exp = String(lot?.expiry_date || "").trim();
+  const mfgLine = mfg ? escapeLotsHtml_(mfg) : "未填";
+  const expLine = exp ? escapeLotsHtml_(exp) : "未填";
+  return (
+    `<div class="lots-mfg-exp-cell">` +
+    `<div class="lots-mfg-exp-mfg">${mfgLine}</div>` +
+    `<div class="lots-mfg-exp-exp">${expLine}</div>` +
+    `</div>`
+  );
 }
 
 function lotsHasOpenModal_(){
@@ -289,6 +303,13 @@ function getLotsAvailableByLotId(lotId){
   return null;
 }
 
+function formatLotsAvailableDisplay_(lotId){
+  if(movementLoadFailed) return "--";
+  const av = getLotsAvailableByLotId(lotId);
+  if(av === null || av === undefined) return "--";
+  return String(av);
+}
+
 function lotsWarehouseLabelById_(warehouseId){
   const id = String(warehouseId || "").trim().toUpperCase();
   if(!id) return "";
@@ -361,9 +382,102 @@ function lotsFormatProductSpec_(lot){
   return name;
 }
 
+function lotsHasFactoryLot_(lot){
+  return !!String(lot?.factory_lot || "").trim();
+}
+
+function lotsRequiresFactoryLot_(lot){
+  return String(lot?.source_type || "").trim().toUpperCase() === "PROCESS";
+}
+
+function lotsSelectRow_(lotId, opts){
+  opts = opts || {};
+  const id = String(lotId || "").trim();
+  if(!id) return;
+  if(opts.toggle && lotsSelectedLotId_ === id){
+    lotsSelectedLotId_ = "";
+  }else{
+    lotsSelectedLotId_ = id;
+  }
+  renderLots();
+}
+
+function lotsToggleSelect_(lotId, ev){
+  if(ev) ev.stopPropagation();
+  lotsSelectRow_(lotId, { toggle: true });
+}
+
+function lotsUpdateActionToolbar_(){
+  const lot = lotsSelectedLotId_ ? getLotById(lotsSelectedLotId_) : null;
+  const btnApprove = document.getElementById("lotsBtnApprove");
+  const btnReject = document.getElementById("lotsBtnReject");
+  const btnEdit = document.getElementById("lotsBtnEditDates");
+  const btnLog = document.getElementById("lotsBtnLog");
+  const btnTrace = document.getElementById("lotsBtnTrace");
+
+  const has = !!lot;
+  const invActive = has && String(getLotInventoryStatusDerived_(lot) || "").toUpperCase() === "ACTIVE";
+  const qaPending = has && String(lot.status || "PENDING").toUpperCase() === "PENDING";
+  const needFactory = has && lotsRequiresFactoryLot_(lot) && !lotsHasFactoryLot_(lot);
+
+  if(btnApprove){
+    btnApprove.disabled = !has || !invActive || !qaPending || needFactory;
+    btnApprove.title = needFactory ? "委外加工產出請先補登加工廠 Lot" : "";
+  }
+  if(btnReject) btnReject.disabled = !has || !invActive || !qaPending;
+  if(btnEdit) btnEdit.disabled = !has;
+  if(btnLog) btnLog.disabled = !has;
+  if(btnTrace) btnTrace.disabled = !has;
+}
+
+function lotsRequireSelectedLot_(){
+  const id = String(lotsSelectedLotId_ || "").trim();
+  if(!id){
+    showToast("請先勾選一筆批次", "error");
+    return "";
+  }
+  return id;
+}
+
+function lotsToolbarApprove_(){
+  const id = lotsRequireSelectedLot_();
+  if(!id) return;
+  approveLot(id, document.getElementById("lotsBtnApprove"));
+}
+
+function lotsToolbarReject_(){
+  const id = lotsRequireSelectedLot_();
+  if(!id) return;
+  rejectLot(id, document.getElementById("lotsBtnReject"));
+}
+
+function lotsToolbarEditDates_(){
+  const id = lotsRequireSelectedLot_();
+  if(!id) return;
+  editLotDates(id);
+}
+
+function lotsToolbarLog_(){
+  const id = lotsRequireSelectedLot_();
+  if(!id) return;
+  openLogs("lot", id, "inventory");
+}
+
+function lotsToolbarTrace_(){
+  const id = lotsRequireSelectedLot_();
+  if(!id) return;
+  window.__pendingTraceLotId = id;
+  if(typeof navigate === "function") navigate("trace");
+}
+
 function showQaApproveConfirm(lotId){
   const lot = getLotById(lotId);
   if(!lot){ showToast("找不到此批次","error"); return; }
+  if(lotsRequiresFactoryLot_(lot) && !lotsHasFactoryLot_(lot)){
+    showToast("委外加工產出須先填加工廠 Lot，才能 QA 放行", "error");
+    editLotDates(lotId);
+    return;
+  }
   const productName = productNameMap[lot.product_id] || lot.product_id || "";
   const modal = document.getElementById("lotsQaConfirmModal");
   const title = document.getElementById("qaConfirmTitle");
@@ -402,15 +516,20 @@ function showQaRejectConfirm(lotId){
 }
 
 async function doApproveLot(lotId, triggerEl){
+  const lot0 = getLotById(lotId) || null;
+  if(lotsRequiresFactoryLot_(lot0) && !lotsHasFactoryLot_(lot0)){
+    showToast("委外加工產出須先填加工廠 Lot，才能 QA 放行", "error");
+    editLotDates(lotId);
+    return;
+  }
   const note = prompt("QA 放行備註（可留空）") ?? "";
   showSaveHint(triggerEl || document.getElementById("qaConfirmPrimary"));
   let ok = false;
   try {
-  const lot0 = getLotById(lotId) || null;
   await updateRecord("lot","lot_id",lotId,{
     status: "APPROVED",
     updated_by: getCurrentUser(),
-    updated_at: nowIso16(),
+    updated_at: nowIsoTaipei(),
     ...(note ? { remark: note } : {})
   });
 
@@ -421,7 +540,7 @@ async function doApproveLot(lotId, triggerEl){
     await updateRecord("lot","lot_id",sourceId,{
       status: "APPROVED",
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
   }
   const children = getTransferChildrenLots_(rootId);
@@ -430,7 +549,7 @@ async function doApproveLot(lotId, triggerEl){
     await updateRecord("lot","lot_id",c.lot_id,{
       status: "APPROVED",
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
   }
 
@@ -453,7 +572,7 @@ async function doRejectLot(lotId, triggerEl){
   await updateRecord("lot","lot_id",lotId,{
     status: "REJECTED",
     updated_by: getCurrentUser(),
-    updated_at: nowIso16(),
+    updated_at: nowIsoTaipei(),
     ...(note ? { remark: note } : {})
   });
 
@@ -464,7 +583,7 @@ async function doRejectLot(lotId, triggerEl){
     await updateRecord("lot","lot_id",sourceId,{
       status: "REJECTED",
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
   }
   const children = getTransferChildrenLots_(rootId);
@@ -473,7 +592,7 @@ async function doRejectLot(lotId, triggerEl){
     await updateRecord("lot","lot_id",c.lot_id,{
       status: "REJECTED",
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
   }
 
@@ -501,13 +620,17 @@ async function editLotDates(lotId){
 function showLotDateModal(lot){
   const modal = document.getElementById("lotsDateModal");
   const info = document.getElementById("lotDateBatchInfo");
+  const factoryEl = document.getElementById("lotDateFactoryLot");
   const mfgEl = document.getElementById("lotDateManufacture");
   const expEl = document.getElementById("lotDateExpiry");
-  if(!modal || !info || !mfgEl || !expEl) return;
+  if(!modal || !info || !factoryEl || !mfgEl || !expEl) return;
   modal.dataset.lotId = lot.lot_id || "";
   info.innerHTML = "批號：<strong>" + escapeLotsHtml_(lot.lot_id || "") + "</strong><br>產品：" + escapeLotsHtml_(productNameMap[lot.product_id] || lot.product_id || "");
+  factoryEl.value = String(lot.factory_lot || "");
   mfgEl.value = String(lot.manufacture_date || "");
   expEl.value = String(lot.expiry_date || "");
+  const reqEl = document.getElementById("lotDateFactoryLotReq");
+  if(reqEl) reqEl.style.display = lotsRequiresFactoryLot_(lot) ? "" : "none";
   modal.style.display = "flex";
 }
 
@@ -520,13 +643,17 @@ function closeLotDateModal(){
 
 async function saveLotDatesFromModal(triggerEl){
   const modal = document.getElementById("lotsDateModal");
+  const factoryEl = document.getElementById("lotDateFactoryLot");
   const mfgEl = document.getElementById("lotDateManufacture");
   const expEl = document.getElementById("lotDateExpiry");
-  if(!modal || !mfgEl || !expEl) return;
+  if(!modal || !factoryEl || !mfgEl || !expEl) return;
   const lotId = String(modal.dataset.lotId || "");
   if(!lotId) return;
+  const lot = getLotById(lotId) || null;
+  const factoryLot = String(factoryEl.value || "").trim().toUpperCase();
   const mfgVal = String(mfgEl.value || "").trim();
   const expVal = String(expEl.value || "").trim();
+  if(lotsRequiresFactoryLot_(lot) && !factoryLot) return showToast("委外加工產出請填加工廠 Lot", "error");
   if(mfgVal && expVal && expVal < mfgVal){
     return showToast("有效期不可早於製造日", "error");
   }
@@ -534,15 +661,16 @@ async function saveLotDatesFromModal(triggerEl){
   showSaveHint(triggerEl || document.getElementById("lotDateSaveBtn"));
   try{
     await updateRecord("lot", "lot_id", lotId, {
+      factory_lot: factoryLot || "",
       manufacture_date: mfgVal,
       expiry_date: expVal,
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     });
     closeLotDateModal();
     await loadLotsAndMovements();
     await renderLots();
-    showToast("批次日期已更新");
+    showToast("批次資料已更新");
   } finally { hideSaveHint(); }
 }
 
@@ -655,6 +783,7 @@ async function renderLots(){
       const srcType = String(l.source_type || "").trim().toUpperCase();
       const hay = [
         l.lot_id,
+        l.factory_lot,
         l.remark,
         pid,
         pname,
@@ -684,12 +813,20 @@ async function renderLots(){
     return true;
   });
 
+  if(lotsSelectedLotId_ && !list.some(l => String(l.lot_id || "") === lotsSelectedLotId_)){
+    lotsSelectedLotId_ = "";
+  }
+
   // 最新在上：群組鍵 / 收貨單ID / Lot ID 皆採「由新到舊」
   //（Lot ID 與多數單據 ID 皆含日期時間，字串排序即可反映新舊）
   const sorted = [...list].sort((a,b)=>{
     const ak = getLotBusinessGroupKey_(a);
     const bk = getLotBusinessGroupKey_(b);
     if(ak !== bk) return bk.localeCompare(ak);
+    if (typeof erpCompareNewestFirst_ === "function") {
+      const cmp = erpCompareNewestFirst_(a, b, ["created_at"], "lot_id");
+      if (cmp !== 0) return cmp;
+    }
     const aIr = String(a.source_id || "");
     const bIr = String(b.source_id || "");
     if(aIr !== bIr) return bIr.localeCompare(aIr);
@@ -746,21 +883,20 @@ async function renderLots(){
       `;
 
       sub.forEach(lot => {
-        const available = movementLoadFailed ? "--" : getLotsAvailableByLotId(lot.lot_id);
+        const available = formatLotsAvailableDisplay_(lot.lot_id);
         const invStatus = getLotInventoryStatusDerived_(lot);
         const qaStatus = lot.status || "PENDING";
         const whText = lotsWarehouseLabelById_(lot.warehouse_id) || (lot.warehouse_id ? String(lot.warehouse_id) : "");
 
         const safeLotId = (lot.lot_id || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-        const allowQa = String(invStatus || "").toUpperCase() === "ACTIVE";
-        const action =
-          (qaStatus === "PENDING" && allowQa)
-            ? `<button type="button" class="btn-secondary btn-lots-action" onclick="approveLot('${safeLotId}', this)">QA<br>放行</button>
-               <button type="button" class="btn-secondary btn-lots-action" onclick="rejectLot('${safeLotId}', this)">QA<br>退回</button>
-               <button type="button" class="btn-secondary btn-lots-action" onclick="editLotDates('${safeLotId}')">補登<br>日期</button>`
-            : `<button type="button" class="btn-secondary btn-lots-action" onclick="openLogs('lot','${safeLotId}','inventory')">Log</button>
-               <button type="button" class="btn-secondary btn-lots-action" onclick="window.__pendingTraceLotId='${safeLotId}';if(typeof navigate==='function')navigate('trace')">追溯</button>
-               <button type="button" class="btn-secondary btn-lots-action" onclick="editLotDates('${safeLotId}')">補登<br>日期</button>`;
+        const isSelected = lotsSelectedLotId_ === lot.lot_id;
+        const factoryLotText = String(lot.factory_lot || "").trim();
+        const needFactoryLot = lotsRequiresFactoryLot_(lot);
+        const factoryLotDisplay = factoryLotText
+          ? escapeLotsHtml_(factoryLotText)
+          : (needFactoryLot
+            ? '<span style="color:#b45309;">未填</span>'
+            : "—");
 
         const productDisplay = lotsFormatProductSpec_(lot);
         const pidAttr = escapeLotsHtml_(lot.product_id || "");
@@ -768,7 +904,10 @@ async function renderLots(){
         const prodText = escapeLotsHtml_(productDisplay);
 
         container.innerHTML += `
-      <tr>
+      <tr class="erp-list-row-selectable${isSelected ? " erp-list-row-open" : ""}" onclick="lotsSelectRow_('${safeLotId}')">
+        <td class="lots-col-select" onclick="event.stopPropagation();">
+          <input type="checkbox" ${isSelected ? "checked" : ""} onclick="lotsToggleSelect_('${safeLotId}', event)" aria-label="選取批次">
+        </td>
         <td title="${lotIdText}">
           <div style="font-size:12px;color:#64748b;line-height:1.2;">${lotIdText}</div>
           <div title="${pidAttr}" style="line-height:1.25;">${prodText}</div>
@@ -776,16 +915,16 @@ async function renderLots(){
         <td>${escapeLotsHtml_(whText || "—")}</td>
         <td>${escapeLotsHtml_(lot.qty != null ? String(lot.qty) : "")}</td>
         <td>${escapeLotsHtml_(String(available))}</td>
-        <td>${escapeLotsHtml_(lot.manufacture_date || "")}</td>
-        <td>${escapeLotsHtml_(lot.expiry_date || "")}</td>
+        <td class="lots-col-dates">${lotsFormatMfgExpiryCell_(lot)}</td>
+        <td class="lots-col-factory">${factoryLotDisplay}</td>
         <td>${lotInventoryStatusBadge_(invStatus)}</td>
         <td>${lotQaStatusLabel_(qaStatus)}</td>
-        <td>${action}</td>
       </tr>
     `;
       });
     });
   });
+  lotsUpdateActionToolbar_();
 }
 
 function resetLotsSearch(){

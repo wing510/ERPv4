@@ -1,0 +1,325 @@
+<!-- ===== 應收帳款／收款 ===== -->
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>
+      AR 應收帳款／收款
+      <button type="button" class="btn-sheet" onclick="openSheetLink('ar_receivable')" title="應收帳款（ar_receivable）">Sheet</button>
+      <span id="arStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">一般銷售出貨自動建 AR · 寄賣結算產生 AR</span>
+    </span>
+    <span data-help="arMain"></span>
+  </div>
+  <div class="card-body">
+    <div class="search-toolbar search-toolbar-master ar-list-toolbar">
+      <select id="ar_filter_status" aria-label="狀態篩選" onchange="arReloadList_()">
+        <option value="ANY">全部</option>
+        <option value="UNCLOSED" selected>未結案（未收＋部分收）</option>
+        <option value="OPEN">未收</option>
+        <option value="PARTIAL">部分收</option>
+        <option value="SETTLED">已結清</option>
+      </select>
+      <select id="ar_filter_customer" aria-label="客戶篩選" onchange="arApplyListFilters_()">
+        <option value="">全部客戶</option>
+      </select>
+      <span class="ar-date-filter" title="依 AR 起算日篩選列表">
+        <label for="ar_filter_date_from" style="font-size:13px;color:#64748b;margin-right:4px;">起算日</label>
+        <input type="date" id="ar_filter_date_from" aria-label="起算日起" onchange="arApplyListFilters_()">
+        <span style="margin:0 4px;color:#94a3b8;">～</span>
+        <input type="date" id="ar_filter_date_to" aria-label="起算日迄" onchange="arApplyListFilters_()">
+        <button class="btn-secondary btn-sm" type="button" style="margin-left:6px;" onclick="arClearDateFilter_()">清除</button>
+      </span>
+      <button class="btn-secondary" type="button" onclick="arReloadList_()">重新整理</button>
+      <button class="btn-secondary" id="ar_view_mode_btn" type="button" onclick="arToggleViewMode_()">批次收款紀錄</button>
+      <span id="ar_batch_toolbar" class="ar-batch-toolbar-btns" style="display:none;">
+        <button class="btn-secondary" id="ar_batch_select_all_btn" type="button" title="全選列表上所有未結清 AR" onclick="arBatchSelectAllOpen_()">全選未結清</button>
+        <button class="btn-secondary" id="ar_batch_select_month_btn" type="button" title="勾選列表上起算日在本月的未結清 AR（須同一客戶）" onclick="arBatchSelectThisMonthOpen_()">本月起算日</button>
+        <button class="btn-secondary" type="button" onclick="arBatchClearSelection_()">清除勾選</button>
+      </span>
+    </div>
+    <div id="ar_list_panel">
+    <div class="table-wrap">
+      <table class="data-table ar-list-table">
+        <colgroup>
+          <col class="ar-col-pick" id="ar_col_pick" style="display:none;">
+          <col class="ar-col-date">
+          <col class="ar-col-customer">
+          <col class="ar-col-sys">
+          <col class="ar-col-due">
+          <col class="ar-col-rec">
+          <col class="ar-col-out">
+          <col class="ar-col-st">
+          <col class="ar-col-od">
+        </colgroup>
+        <thead>
+          <tr>
+            <th id="ar_th_pick" style="display:none;" class="ar-col-pick">批次</th>
+            <th class="ar-list-date-col">起算日</th>
+            <th>客戶／來源</th>
+            <th>原始金額</th>
+            <th>應收金額</th>
+            <th>已收</th>
+            <th>未收</th>
+            <th>狀態</th>
+            <th>逾期</th>
+          </tr>
+        </thead>
+        <tbody id="ar_list_tbody">
+          <tr><td colspan="9" class="text-muted">載入中…</td></tr>
+        </tbody>
+        <tfoot id="ar_list_tfoot" style="display:none;">
+          <tr class="ar-list-total-row">
+            <td id="ar_total_pick" style="display:none;"></td>
+            <td colspan="2"><strong>合計</strong> <span id="ar_total_count" class="text-muted"></span></td>
+            <td id="ar_total_system"><strong>—</strong></td>
+            <td id="ar_total_due"><strong>—</strong></td>
+            <td id="ar_total_rec"><strong>—</strong></td>
+            <td id="ar_total_out"><strong>—</strong></td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    </div>
+    <div id="ar_batch_history_panel" style="display:none;">
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>收款日</th>
+              <th>客戶</th>
+              <th>匯款總額</th>
+              <th>末五碼／帳戶名</th>
+              <th>登記人</th>
+              <th>備註</th>
+            </tr>
+          </thead>
+          <tbody id="ar_batch_history_tbody">
+            <tr><td colspan="6" class="text-muted">載入中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="ar_batch_history_detail_card" style="display:none;">
+  <div class="card-header card-header-flex">
+    <span>批次收款明細 · <span id="ar_batch_history_detail_title">—</span></span>
+    <span style="display:flex;align-items:center;gap:8px;">
+      <button type="button" class="btn-secondary btn-sm" id="ar_batch_void_btn" style="display:none;color:#b42318;border-color:#fecdca;" onclick="arVoidBatchPayment_(arSelectedBatchId_, this)">作廢</button>
+      <span data-help="arBatchHistory"></span>
+    </span>
+  </div>
+  <div class="card-body">
+    <div id="ar_batch_history_summary" style="margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;"></div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>起算日</th>
+            <th>AR</th>
+            <th>來源</th>
+            <th>分配金額</th>
+            <th>狀態</th>
+          </tr>
+        </thead>
+        <tbody id="ar_batch_history_lines_tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="ar_batch_card" style="display:none;">
+  <div class="card-header card-header-flex">
+    <span>批次收款 · <span id="ar_batch_customer_label">—</span></span>
+    <span data-help="arBatch"></span>
+  </div>
+  <div class="card-body">
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label>收款日 *</label>
+        <input type="date" id="ar_batch_pay_date">
+      </div>
+      <div class="form-group">
+        <label>本次匯款總額 *</label>
+        <input type="number" id="ar_batch_pay_amount" min="0" step="0.01" oninput="arUpdateBatchPreview_()">
+      </div>
+      <div class="form-group">
+        <label>末五碼</label>
+        <input type="text" id="ar_batch_pay_last5" maxlength="5" inputmode="numeric" autocomplete="off" placeholder="匯款帳號末五碼">
+      </div>
+      <div class="form-group">
+        <label>帳戶名</label>
+        <input type="text" id="ar_batch_pay_account_name" maxlength="40" autocomplete="off" placeholder="匯款人／帳戶名">
+      </div>
+      <div class="form-group" style="grid-column:span 4;">
+        <label>備註</label>
+        <input type="text" id="ar_batch_pay_remark" placeholder="例如：2026-07 月結匯款">
+      </div>
+    </div>
+    <div id="ar_batch_summary" style="margin-bottom:12px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;"></div>
+    <div class="table-wrap" style="margin-bottom:12px;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>起算日</th>
+            <th>來源</th>
+            <th>改前未收</th>
+            <th>本次分配</th>
+            <th>改後未收</th>
+            <th>狀態</th>
+          </tr>
+        </thead>
+        <tbody id="ar_batch_preview_tbody">
+          <tr><td colspan="6" class="text-muted">請勾選 AR 並填匯款總額</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="button-group">
+      <button class="btn-primary" id="ar_batch_submit_btn" type="button" title="請勾選 AR 並填匯款總額" onclick="arSubmitBatchPayment_(this)">確認批次收款</button>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="ar_detail_card" style="display:none;">
+  <div class="card-header card-header-flex">
+    <span>AR 明細 · <span id="ar_detail_title">—</span>
+      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('ar_payment')" title="收款紀錄（ar_payment）">Sheet</button>
+    </span>
+    <span data-help="arDetail"></span>
+  </div>
+  <div class="card-body">
+    <div id="ar_summary_box" style="margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;"></div>
+
+    <h4 style="margin:0 0 10px 0;">登記收款</h4>
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label>收款日 *</label>
+        <input type="date" id="ar_pay_date">
+      </div>
+      <div class="form-group">
+        <label>金額 *</label>
+        <input type="number" id="ar_pay_amount" min="0" step="0.01">
+      </div>
+      <div class="form-group">
+        <label>末五碼</label>
+        <input type="text" id="ar_pay_last5" maxlength="5" inputmode="numeric" autocomplete="off" placeholder="匯款帳號末五碼">
+      </div>
+      <div class="form-group">
+        <label>帳戶名</label>
+        <input type="text" id="ar_pay_account_name" maxlength="40" autocomplete="off" placeholder="匯款人／帳戶名">
+      </div>
+      <div class="form-group" id="ar_pay_gap_writeoff_group">
+        <label>沖銷差額（未收≤ 100 可選）</label>
+        <select id="ar_pay_gap_writeoff" onchange="arOnGapWriteoffChange_()">
+          <option value="">不沖銷</option>
+          <option value="REMIT_FEE">匯費扣除</option>
+          <option value="HANDLING_FEE">手續費損</option>
+          <option value="ROUNDING">尾數折讓</option>
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:span 3;">
+        <label>備註</label>
+        <input type="text" id="ar_pay_remark">
+      </div>
+    </div>
+    <div id="ar_pay_gap_writeoff_hint" style="display:none;font-size:13px;margin:-4px 0 12px 0;"></div>
+    <div class="button-group" style="margin-bottom:20px;">
+      <button class="btn-primary" id="ar_pay_btn" type="button" onclick="arRegisterPayment_(this)">登記收款</button>
+      <button class="btn-secondary" id="ar_pay_cancel_btn" type="button" style="display:none;" onclick="arCancelEditPayment_()">取消修改</button>
+    </div>
+    <div id="ar_pay_edit_hint" class="text-muted" style="display:none;font-size:12px;margin:-12px 0 16px 0;">
+      已有調整歷程：僅可修改收款日／備註，不可改金額。若要改應收或重開追款，請用「重開調整」。
+    </div>
+
+    <h4 style="margin:0 0 10px 0;">收款紀錄</h4>
+    <div class="table-wrap" style="margin-bottom:16px;">
+      <table class="data-table">
+        <thead><tr><th>日期</th><th>金額</th><th>末五碼／帳戶名</th><th>登記人</th><th>備註</th><th></th></tr></thead>
+        <tbody id="ar_payment_tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="button-group" id="ar_exception_toggle_row" style="display:none;margin-bottom:8px;">
+      <button type="button" class="btn-secondary" id="ar_exception_toggle" onclick="arToggleExceptionCard_(this)">例外處理（調整應收／手動沖銷結案）</button>
+      <button class="btn-secondary" type="button" onclick="openLogs('ar_receivable', document.getElementById('ar_selected_id')?.value || '', 'ar')">Log</button>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="ar_exception_card" style="display:none;">
+  <div class="card-header card-header-flex">
+    <span id="ar_exception_card_title">例外處理</span>
+    <span style="display:flex;align-items:center;gap:8px;">
+      <span data-help="arException"></span>
+      <button type="button" class="btn-secondary btn-sm" onclick="arCollapseExceptionCard_()">收起</button>
+    </span>
+  </div>
+  <div class="card-body">
+    <div id="ar_exception_forms">
+    <div id="ar_adjust_section">
+    <div id="ar_adjust_due_summary" style="display:none;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;"></div>
+    <h4 style="margin:0 0 10px 0;">調整應收金額</h4>
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label>新應收金額 *</label>
+        <input type="number" id="ar_adjust_due" min="0" step="0.01" title="預設帶入已收金額，方便尾差／去零頭調整">
+      </div>
+      <div class="form-group">
+        <label>原因 *</label>
+        <select id="ar_adjust_reason_code" onchange="arOnReasonCodeChange_('adjust')">
+          <option value="">請選擇</option>
+          <option value="DISCOUNT">折讓（僅可減少應收）</option>
+          <option value="NEGOTIATE">議價調整（僅可減少應收）</option>
+          <option value="AMOUNT_FIX">金額更正（可增可減）</option>
+          <option value="OTHER">其他</option>
+        </select>
+      </div>
+      <div class="form-group" id="ar_adjust_reason_other_row" style="display:none;grid-column:span 2;">
+        <label>其他說明 *</label>
+        <input type="text" id="ar_adjust_reason_detail" placeholder="請說明調整原因">
+      </div>
+    </div>
+    <div class="button-group" style="margin-bottom:20px;">
+      <button class="btn-secondary" id="ar_adjust_btn" type="button" onclick="arAdjustAmount_(this)">調整應收</button>
+    </div>
+    </div>
+
+    <div id="ar_force_section">
+    <h4 style="margin:0 0 10px 0;">手動沖銷結案</h4>
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label>原因 *</label>
+        <select id="ar_force_reason_code" onchange="arOnReasonCodeChange_('force')">
+          <option value="">請選擇</option>
+          <option value="BAD_DEBT">呆帳</option>
+          <option value="DISPUTE">爭議款</option>
+          <option value="WAIVE">老闆決定不追</option>
+          <option value="OTHER">其他</option>
+        </select>
+      </div>
+      <div class="form-group" id="ar_force_reason_other_row" style="display:none;grid-column:span 2;">
+        <label>其他說明 *</label>
+        <input type="text" id="ar_force_reason_detail" placeholder="請說明手動沖銷結案原因">
+      </div>
+    </div>
+    <div class="button-group" style="margin-bottom:20px;">
+      <button class="btn-secondary" id="ar_force_btn" type="button" style="color:#b42318;border-color:#fecdca;" onclick="arForceClose_(this)">手動沖銷結案</button>
+    </div>
+    </div>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="ar_adjust_history_card" style="display:none;">
+  <div class="card-header card-header-flex">
+    <span>調整歷程 · <span id="ar_adjust_history_title">—</span></span>
+  </div>
+  <div class="card-body">
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>時間</th><th>改前</th><th>改後</th><th>原因</th><th>操作人</th></tr></thead>
+        <tbody id="ar_adjust_tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>

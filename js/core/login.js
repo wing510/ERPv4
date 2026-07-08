@@ -142,50 +142,24 @@
     try{
       var el = document.getElementById("topbarCurrentUser");
       if(!el) return;
-      var uid = String(userId || "").trim();
       var role = "";
       try{
         role = (typeof getCurrentUserRole === "function") ? String(getCurrentUserRole() || "").trim() : "";
       }catch(_eRole){ role = ""; }
-      var r = String(role || "").trim().toUpperCase();
-      var roleZh = (function(){
-        if(!r) return "";
-        // 與 Users 角色選單對齊（modules/users.html）
-        var map = {
-          "CEO": "CEO",
-          "FN": "財務",
-          "GA": "總務",
-          "OP": "作業",
-          "QA": "品保",
-          "SL": "業務",
-          "AS": "助理",
-          "WH": "倉管",
-          "ADMIN": "管理者"
-        };
-        return map[r] || r;
-      })();
-      var label = uid ? (roleZh ? (roleZh + " - " + uid) : uid) : "—";
-      el.textContent = label;
-      el.title = uid ? ("目前登入：" + (roleZh ? (roleZh + " - " + uid) : uid)) : "";
+      var pack = (typeof erpTopbarUserText_ === "function")
+        ? erpTopbarUserText_(userId, role)
+        : { label: String(userId || "").trim() || "—", title: "" };
+      el.textContent = pack.label;
+      el.title = pack.title || "";
     }catch(_e){}
   }
 
   function welcomeToast_(uid, role, uname){
     try{
-      var r = String(role || "").trim().toUpperCase();
-      var map = {
-        "CEO": "CEO",
-        "FN": "財務",
-        "GA": "總務",
-        "OP": "作業",
-        "QA": "品保",
-        "SL": "業務",
-        "AS": "助理",
-        "WH": "倉管",
-        "ADMIN": "管理者"
-      };
-      var roleZh = map[r] || (r || "");
-      var main = roleZh ? (roleZh + "-" + String(uid || "").trim()) : String(uid || "").trim();
+      var roleZh = (typeof erpRoleLabelZh_ === "function") ? erpRoleLabelZh_(role) : String(role || "").trim();
+      var idRaw = String(uid || "").trim();
+      var idShow = (typeof erpDisplayOperatorName_ === "function") ? erpDisplayOperatorName_(idRaw) : idRaw;
+      var main = roleZh ? (roleZh + "-" + idShow) : idShow;
       var msg = "歡迎登入 " + main + (uname ? (" " + String(uname || "").trim()) : "");
       if(typeof showToast === "function") showToast(msg, "success");
     }catch(_e){}

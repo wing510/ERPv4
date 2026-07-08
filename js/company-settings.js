@@ -1,4 +1,4 @@
-/*********************************
+﻿/*********************************
  * Company Profile（公司資料）
  *********************************/
 
@@ -26,6 +26,14 @@ function cpApplyFormPermissions_(){
   if(grid){
     const fields = grid.querySelectorAll("input, select, textarea");
     fields.forEach(function(el){
+      el.disabled = !canEdit;
+      el.readOnly = !canEdit;
+    });
+  }
+  const finGrid = document.getElementById("companyProfileFinanceGrid");
+  if(finGrid){
+    const finFields = finGrid.querySelectorAll("input, select, textarea");
+    finFields.forEach(function(el){
       el.disabled = !canEdit;
       el.readOnly = !canEdit;
     });
@@ -62,12 +70,32 @@ function cpBackupKindLabel_(kind){
   return k || "—";
 }
 
+function cpBackupKindHtml_(kind){
+  const k = String(kind || "").toLowerCase();
+  if(k === "manual"){
+    return "<span class=\"cp-backup-kind-badge cp-backup-kind-manual\">手動</span>";
+  }
+  if(k === "scheduled"){
+    return "<span class=\"cp-backup-kind-badge cp-backup-kind-auto\">自動</span>";
+  }
+  return cpEscapeHtml_(cpBackupKindLabel_(kind));
+}
+
 function cpFormatBackupSize_(row){
   const mb = row && row.size_mb != null ? Number(row.size_mb) : NaN;
   if(Number.isFinite(mb) && mb > 0) return mb + " MB";
   const bytes = row && row.size_bytes != null ? Number(row.size_bytes) : 0;
   if(bytes > 0) return Math.round(bytes / 1024) + " KB";
   return "—";
+}
+
+/** 列表顯示用短檔名（還原仍用完整 file_name） */
+function cpShortBackupFileName_(fileName){
+  const name = String(fileName || "").trim();
+  if(!name || name === "—") return name;
+  let short = name.replace(/^erp_supabase_/i, "").replace(/\.dump$/i, "");
+  short = short.replace(/^manual_/i, "");
+  return short || name;
 }
 
 async function loadCompanyBackupList(){
@@ -84,11 +112,16 @@ async function loadCompanyBackupList(){
       return;
     }
     body.innerHTML = rows.map(function(row){
-      const t = String(row.display_time || row.modified_at || "").trim() || "—";
+      const tRaw = String(row.display_time || row.modified_at || "").trim();
+      const t = tRaw
+        ? (typeof erpFormatListDateTime_ === "function" ? erpFormatListDateTime_(tRaw) : tRaw)
+        : "—";
       const name = String(row.file_name || "").trim() || "—";
+      const shortName = cpShortBackupFileName_(name);
       const size = cpFormatBackupSize_(row);
-      const kind = cpBackupKindLabel_(row.backup_kind);
+      const kindHtml = cpBackupKindHtml_(row.backup_kind);
       const nameJs = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const nameTitle = name !== "—" ? ' title="' + cpEscapeHtml_(name) + '"' : "";
       const restoreBtn = name !== "—"
         ? (
           "<button class=\"btn-secondary\" type=\"button\" " +
@@ -98,11 +131,14 @@ async function loadCompanyBackupList(){
         : "—";
       return (
         "<tr>" +
-        "<td>" + cpEscapeHtml_(t) + "</td>" +
-        "<td style=\"word-break:break-all;\">" + cpEscapeHtml_(name) + "</td>" +
-        "<td>" + cpEscapeHtml_(size) + "</td>" +
-        "<td>" + cpEscapeHtml_(kind) + "</td>" +
-        "<td>" + restoreBtn + "</td>" +
+        "<td class=\"col-backup-timefile\">" +
+        "<div class=\"cp-backup-time\">" + cpEscapeHtml_(t) + "</div>" +
+        "<div class=\"cp-backup-filename\"" + nameTitle + ">" + cpEscapeHtml_(shortName) + "</div>" +
+        "</td>" +
+        "<td class=\"col-backup-filename-desk\"" + nameTitle + ">" + cpEscapeHtml_(name) + "</td>" +
+        "<td class=\"col-backup-size\">" + cpEscapeHtml_(size) + "</td>" +
+        "<td class=\"col-backup-kind\">" + kindHtml + "</td>" +
+        "<td class=\"col-backup-action\">" + restoreBtn + "</td>" +
         "</tr>"
       );
     }).join("");
@@ -136,6 +172,9 @@ async function loadCompanyProfileForm(){
     cpSet_("cp_default_incoterms", r?.default_incoterms || "");
     cpSet_("cp_declaration_text", r?.declaration_text || "I declare that the information is true and correct.");
     cpSet_("cp_remark", r?.remark || "");
+    cpSet_("cp_ar_overdue_days_normal", r?.ar_overdue_days_normal != null ? r.ar_overdue_days_normal : 14);
+    cpSet_("cp_ar_overdue_days_consignment", r?.ar_overdue_days_consignment != null ? r.ar_overdue_days_consignment : 30);
+    cpSet_("cp_ar_reminder_days_before_overdue", r?.ar_reminder_days_before_overdue != null ? r.ar_reminder_days_before_overdue : 5);
   }catch(_e){
     showToast("無法載入公司設定", "error");
   }finally{
@@ -174,8 +213,11 @@ async function saveCompanyProfile(triggerEl){
       default_incoterms: String(document.getElementById("cp_default_incoterms")?.value || "").trim(),
       declaration_text: String(document.getElementById("cp_declaration_text")?.value || "").trim(),
       remark: String(document.getElementById("cp_remark")?.value || "").trim(),
+      ar_overdue_days_normal: String(document.getElementById("cp_ar_overdue_days_normal")?.value || "14").trim(),
+      ar_overdue_days_consignment: String(document.getElementById("cp_ar_overdue_days_consignment")?.value || "30").trim(),
+      ar_reminder_days_before_overdue: String(document.getElementById("cp_ar_reminder_days_before_overdue")?.value || "5").trim(),
       updated_by: getCurrentUser(),
-      updated_at: nowIso16()
+      updated_at: nowIsoTaipei()
     }, { method: "POST" });
     showToast("公司資料已儲存", "success");
   }catch(err){
@@ -229,7 +271,10 @@ async function restoreCompanySupabaseBackup(fileName, triggerEl){
   const statusEl = document.getElementById("cpBackupStatus");
   const btn = triggerEl;
   if(btn) btn.disabled = true;
-  if(statusEl) statusEl.textContent = "還原中…（請勿關閉頁面，約需 1～3 分鐘）";
+  if(statusEl){
+    statusEl.textContent = "還原中…（請勿關閉頁面，約需 1～3 分鐘）";
+    statusEl.classList.add("cp-backup-restoring");
+  }
 
   try{
     const r = await callAPI({
@@ -240,12 +285,18 @@ async function restoreCompanySupabaseBackup(fileName, triggerEl){
     const exitCode = r?.pg_restore_exit_code;
     let msg = "還原完成：" + name;
     if(exitCode === 1) msg += "（有部分警告，public 通常仍成功）";
-    if(statusEl) statusEl.textContent = msg;
+    if(statusEl){
+      statusEl.classList.remove("cp-backup-restoring");
+      statusEl.textContent = msg;
+    }
     showToast(msg, "success");
     const hint = String(r?.hint || "").trim();
     if(hint) setTimeout(function(){ showToast(hint, "info"); }, 800);
   }catch(err){
-    if(statusEl) statusEl.textContent = "";
+    if(statusEl){
+      statusEl.classList.remove("cp-backup-restoring");
+      statusEl.textContent = "";
+    }
     if(!(err && err.erpApiToastShown)) showToast("還原失敗", "error");
   }finally{
     if(btn) btn.disabled = false;

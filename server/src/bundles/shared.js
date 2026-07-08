@@ -1,21 +1,54 @@
 const { getSupabase } = require("../supabase");
 
+/** 寫入 timestamptz：台灣時間 +08:00（避免無時區字串被 PG 當 UTC，前端又 +8 變成 23:xx） */
 function nowIso() {
   const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return (
-    d.getFullYear() +
-    "-" +
-    pad(d.getMonth() + 1) +
-    "-" +
-    pad(d.getDate()) +
-    "T" +
-    pad(d.getHours()) +
-    ":" +
-    pad(d.getMinutes()) +
-    ":" +
-    pad(d.getSeconds())
-  );
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    }).formatToParts(d);
+    const get = (type) => parts.find((p) => p.type === type)?.value || "00";
+    return (
+      get("year") +
+      "-" +
+      get("month") +
+      "-" +
+      get("day") +
+      "T" +
+      get("hour") +
+      ":" +
+      get("minute") +
+      ":" +
+      get("second") +
+      "+08:00"
+    );
+  } catch (_e) {
+    return new Date().toISOString();
+  }
+}
+
+/** 前端 nowIso16 等無時區字串 → 補 +08:00，避免 PG 當 UTC 儲存 */
+function normalizeTaipeiTimestamp_(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  if (/[Zz]$|[+-]\d{2}:\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+  if (!m) return s;
+  const sec = m[4] != null ? m[4] : "00";
+  return m[1] + "T" + m[2] + ":" + m[3] + ":" + sec + "+08:00";
+}
+
+/** 前端傳入或缺省 → 寫入 timestamptz 用 */
+function timestamptzFromClient_(v) {
+  const n = normalizeTaipeiTimestamp_(v);
+  return n || nowIso();
 }
 
 function buildTxId() {
@@ -25,8 +58,47 @@ function buildTxId() {
 }
 
 function buildId_(prefix) {
-  const rnd = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
   return String(prefix || "ID") + "-" + Date.now() + "-" + rnd;
+}
+
+/** 較短單據 ID：PREFIX-YYMMDD-RRRR（例 CS-260619-K3P9） */
+function buildShortDocId_(prefix) {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = String(d.getFullYear()).slice(2) + pad(d.getMonth() + 1) + pad(d.getDate());
+  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return String(prefix || "ID") + "-" + ymd + "-" + rnd;
+}
+
+/** 促銷方案編號：CP-YYMMDD-RR（例 CP-260616-A3；與前端 ccNewPromoSchemeId_ 一致） */
+function buildShortPromoSchemeId_() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = String(d.getFullYear()).slice(2) + pad(d.getMonth() + 1) + pad(d.getDate());
+  const n = Math.floor(Math.random() * 36 * 36);
+  const rnd = n.toString(36).toUpperCase().padStart(2, "0");
+  return "CP-" + ymd + "-" + rnd;
+}
+
+/** 經銷方案編號：CD-YYMMDD-RR（與前端 cdNewDealerSchemeId_ 一致） */
+function buildShortDealerSchemeId_() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = String(d.getFullYear()).slice(2) + pad(d.getMonth() + 1) + pad(d.getDate());
+  const n = Math.floor(Math.random() * 36 * 36);
+  const rnd = n.toString(36).toUpperCase().padStart(2, "0");
+  return "CD-" + ymd + "-" + rnd;
+}
+
+/** 主檔短 ID：PREFIXYYMMDD-RR（例 C260616-A3、CC260616-A3；與前端 generateShortId 一致） */
+function buildShortMasterId_(prefix) {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = String(d.getFullYear()).slice(-2) + pad(d.getMonth() + 1) + pad(d.getDate());
+  const n = Math.floor(Math.random() * 36 * 36);
+  const rnd = n.toString(36).toUpperCase().padStart(2, "0");
+  return String(prefix || "ID") + ymd + "-" + rnd;
 }
 
 function appendSystemRemark_(prev, line) {
@@ -109,7 +181,7 @@ async function writeAuditLog_(table, refId, actionType, actor, newValue, oldValu
       old_value: serializeLogPayload_(oldValue),
       new_value: serializeLogPayload_(newValue),
       created_by: actor,
-      created_at: new Date().toISOString()
+      created_at: nowIso()
     });
   } catch (_e) {}
 }
@@ -182,7 +254,7 @@ async function applyLotBalanceDelta_(lotId, qtyDelta, movementId, actor) {
   const sb = getSupabase();
   const who = String(actor || "").trim();
   const mvId = String(movementId || "").trim();
-  const now = new Date().toISOString();
+  const now = nowIso();
   const { data: row } = await sb.from("lot_balance").select("*").eq("lot_id", id).maybeSingle();
   if (row) {
     await sb
@@ -304,8 +376,14 @@ async function hasCancelMovement_(refType, refId) {
 
 module.exports = {
   nowIso,
+  normalizeTaipeiTimestamp_,
+  timestamptzFromClient_,
   buildTxId,
   buildId_,
+  buildShortDocId_,
+  buildShortPromoSchemeId_,
+  buildShortDealerSchemeId_,
+  buildShortMasterId_,
   appendSystemRemark_,
   parseJsonArray,
   parseJsonObject,

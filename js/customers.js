@@ -1,4 +1,4 @@
-/*********************************
+﻿/*********************************
  * Customers Module - Enterprise v3 (API 版)
  *********************************/
 
@@ -95,7 +95,275 @@ function custSyncTwInvoiceRow_(){
   custSyncCountryPanels_();
 }
 
-/* ===== 初始化 ===== */
+/* ===== 經銷方案（月結回饋 + 累積金額制） ===== */
+function custFmtDealerMoney_(n) {
+  const v = Number(n || 0);
+  return typeof formatMoney === "function" ? formatMoney(v) : v.toFixed(2);
+}
+
+function custFmtDealerTierLine_(label, rate) {
+  const name = String(label || "").trim();
+  const r = Number(rate || 0);
+  if (!name && !(r > 0)) return "—";
+  if (name && r > 0) return name + "（" + r + " 折）";
+  if (name) return name;
+  return r > 0 ? r + " 折" : "—";
+}
+
+async function custLoadDealerSchemeRows_() {
+  try {
+    const r = await callAPI({ action: "list_commercial_dealer_scheme_enriched" }, { method: "GET" });
+    return (r?.data || []).filter(function (row) {
+      return String(row.status || "").trim().toUpperCase() === "ACTIVE";
+    });
+  } catch (_e) {
+    return [];
+  }
+}
+
+function custFillDealerSchemeSelect_(el, schemeType, selected, activeRows) {
+  if (!el) return;
+  const sel = String(selected != null ? selected : el.value || "").trim().toUpperCase();
+  const want = String(schemeType || "").trim().toUpperCase();
+  const rows = (activeRows || []).filter(function (r) {
+    const st = String(r.scheme_type || "MONTHLY_REBATE").trim().toUpperCase();
+    return want === "CUMULATIVE_AMOUNT" ? st === "CUMULATIVE_AMOUNT" : st !== "CUMULATIVE_AMOUNT";
+  });
+  let html = '<option value="">（未設定）</option>';
+  rows.forEach(function (r) {
+    const id = String(r.scheme_id || "").trim().toUpperCase();
+    const label = id + " " + String(r.scheme_name || "");
+    html += '<option value="' + custEscHtml_(id) + '"' + (id === sel ? " selected" : "") + ">" + custEscHtml_(label) + "</option>";
+  });
+  if (sel && !rows.some(function (r) { return String(r.scheme_id || "").trim().toUpperCase() === sel; })) {
+    html += '<option value="' + custEscHtml_(sel) + '" selected>' + custEscHtml_(sel) + "｜（非生效）</option>";
+  }
+  el.innerHTML = html;
+}
+
+async function custRefreshDealerSchemeSelects_(rebateSelected, cumulativeSelected) {
+  const rows = await custLoadDealerSchemeRows_();
+  const rebateEl = document.getElementById("c_dealer_rebate_scheme_id");
+  const cumEl = document.getElementById("c_dealer_cumulative_scheme_id");
+  custFillDealerSchemeSelect_(rebateEl, "MONTHLY_REBATE", rebateSelected, rows);
+  custFillDealerSchemeSelect_(cumEl, "CUMULATIVE_AMOUNT", cumulativeSelected, rows);
+}
+
+/** @deprecated 相容舊呼叫 */
+async function custRefreshDealerSchemeSelect_(selected) {
+  await custRefreshDealerSchemeSelects_(selected, null);
+}
+
+function custResolveRebateSchemeId_(row) {
+  const c = row || {};
+  return String(c.dealer_rebate_scheme_id || c.dealer_scheme_id || "").trim().toUpperCase();
+}
+
+function custSetDealerFields_(c) {
+  const row = c || {};
+  const rebateEl = document.getElementById("c_dealer_rebate_scheme_id");
+  if (rebateEl) rebateEl.value = custResolveRebateSchemeId_(row);
+  const cumEl = document.getElementById("c_dealer_cumulative_scheme_id");
+  if (cumEl) cumEl.value = String(row.dealer_cumulative_scheme_id || "").trim().toUpperCase();
+  const modeEl = document.getElementById("c_dealer_rebate_settle_mode");
+  if (modeEl) modeEl.value = String(row.dealer_rebate_settle_mode || "CREDIT_NOTE").trim().toUpperCase() || "CREDIT_NOTE";
+  const exclEl = document.getElementById("c_dealer_rebate_excluded");
+  if (exclEl) {
+    const ex = row.dealer_rebate_excluded === true || String(row.dealer_rebate_excluded || "").toUpperCase() === "TRUE";
+    exclEl.value = ex ? "true" : "false";
+  }
+  const balEl = document.getElementById("c_dealer_rebate_credit_balance");
+  if (balEl) balEl.value = custFmtDealerMoney_(row.dealer_rebate_credit_balance);
+  const startedEl = document.getElementById("c_dealer_cumulative_started_at");
+  if (startedEl) startedEl.value = String(row.dealer_cumulative_started_at || "").slice(0, 10);
+  const cumAmtEl = document.getElementById("c_dealer_cumulative_amount");
+  if (cumAmtEl) cumAmtEl.value = custFmtDealerMoney_(row.dealer_cumulative_amount);
+  const tierEl = document.getElementById("c_dealer_cumulative_tier_display");
+  if (tierEl) {
+    const cumScheme = String(row.dealer_cumulative_scheme_id || "").trim();
+    tierEl.value = cumScheme
+      ? custFmtDealerTierLine_(row.dealer_cumulative_tier_label, row.dealer_cumulative_price_rate)
+      : "—";
+  }
+  const pendingEl = document.getElementById("c_dealer_cumulative_pending_display");
+  if (pendingEl) {
+    const cumScheme = String(row.dealer_cumulative_scheme_id || "").trim();
+    if (!cumScheme) {
+      pendingEl.value = "—";
+    } else {
+      const pending = custFmtDealerTierLine_(
+        row.dealer_cumulative_pending_tier_label,
+        row.dealer_cumulative_pending_price_rate
+      );
+      pendingEl.value = pending === "—" ? "—" : pending + "（次月生效）";
+    }
+  }
+}
+
+function custSchemeNameById_(rows, id) {
+  const want = String(id || "").trim().toUpperCase();
+  if (!want) return "";
+  const hit = (rows || []).find(function (r) {
+    return String(r.scheme_id || "").trim().toUpperCase() === want;
+  });
+  return hit ? String(hit.scheme_name || "").trim() : "";
+}
+
+async function custRenderDealerSummaryReadOnly_(c) {
+  const row = c || {};
+  const schemeRows = await custLoadDealerSchemeRows_();
+  const rebateId = custResolveRebateSchemeId_(row);
+  const cumId = String(row.dealer_cumulative_scheme_id || "").trim().toUpperCase();
+  const rebateName = rebateId ? custSchemeNameById_(schemeRows, rebateId) : "";
+  const cumName = cumId ? custSchemeNameById_(schemeRows, cumId) : "";
+  const credit = Number(row.dealer_rebate_credit_balance || 0);
+
+  const elRebate = document.getElementById("c_dealer_summary_rebate");
+  const elCum = document.getElementById("c_dealer_summary_cumulative");
+  const elAmt = document.getElementById("c_dealer_summary_cumulative_amt");
+  const elTier = document.getElementById("c_dealer_summary_tier");
+  const elCredit = document.getElementById("c_dealer_summary_credit");
+
+  if (elRebate) {
+    if (!rebateId) elRebate.textContent = "—";
+    else elRebate.textContent = rebateName ? rebateId + " " + rebateName : rebateId;
+  }
+  if (elCum) {
+    if (!cumId) elCum.textContent = "—";
+    else elCum.textContent = cumName ? cumId + " " + cumName : cumId;
+  }
+
+  if (elAmt) {
+    elAmt.textContent = cumId ? custFmtDealerMoney_(row.dealer_cumulative_amount) : "—";
+  }
+  if (elTier) {
+    if (!cumId) elTier.textContent = "—";
+    else {
+      const tier = custFmtDealerTierLine_(row.dealer_cumulative_tier_label, row.dealer_cumulative_price_rate);
+      elTier.textContent = tier === "—" ? "—" : tier;
+    }
+  }
+  if (elCredit) {
+    elCredit.textContent =
+      credit > 0 || rebateId ? custFmtDealerMoney_(row.dealer_rebate_credit_balance) : "—";
+  }
+}
+
+function custClearDealerSummaryReadOnly_() {
+  ["c_dealer_summary_rebate", "c_dealer_summary_cumulative", "c_dealer_summary_cumulative_amt", "c_dealer_summary_tier", "c_dealer_summary_credit"].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = "—";
+  });
+}
+
+function custGoDealerCustomerSettings_(customerId) {
+  const cid = String(customerId || document.getElementById("c_id")?.value || "").trim();
+  if (!cid) return showToast("請先載入客戶", "error");
+  if (typeof navigate !== "function") return;
+  try {
+    sessionStorage.setItem("erp_dealer_customer_preset", cid);
+  } catch (_e) {}
+  navigate("commercial_dealer_customer");
+}
+
+async function custMaybeSyncCumulativeTierDisplay_(row) {
+  const cid = String(row?.customer_id || "").trim().toUpperCase();
+  const schemeId = String(row?.dealer_cumulative_scheme_id || "").trim();
+  if (!cid || !schemeId) return row;
+  try {
+    const r = await callAPI(
+      {
+        action: "sync_customer_cumulative_tier",
+        customer_id: cid,
+        updated_by: typeof getCurrentUser === "function" ? getCurrentUser() : ""
+      },
+      { method: "POST", silent: true }
+    );
+    if (!r) return row;
+    const merged = Object.assign({}, row, {
+      dealer_cumulative_amount:
+        r.cumulative_after != null
+          ? r.cumulative_after
+          : r.recalc && r.recalc.cumulative_after != null
+            ? r.recalc.cumulative_after
+            : row.dealer_cumulative_amount,
+      dealer_cumulative_tier_label: r.dealer_cumulative_tier_label || row.dealer_cumulative_tier_label,
+      dealer_cumulative_price_rate:
+        r.dealer_cumulative_price_rate != null ? r.dealer_cumulative_price_rate : row.dealer_cumulative_price_rate,
+      dealer_cumulative_pending_tier_label:
+        r.dealer_cumulative_pending_tier_label || row.dealer_cumulative_pending_tier_label,
+      dealer_cumulative_pending_price_rate:
+        r.dealer_cumulative_pending_price_rate != null
+          ? r.dealer_cumulative_pending_price_rate
+          : row.dealer_cumulative_pending_price_rate
+    });
+    await custRenderDealerSummaryReadOnly_(merged);
+    return merged;
+  } catch (_e) {
+    return row;
+  }
+}
+
+function custCollectDealerFields_() {
+  const exclRaw = String(document.getElementById("c_dealer_rebate_excluded")?.value || "false").trim().toLowerCase();
+  const rebateSchemeId = String(document.getElementById("c_dealer_rebate_scheme_id")?.value || "").trim().toUpperCase();
+  const cumulativeSchemeId = String(document.getElementById("c_dealer_cumulative_scheme_id")?.value || "").trim().toUpperCase();
+  const startedRaw = String(document.getElementById("c_dealer_cumulative_started_at")?.value || "").trim();
+  return {
+    dealer_rebate_scheme_id: rebateSchemeId,
+    dealer_scheme_id: rebateSchemeId,
+    dealer_cumulative_scheme_id: cumulativeSchemeId,
+    dealer_rebate_settle_mode: String(document.getElementById("c_dealer_rebate_settle_mode")?.value || "CREDIT_NOTE").trim().toUpperCase(),
+    dealer_rebate_excluded: exclRaw === "true",
+    dealer_cumulative_started_at: startedRaw || null
+  };
+}
+
+/** 儲存用：方案改（未設定）時一併清掉等級快照欄位 */
+function custDealerFieldsForSave_() {
+  const base = custCollectDealerFields_();
+  if (!base.dealer_cumulative_scheme_id) {
+    base.dealer_cumulative_tier_label = "";
+    base.dealer_cumulative_price_rate = null;
+    base.dealer_cumulative_pending_tier_label = "";
+    base.dealer_cumulative_pending_price_rate = null;
+    base.dealer_cumulative_started_at = null;
+  }
+  if (!base.dealer_rebate_scheme_id) {
+    base.dealer_scheme_id = "";
+  }
+  return base;
+}
+
+function custOnDealerSchemeSelectChange_() {
+  const cumScheme = String(document.getElementById("c_dealer_cumulative_scheme_id")?.value || "").trim();
+  if (!cumScheme) {
+    const tierEl = document.getElementById("c_dealer_cumulative_tier_display");
+    const pendingEl = document.getElementById("c_dealer_cumulative_pending_display");
+    const startedEl = document.getElementById("c_dealer_cumulative_started_at");
+    if (tierEl) tierEl.value = "—";
+    if (pendingEl) pendingEl.value = "—";
+    if (startedEl) startedEl.value = "";
+  }
+}
+
+function custClearDealerFields_() {
+  custSetDealerFields_({
+    dealer_rebate_scheme_id: "",
+    dealer_scheme_id: "",
+    dealer_cumulative_scheme_id: "",
+    dealer_rebate_settle_mode: "CREDIT_NOTE",
+    dealer_rebate_excluded: false,
+    dealer_rebate_credit_balance: 0,
+    dealer_cumulative_amount: 0,
+    dealer_cumulative_tier_label: "",
+    dealer_cumulative_price_rate: null,
+    dealer_cumulative_pending_tier_label: "",
+    dealer_cumulative_pending_price_rate: null,
+    dealer_cumulative_started_at: ""
+  });
+}
+
 async function customersInit(){
   bindUppercaseInput("c_id");
   bindAutoSearchToolbar_([
@@ -103,7 +371,8 @@ async function customersInit(){
     ["search_customer_category", "change"],
     ["search_customer_status", "change"]
   ], () => searchCustomers());
-  await renderCustomers();
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("search_customer_status");
+  await searchCustomers();
   clearCustomerForm();
   if(typeof bindStatusSelectLamp_ === "function") bindStatusSelectLamp_("c_status");
   if(typeof erpLockStatusSelect_ === "function") erpLockStatusSelect_("c_status");
@@ -161,25 +430,38 @@ async function custLoadRecipients_(customerId){
   custRenderRecipients_(custRecipients_);
 }
 
+function custRecipientNameCellHtml_(r){
+  const zh = custEscHtml_(String(r.recipient_name || "").trim() || "—");
+  const enRaw = String(r.recipient_name_en || "").trim();
+  const en = enRaw ? custEscHtml_(enRaw) : "";
+  return `
+    <td class="cust-recipient-name-cell">
+      <div class="cust-recipient-name-desk">
+        <div class="cust-recipient-name-zh">${zh}</div>
+        ${en ? `<div class="cust-recipient-name-en">${en}</div>` : ""}
+      </div>
+    </td>
+  `;
+}
+
 function custRenderRecipients_(rows){
   const tbody = document.getElementById("cRecipientBody");
   if(!tbody) return;
   const list = Array.isArray(rows) ? rows : [];
   tbody.innerHTML = "";
   if(!list.length){
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#64748b;padding:12px;">尚無收件人</td></tr>';
+    tbody.innerHTML = '<tr class="cust-recipient-empty"><td colspan="5" style="text-align:center;color:#64748b;padding:12px;">尚無收件人</td></tr>';
     return;
   }
   list.forEach(r => {
     const rid = String(r.recipient_id || "").trim();
     tbody.innerHTML += `
-      <tr>
-        <td>${custEscHtml_(r.recipient_name)}</td>
-        <td>${custEscHtml_(r.recipient_name_en)}</td>
-        <td>${custEscHtml_(r.address)}</td>
-        <td>${custEscHtml_(r.phone)}</td>
-        <td>${custEscHtml_(r.remark)}</td>
-        <td>
+      <tr class="cust-recipient-row">
+        ${custRecipientNameCellHtml_(r)}
+        <td data-label="地址">${custEscHtml_(r.address)}</td>
+        <td data-label="電話">${custEscHtml_(r.phone)}</td>
+        <td data-label="備註">${custEscHtml_(r.remark)}</td>
+        <td class="cust-recipient-actions">
           <button type="button" class="btn-edit" onclick="custEditRecipient_('${custEscHtml_(rid)}')">編輯</button>
           <button type="button" class="btn-secondary" onclick="custDeleteRecipient_('${custEscHtml_(rid)}')">刪除</button>
         </td>
@@ -249,7 +531,7 @@ async function custSaveRecipient_(triggerEl){
         remark,
         status: "ACTIVE",
         created_by: getCurrentUser(),
-        created_at: nowIso16(),
+        created_at: nowIsoTaipei(),
         updated_by: "",
         updated_at: ""
       });
@@ -330,7 +612,7 @@ async function createCustomer(triggerEl){
     status: c_status.value,
     remark,
     created_by: getCurrentUser(),
-    created_at: nowIso16(),
+    created_at: nowIsoTaipei(),
     updated_by: "",
     updated_at: ""
   };
@@ -419,7 +701,7 @@ async function updateCustomer(triggerEl){
     status: newStatus,
     remark,
     updated_by: getCurrentUser(),
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   };
   // 主檔一致化：更新也做必填檢核（避免更新成空值）
   if(!newData.customer_name)
@@ -428,7 +710,7 @@ async function updateCustomer(triggerEl){
   await updateRecord("customer", "customer_id", customer_id, newData);
 
   await renderCustomers();
-  clearCustomerForm();
+  await loadCustomer(customer_id);
 
   showToast("客戶更新成功");
   } finally { hideSaveHint(); }
@@ -444,6 +726,7 @@ function clearCustomerForm(){
   custClearRecipientForm_();
   custRecipients_ = [];
   custRenderRecipients_([]);
+  custClearDealerSummaryReadOnly_();
 
   syncSelectWithLegacy_("c_category", "");
   syncSelectWithLegacy_("c_country", "");
@@ -492,6 +775,14 @@ function customerSnapshotFromForm_(){
 async function loadCustomer(id){
   const nextId = String(id || "").trim();
   if(!nextId) return;
+  const curIdEarly = String(c_id?.value || "").trim();
+  if(
+    customerEditing &&
+    typeof erpTryToggleCloseMasterListRow_ === "function" &&
+    erpTryToggleCloseMasterListRow_(curIdEarly, nextId, "customer_edit_card", clearCustomerForm, "customerTableBody")
+  ){
+    return;
+  }
   if(customerLoadInFlight_){
     customerPendingLoadId_ = nextId;
     showToast(`載入中：已排隊 ${nextId}（完成後自動載入）`, "warn", 6000);
@@ -514,7 +805,7 @@ async function loadCustomer(id){
   }catch(_e0){}
   customerLoadInFlight_ = true;
   try{
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("customer_edit_card");
     const c = await getOne("customer","customer_id",nextId);
     if(!c) return;
 
@@ -540,11 +831,14 @@ async function loadCustomer(id){
     custSyncCountryPanels_();
     c_status.value = c.status;
     c_remark.value = c.remark;
+    let merged = c;
+    merged = await custMaybeSyncCumulativeTierDisplay_(c);
+    await custRenderDealerSummaryReadOnly_(merged);
     if(typeof syncStatusSelectLamp_ === "function") syncStatusSelectLamp_("c_status");
     if(typeof erpLockStatusSelect_ === "function") erpLockStatusSelect_("c_status");
 
     c_id.disabled=true;
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("customer_edit_card");
     try{
       if(window.erpDirty_){
         window.erpDirty_.bind("customer", customerSnapshotFromForm_);
@@ -553,6 +847,7 @@ async function loadCustomer(id){
     }catch(_eS){}
     await custLoadRecipients_(nextId);
     setCustomerButtons_();
+    if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("customerTableBody", "data-row-id", nextId);
   } finally {
     customerLoadInFlight_ = false;
     try{
@@ -567,7 +862,7 @@ async function loadCustomer(id){
 
 /* ===== 搜尋 ===== */
 async function searchCustomers(){
-  setTbodyLoading_("customerTableBody", 8);
+  setTbodyLoading_("customerTableBody", 7);
 
   const kw = (document.getElementById("search_customer_keyword")?.value || "").trim().toLowerCase();
   const cat = (document.getElementById("search_customer_category")?.value || "").trim();
@@ -592,15 +887,17 @@ async function searchCustomers(){
 }
 
 async function resetCustomerSearch(){
-  custClear_(["search_customer_keyword","search_customer_category","search_customer_status"]);
-  await renderCustomers();
+  custClear_(["search_customer_keyword","search_customer_category"]);
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("search_customer_status");
+  await searchCustomers();
+  if(typeof resetMasterListView_ === "function") resetMasterListView_("customer_edit_card", clearCustomerForm);
 }
 
 /* ===== 排序 ===== */
 let customerSort = { field:"", asc:true };
 
 async function sortCustomers(field){
-  setTbodyLoading_("customerTableBody", 8);
+  setTbodyLoading_("customerTableBody", 7);
   const list = [...(await getAll("customer"))];
 
   if(customerSort.field===field){
@@ -632,32 +929,34 @@ async function renderCustomers(list=null){
   if(!tbody) return;
 
   if(!list){
-    setTbodyLoading_(tbody, 8);
+    setTbodyLoading_(tbody, 7);
     list = await getAll("customer");
+  }
+  if (!customerSort.field && typeof erpSortRowsNewestFirst_ === "function") {
+    list = erpSortRowsNewestFirst_(list, ["updated_at", "created_at"], "customer_id");
   }
 
   tbody.innerHTML="";
   if(!list.length){
-    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:#64748b;padding:24px;">尚無客戶。請在上方表單填寫後按「建立」新增第一筆客戶。</td></tr>';
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#64748b;padding:24px;">尚無客戶。請在上方表單填寫後按「建立」新增第一筆客戶。</td></tr>';
     return;
   }
 
   list.forEach(c=>{
 
     const badge = termStatusLampHtml(c.status);
+    const cid = String(c.customer_id || "");
+    const safeCid = cid.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("c_id")?.value || "").trim().toUpperCase();
+    const open = selId === cid.trim().toUpperCase();
 
     tbody.innerHTML+=`
-      <tr>
-        <td>${c.customer_id}</td>
-        <td>${c.customer_name}</td>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${cid.replace(/"/g, "&quot;")}" onclick="loadCustomer('${safeCid}')">
+        ${typeof masterListIdNameCells_ === "function" ? masterListIdNameCells_(c.customer_id, c.customer_name) : `<td>${c.customer_id}</td><td>${c.customer_name}</td>`}
         <td>${c.category||""}</td>
-        <td>${c.contact_person||""}</td>
-        <td>${c.phone||""}</td>
+        ${typeof masterListContactPhoneCells_ === "function" ? masterListContactPhoneCells_(c.contact_person, c.phone) : `<td>${c.contact_person||""}</td><td>${c.phone||""}</td>`}
         <td>${c.country||""}</td>
         <td class="col-status">${badge}</td>
-        <td>
-          <button class="btn-edit" onclick="loadCustomer('${c.customer_id}')">Load</button>
-        </td>
       </tr>
     `;
   });

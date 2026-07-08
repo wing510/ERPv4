@@ -1,5 +1,5 @@
 /*********************************
- * ERP v4.1 - Smart Router
+ * ERP v4.2 - Smart Router
  *********************************/
 
 // 避免「切換模組時，上一個模組的 async 還在跑」導致偶發 null 元素錯誤
@@ -34,6 +34,15 @@ function erpIsPrivilegedAdminRole_(){
   }
 }
 
+function erpCanViewFinanceByRole_(){
+  try{
+    var r = (typeof getCurrentUserRole === "function" ? String(getCurrentUserRole() || "") : "").trim().toUpperCase();
+    return r === "CEO" || r === "FN" || r === "FINANCE";
+  }catch(_e){
+    return false;
+  }
+}
+
 function erpIsModuleAllowed_(moduleKey){
   var k = String(moduleKey || "").trim();
   if(!k) return true;
@@ -51,10 +60,149 @@ function erpIsModuleAllowed_(moduleKey){
     if(set && set.logs) return true;
     return false;
   }
+  // FINANCE：CEO／財務角色，或 Users 勾選對應模組（總務 admin 等不再因角色自動開啟）
+  if(k === "ar"){
+    if(erpCanViewFinanceByRole_()) return true;
+    if(!set) return true;
+    return !!set.ar;
+  }
+  if(k === "dealer_rebate"){
+    if(erpCanViewFinanceByRole_()) return true;
+    if(!set) return true;
+    return !!(set.dealer_rebate || set.ar);
+  }
+  if(k === "invoice"){
+    if(erpCanViewFinanceByRole_()) return true;
+    if(!set) return true;
+    if(set.shipping) return true;
+    return !!set.invoice;
+  }
+  if(k === "invoice_blank"){
+    if(erpCanViewFinanceByRole_()) return true;
+    if(!set) return true;
+    if(set.invoice || set.shipping) return true;
+    return !!set.invoice_blank;
+  }
   if(!set) return true; // 全開
-  if(k === "invoice" && set.shipping) return true; // 有出貨權限即可開 CI
-  if(k === "invoice_blank" && (set.invoice || set.shipping || set.invoice_blank)) return true;
+  if(k === "commercial_promo" || k === "consignment_promo"){
+    return !!(set.commercial_promo || set.consignment);
+  }
+  if(k === "commercial_dealer"){
+    return !!set.commercial_dealer;
+  }
+  if(k === "commercial_dealer_customer"){
+    return !!set.commercial_dealer_customer;
+  }
+  if(k === "consignment_case" || k === "consignment_settlement" || k === "consignment_return") return !!set.consignment;
   return !!set[k];
+}
+
+function erpNavCollapsedStorageKey_(){
+  return "erp_nav_sections_collapsed";
+}
+
+function erpLoadNavCollapsed_(){
+  try{
+    var raw = localStorage.getItem(erpNavCollapsedStorageKey_());
+    return raw ? JSON.parse(raw) : {};
+  }catch(_e){
+    return {};
+  }
+}
+
+function erpSaveNavCollapsed_(state){
+  try{
+    localStorage.setItem(erpNavCollapsedStorageKey_(), JSON.stringify(state || {}));
+  }catch(_e){}
+}
+
+function erpInitNavSections_(){
+  try{
+    var nav = document.getElementById("sidebarNav");
+    if(!nav || nav.dataset.sectionsInit === "1") return;
+    var titles = Array.prototype.slice.call(nav.querySelectorAll(":scope > .section-title"));
+    if(!titles.length) return;
+    nav.dataset.sectionsInit = "1";
+    var collapsed = erpLoadNavCollapsed_();
+
+    titles.forEach(function(title, idx){
+      var key = String(title.textContent || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || ("sec_" + idx);
+      var section = document.createElement("div");
+      section.className = "nav-section";
+      section.setAttribute("data-nav-section", key);
+
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "nav-section-toggle";
+      btn.setAttribute("aria-expanded", "true");
+      btn.innerHTML = '<span class="nav-section-label">' + String(title.textContent || "").trim() + "</span>";
+
+      var links = document.createElement("div");
+      links.className = "nav-section-links";
+
+      var el = title.nextElementSibling;
+      var toMove = [];
+      while(el && !el.classList.contains("section-title")){
+        toMove.push(el);
+        el = el.nextElementSibling;
+      }
+      var anchor = toMove[0] || null;
+      title.remove();
+      section.appendChild(btn);
+      section.appendChild(links);
+      if(anchor) nav.insertBefore(section, anchor);
+      else nav.appendChild(section);
+      toMove.forEach(function(node){
+        links.appendChild(node);
+      });
+
+      if(collapsed[key]){
+        section.classList.add("nav-section-collapsed");
+        btn.setAttribute("aria-expanded", "false");
+      }
+
+      btn.addEventListener("click", function(){
+        var isCollapsed = section.classList.toggle("nav-section-collapsed");
+        btn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+        var state = erpLoadNavCollapsed_();
+        state[key] = isCollapsed;
+        erpSaveNavCollapsed_(state);
+      });
+    });
+  }catch(_e){}
+}
+
+function erpSyncNavSectionActive_(){
+  try{
+    document.querySelectorAll(".nav-section").forEach(function(sec){
+      sec.classList.remove("nav-section-has-active");
+      if(sec.querySelector("a.nav-active")) sec.classList.add("nav-section-has-active");
+    });
+  }catch(_e){}
+}
+
+function erpExpandNavSectionForRoute_(route){
+  try{
+    var r = String(route || "").trim();
+    if(!r) return;
+    document.querySelectorAll(".sidebar a[data-nav-module]").forEach(function(a){
+      var onclick = a.getAttribute("onclick") || "";
+      var m = onclick.match(/navigate\s*\(\s*['"]([^'"]+)['"]\s*\)/);
+      if(!m || m[1] !== r) return;
+      var sec = a.closest(".nav-section");
+      if(!sec) return;
+      sec.classList.remove("nav-section-collapsed");
+      var btn = sec.querySelector(".nav-section-toggle");
+      if(btn) btn.setAttribute("aria-expanded", "true");
+      var key = sec.getAttribute("data-nav-section");
+      if(key){
+        var state = erpLoadNavCollapsed_();
+        state[key] = false;
+        erpSaveNavCollapsed_(state);
+      }
+    });
+    erpSyncNavSectionActive_();
+  }catch(_e){}
 }
 
 function erpApplyModulePermissions(){
@@ -65,23 +213,38 @@ function erpApplyModulePermissions(){
       a.style.display = ok ? "" : "none";
       a.setAttribute("aria-hidden", ok ? "false" : "true");
     });
-    // 若某段落底下沒有任何可見連結，就隱藏 section title
-    document.querySelectorAll(".section-title").forEach(function(t){
-      var el = t.nextElementSibling;
+    document.querySelectorAll(".nav-section").forEach(function(sec){
+      var links = sec.querySelectorAll("[data-nav-module]");
       var has = false;
-      while(el){
-        if(el.classList && el.classList.contains("section-title")) break;
-        if(el.matches && el.matches("[data-nav-module]")){
-          if(el.style.display !== "none") { has = true; break; }
-        }
-        el = el.nextElementSibling;
-      }
-      t.style.display = has ? "" : "none";
-      t.setAttribute("aria-hidden", has ? "false" : "true");
+      links.forEach(function(a){
+        if(a.style.display !== "none") has = true;
+      });
+      sec.style.display = has ? "" : "none";
+      sec.setAttribute("aria-hidden", has ? "false" : "true");
     });
+    erpSyncNavSectionActive_();
   }catch(_e){}
 }
 try{ window.erpApplyModulePermissions = erpApplyModulePermissions; }catch(_e0){}
+
+function erpSetActiveNavRoute_(route){
+  try{
+    var r = String(route || "").trim();
+    if(!r) return;
+    document.querySelectorAll(".sidebar a[data-nav-module]").forEach(function(a){
+      a.classList.remove("nav-active");
+      a.removeAttribute("aria-current");
+      var onclick = a.getAttribute("onclick") || "";
+      var m = onclick.match(/navigate\s*\(\s*['"]([^'"]+)['"]\s*\)/);
+      if(m && m[1] === r){
+        a.classList.add("nav-active");
+        a.setAttribute("aria-current", "page");
+      }
+    });
+    erpExpandNavSectionForRoute_(r);
+  }catch(_e){}
+}
+try{ window.erpSetActiveNavRoute_ = erpSetActiveNavRoute_; }catch(_eNavFn){}
 
 function escapeModuleLoadHtml_(s) {
   return String(s ?? "")
@@ -288,11 +451,18 @@ function navigate(module) {
   }
   // 模組權限：若未允許，阻擋導頁（避免只靠隱藏選單被繞過）
   try{
-    if(module && !erpIsModuleAllowed_(module)){
+    var permKey = module;
+    if(module === "consignment_case" || module === "consignment_settlement" || module === "consignment_return"){
+      permKey = "consignment";
+    }else if(module === "consignment_promo"){
+      permKey = "commercial_promo";
+    }
+    if(module && !erpIsModuleAllowed_(permKey)){
       if(typeof showToast === "function") showToast("您沒有權限使用此模組。", "error");
       return;
     }
   }catch(_ePerm){}
+  var navRoute = module;
   switch (module) {
 
     case "dashboard":
@@ -359,6 +529,39 @@ function navigate(module) {
       loadModule("modules/shipping.html", "shipping");
       break;
 
+    case "consignment_case":
+      loadModule("modules/consignment-case.html", "consignmentCase");
+      break;
+
+    case "consignment_settlement":
+      loadModule("modules/consignment-settlement.html", "consignmentSettlement");
+      break;
+
+    case "commercial_promo":
+    case "consignment_promo":
+      loadModule("modules/consignment-promo.html", "consignmentPromo");
+      break;
+
+    case "commercial_dealer":
+      loadModule("modules/commercial-dealer.html", "commercialDealer");
+      break;
+
+    case "commercial_dealer_customer":
+      loadModule("modules/commercial-dealer-customer.html", "commercialDealerCustomer");
+      break;
+
+    case "dealer_rebate":
+      loadModule("modules/dealer-rebate.html", "dealerRebate");
+      break;
+
+    case "consignment_return":
+      loadModule("modules/consignment-return.html", "consignmentReturn");
+      break;
+
+    case "ar":
+      loadModule("modules/ar.html", "ar");
+      break;
+
     case "invoice":
       loadModule("modules/invoice.html", "invoice");
       break;
@@ -384,11 +587,14 @@ function navigate(module) {
       break;
 
     default:
+      navRoute = "dashboard";
       loadModule("modules/dashboard.html");
   }
+  try{ erpSetActiveNavRoute_(navRoute); }catch(_eNavActive){}
 }
 
 document.addEventListener("DOMContentLoaded", function () {
+  try{ erpInitNavSections_(); }catch(_eNavSec){}
   try{ erpApplyModulePermissions(); }catch(_e0){}
   // 尚未登入（無 session_token）時，不要自動載入任何模組，避免背景打 API 造成大量 session_token required 噪音。
   try{

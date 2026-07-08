@@ -13,6 +13,28 @@ let rcvLoadInFlight_ = false;
 let rcvPendingSourceId_ = "";
 let rcvLoadWarnToken_ = "";
 
+function rcvSortReceiptRows_(rows, idField) {
+  var idKey = idField || "gr_id";
+  if (typeof erpSortRowsNewestFirst_ === "function") {
+    return erpSortRowsNewestFirst_(rows, ["receipt_date", "created_at"], idKey);
+  }
+  return (rows || []).slice().sort(function (a, b) {
+    return String(b.receipt_date || "").localeCompare(String(a.receipt_date || ""));
+  });
+}
+
+function rcvSortSourceDocs_(rows, idField, dateFields) {
+  var idKey = idField || "po_id";
+  var dates = dateFields || ["order_date", "created_at"];
+  if (typeof erpSortRowsNewestFirst_ === "function") {
+    return erpSortRowsNewestFirst_(rows, dates, idKey);
+  }
+  var primary = dates[0] || "order_date";
+  return (rows || []).slice().sort(function (a, b) {
+    return String(b[primary] || "").localeCompare(String(a[primary] || ""));
+  });
+}
+
 function rcvSetLoadActionLock_(on){
   const loading = !!on;
   const postBtn = document.getElementById("rcv_post_btn");
@@ -157,6 +179,8 @@ function rcvWarehouseLabelById_(warehouseId){
   return catLabel ? `${namePart}-${catLabel}` : namePart;
 }
 let rcvSuppliers = [];
+let rcvPostedExpandedId_ = "";
+let rcvPostedRenderCache_ = null;
 
 const RCV_OPT_SEP = "│";
 
@@ -171,6 +195,13 @@ function rcvEscOptText_(s){
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;");
+}
+
+function rcvSyncSourceSelectTitle_(sel){
+  if(!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const raw = opt ? String(opt.getAttribute("title") || opt.textContent || "").trim() : "";
+  sel.title = raw;
 }
 
 function rcvSupplierDisplay_(supplierId){
@@ -256,6 +287,177 @@ function formatRcvProductDisplay_(productId){
   return spec ? `${name}（${spec}）` : name;
 }
 
+function rcvPostedReceiptId_(row, sourceType){
+  if(sourceType === "PO") return String(row.gr_id || "").trim();
+  return String(row.import_receipt_id || "").trim();
+}
+
+function rcvTogglePostedDetail_(receiptId){
+  const id = String(receiptId || "").trim();
+  rcvPostedExpandedId_ = (rcvPostedExpandedId_ === id) ? "" : id;
+  rcvPaintPostedReceipts_();
+}
+
+function rcvBuildLotMap_(lotsAll){
+  const lotById = {};
+  (lotsAll || []).forEach((l) => {
+    const lid = String(l.lot_id || "").trim();
+    if(lid) lotById[lid] = l;
+  });
+  return lotById;
+}
+
+function rcvPostedDetailHeadCellStyle_() {
+  return "padding:8px 12px 4px;background:#f8fafc;border-top:none;font-size:11px;color:#64748b;font-weight:600;";
+}
+
+function rcvPostedDetailLineCellStyle_() {
+  return "padding:4px 12px 6px;background:#f8fafc;border-top:none;font-size:12px;line-height:1.45;";
+}
+
+function rcvBuildPostedDetailRowsHtml_(receiptId, items, lotById, expanded) {
+  const idAttr = rcvEscOptAttr_(receiptId);
+  const detailStyle = expanded ? "" : ' style="display:none;"';
+  const rows = Array.isArray(items) ? items : [];
+  const cellBg = "background:#f8fafc;border-top:none;";
+  if (!rows.length) {
+    return (
+      '<tr class="rcv-posted-detail" data-rcv-receipt-detail="' +
+      idAttr +
+      '"' +
+      detailStyle +
+      '><td colspan="6" style="padding:8px 12px 10px;' +
+      cellBg +
+      'color:#94a3b8;font-size:12px;">無明細</td></tr>'
+    );
+  }
+  const headStyle = rcvPostedDetailHeadCellStyle_();
+  const head =
+    '<tr class="rcv-posted-detail rcv-posted-detail-head" data-rcv-receipt-detail="' +
+    idAttr +
+    '"' +
+    detailStyle +
+    ">" +
+    '<td style="' +
+    headStyle +
+    '">產品</td>' +
+    '<td style="' +
+    headStyle +
+    '">製造／有效</td>' +
+    '<td style="' +
+    headStyle +
+    '">加工廠 Lot</td>' +
+    '<td style="' +
+    headStyle +
+    '">數量</td>' +
+    '<td style="' +
+    headStyle +
+    '"></td>' +
+    '<td style="' +
+    headStyle +
+    '"></td>' +
+    "</tr>";
+  const lineStyle = rcvPostedDetailLineCellStyle_();
+  const lines = rows
+    .map(function (it) {
+      const lot = lotById[String(it.lot_id || "").trim()] || {};
+      const prod = formatRcvProductDisplay_(it.product_id);
+      const qty = Math.round(Number(it.received_qty || 0) * 10000) / 10000;
+      const unit = String(it.unit || "").trim();
+      const qtyTxt = qty + (unit ? " " + unit : "");
+      const fl = String(lot.factory_lot || "").trim();
+      const mfg = String(lot.manufacture_date || "").trim();
+      const exp = String(lot.expiry_date || "").trim();
+      const dates = [mfg ? "製 " + mfg : "", exp ? "效 " + exp : ""].filter(Boolean).join(" ") || "—";
+      return (
+        '<tr class="rcv-posted-detail rcv-posted-detail-line" data-rcv-receipt-detail="' +
+        idAttr +
+        '"' +
+        detailStyle +
+        ">" +
+        '<td style="' +
+        lineStyle +
+        '">' +
+        rcvEscOptText_(prod) +
+        "</td>" +
+        '<td style="' +
+        lineStyle +
+        'color:#64748b;font-size:11px;">' +
+        rcvEscOptText_(dates) +
+        "</td>" +
+        '<td style="' +
+        lineStyle +
+        '">' +
+        (fl ? rcvEscOptText_(fl) : "—") +
+        "</td>" +
+        '<td style="' +
+        lineStyle +
+        '">' +
+        rcvEscOptText_(qtyTxt) +
+        "</td>" +
+        '<td style="' +
+        lineStyle +
+        '"></td>' +
+        '<td style="' +
+        lineStyle +
+        '"></td>' +
+        "</tr>"
+      );
+    })
+    .join("");
+  return head + lines;
+}
+
+function rcvBuildPostedReceiptRowsHtml_(row, ctx){
+  const sourceType = ctx.sourceType;
+  const id = rcvPostedReceiptId_(row, sourceType);
+  const items = (ctx.items || []).filter((x) => {
+    if(sourceType === "PO") return String(x.gr_id || "") === id;
+    return String(x.import_receipt_id || "") === id;
+  });
+  const totalQty = items.reduce((s, x) => s + Number(x.received_qty || 0), 0);
+  const wh = rcvWarehouseLabelById_(row.warehouse || row.warehouse_id || "");
+  const st = String(row.status || "").toUpperCase() || "OPEN";
+  const stLabel = (typeof termLabelZhOnly === "function" ? termLabelZhOnly(st) : (typeof termLabel === "function" ? termLabel(st) : st));
+  const ev = sourceType === "PO"
+    ? rcvVoidEligibilityForGr_(id, row, ctx.sourceId, ctx.items, ctx.movements, ctx.availOpts)
+    : rcvVoidEligibilityForIr_(id, row, ctx.sourceId, ctx.items, ctx.movements, ctx.availOpts);
+  const canVoid = ev.ok;
+  const disabled = canVoid ? "" : "disabled";
+  const tip = canVoid ? "作廢此張收貨單（需選擇原因）" : ev.reason;
+  const tipAttr = rcvEscOptAttr_(tip);
+  const idAttr = rcvEscOptAttr_(id);
+  const expanded = rcvPostedExpandedId_ === id;
+  const summaryCls = "rcv-posted-summary erp-list-row-selectable" + (expanded ? " erp-list-row-open" : "");
+
+  return `
+    <tr class="${summaryCls}" data-rcv-receipt-id="${idAttr}" onclick="rcvTogglePostedDetail_(this.getAttribute('data-rcv-receipt-id'))" title="點擊展開／收合明細">
+      <td>${rcvEscOptText_(id)}</td>
+      <td>${rcvEscOptText_(row.receipt_date || "")}</td>
+      <td>${rcvEscOptText_(wh)}</td>
+      <td>${Math.round(totalQty * 10000) / 10000}</td>
+      <td>${rcvEscOptText_(stLabel)}</td>
+      <td onclick="event.stopPropagation()">
+        <button type="button" class="btn-secondary btn-sm" ${disabled} title="${tipAttr}" data-rcv-receipt-id="${idAttr}" onclick="event.stopPropagation(); voidPostedReceiptFromListBtn(this)">${canVoid ? "作廢" : "無法作廢"}</button>
+      </td>
+    </tr>
+    ${rcvBuildPostedDetailRowsHtml_(id, items, ctx.lotById || {}, expanded)}
+  `;
+}
+
+function rcvPaintPostedReceipts_(){
+  const tbody = document.getElementById("rcvPostedBody");
+  const cache = rcvPostedRenderCache_;
+  if(!tbody || !cache) return;
+  const rows = Array.isArray(cache.rows) ? cache.rows : [];
+  if(!rows.length){
+    const emptyMsg = cache.sourceType === "PO" ? "此 PO 尚無收貨單" : "此報單尚無收貨單";
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:18px;">${emptyMsg}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map((r) => rcvBuildPostedReceiptRowsHtml_(r, cache)).join("");
+}
+
 /**
  * 從其他列表跳轉到「收貨入庫」時使用（預先選好來源與單號）
  * sourceType: "PO" | "IMPORT"
@@ -291,106 +493,80 @@ async function renderRcvPostedReceipts_(){
   const tbody = document.getElementById("rcvPostedBody");
   if(!tbody) return;
   if(!rcvSourceType || !rcvSourceId){
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#64748b;padding:18px;">請先選擇 PO／報單</td></tr>`;
+    rcvPostedRenderCache_ = null;
+    rcvPostedExpandedId_ = "";
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:18px;">請先選擇 PO／報單</td></tr>`;
     return;
   }
-  setTbodyLoading_(tbody, 7);
+  setTbodyLoading_(tbody, 6);
+  rcvPostedExpandedId_ = "";
   try{
-    /* 作廢改由按鈕 data-rcv-receipt-id 傳入 ID（空 select 無 option 時無法用 .value 設定） */
+    const lotsAll = await getAll("lot").catch(() => []);
+    const lotById = rcvBuildLotMap_(lotsAll);
     if(rcvSourceType === "PO"){
       const [grAll, griAll, voidData] = await Promise.all([
         getAll("goods_receipt").catch(()=>[]),
         getAll("goods_receipt_item").catch(()=>[]),
         rcvFetchVoidData_()
       ]);
-      const availOpts = { availMap: voidData.availMap, availOk: voidData.availOk };
-      const rows = (grAll || []).filter(r => String(r.po_id || "") === String(rcvSourceId));
-      rows.sort((a,b)=>String(b.receipt_date||"").localeCompare(String(a.receipt_date||"")));
-      if(!rows.length){
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#64748b;padding:18px;">此 PO 尚無收貨單</td></tr>`;
-        return;
-      }
-      const movements = await rcvFetchMovementsByRefs_("GOODS_RECEIPT", rows.map(r => String(r.gr_id || "")), { refresh: false });
-      const items = Array.isArray(griAll) ? griAll : [];
-      const mv = Array.isArray(movements) ? movements : [];
-      tbody.innerHTML = "";
-      rows.forEach(r=>{
-        const id = String(r.gr_id || "");
-        const its = items.filter(x => String(x.gr_id || "") === id);
-        const lineCount = its.length;
-        const totalQty = its.reduce((s,x)=>s + Number(x.received_qty || 0), 0);
-        const wh = rcvWarehouseLabelById_(r.warehouse || r.warehouse_id || "");
-        const st = String(r.status || "").toUpperCase() || "OPEN";
-        const stLabel = (typeof termLabelZhOnly === "function" ? termLabelZhOnly(st) : (typeof termLabel === "function" ? termLabel(st) : st));
-        const ev = rcvVoidEligibilityForGr_(id, r, rcvSourceId, items, mv, availOpts);
-        const canVoid = ev.ok;
-        const disabled = canVoid ? "" : "disabled";
-        const tip = canVoid ? "作廢此張收貨單（需選擇原因）" : ev.reason;
-        const tipAttr = rcvEscOptAttr_(tip);
-        const idAttr = rcvEscOptAttr_(id);
-        tbody.innerHTML += `
-          <tr>
-            <td>${id}</td>
-            <td>${r.receipt_date || ""}</td>
-            <td>${wh}</td>
-            <td>${lineCount}</td>
-            <td>${Math.round(totalQty*10000)/10000}</td>
-            <td>${stLabel}</td>
-            <td>
-              <button type="button" class="btn-secondary btn-sm" ${disabled} title="${tipAttr}" data-rcv-receipt-id="${idAttr}" onclick="voidPostedReceiptFromListBtn(this)">${canVoid ? "作廢" : "無法作廢"}</button>
-            </td>
-          </tr>
-        `;
-      });
+      const rows = rcvSortReceiptRows_(
+        (grAll || []).filter(r => String(r.po_id || "") === String(rcvSourceId)),
+        "gr_id"
+      );
+      const movements = rows.length
+        ? await rcvFetchMovementsByRefs_("GOODS_RECEIPT", rows.map(r => String(r.gr_id || "")), { refresh: false })
+        : [];
+      rcvPostedRenderCache_ = {
+        sourceType: "PO",
+        sourceId: rcvSourceId,
+        rows,
+        items: Array.isArray(griAll) ? griAll : [],
+        movements: Array.isArray(movements) ? movements : [],
+        lotById,
+        availOpts: { availMap: voidData.availMap, availOk: voidData.availOk }
+      };
     }else{
       const [irAll, iriAll, voidData] = await Promise.all([
         getAll("import_receipt").catch(()=>[]),
         getAll("import_receipt_item").catch(()=>[]),
         rcvFetchVoidData_()
       ]);
-      const availOpts = { availMap: voidData.availMap, availOk: voidData.availOk };
-      const rows = (irAll || []).filter(r => String(r.import_doc_id || "") === String(rcvSourceId));
-      rows.sort((a,b)=>String(b.receipt_date||"").localeCompare(String(a.receipt_date||"")));
-      if(!rows.length){
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#64748b;padding:18px;">此報單尚無收貨單</td></tr>`;
-        return;
-      }
-      const movements = await rcvFetchMovementsByRefs_("IMPORT_RECEIPT", rows.map(r => String(r.import_receipt_id || "")), { refresh: false });
-      const items = Array.isArray(iriAll) ? iriAll : [];
-      const mv = Array.isArray(movements) ? movements : [];
-      tbody.innerHTML = "";
-      rows.forEach(r=>{
-        const id = String(r.import_receipt_id || "");
-        const its = items.filter(x => String(x.import_receipt_id || "") === id);
-        const lineCount = its.length;
-        const totalQty = its.reduce((s,x)=>s + Number(x.received_qty || 0), 0);
-        const wh = rcvWarehouseLabelById_(r.warehouse || r.warehouse_id || "");
-        const st = String(r.status || "").toUpperCase() || "OPEN";
-        const stLabel = (typeof termLabelZhOnly === "function" ? termLabelZhOnly(st) : (typeof termLabel === "function" ? termLabel(st) : st));
-        const ev = rcvVoidEligibilityForIr_(id, r, rcvSourceId, items, mv, availOpts);
-        const canVoid = ev.ok;
-        const disabled = canVoid ? "" : "disabled";
-        const tip = canVoid ? "作廢此張收貨單（需選擇原因）" : ev.reason;
-        const tipAttr = rcvEscOptAttr_(tip);
-        const idAttr = rcvEscOptAttr_(id);
-        tbody.innerHTML += `
-          <tr>
-            <td>${id}</td>
-            <td>${r.receipt_date || ""}</td>
-            <td>${wh}</td>
-            <td>${lineCount}</td>
-            <td>${Math.round(totalQty*10000)/10000}</td>
-            <td>${stLabel}</td>
-            <td>
-              <button type="button" class="btn-secondary btn-sm" ${disabled} title="${tipAttr}" data-rcv-receipt-id="${idAttr}" onclick="voidPostedReceiptFromListBtn(this)">${canVoid ? "作廢" : "無法作廢"}</button>
-            </td>
-          </tr>
-        `;
-      });
+      const rows = rcvSortReceiptRows_(
+        (irAll || []).filter(r => String(r.import_doc_id || "") === String(rcvSourceId)),
+        "import_receipt_id"
+      );
+      const movements = rows.length
+        ? await rcvFetchMovementsByRefs_("IMPORT_RECEIPT", rows.map(r => String(r.import_receipt_id || "")), { refresh: false })
+        : [];
+      rcvPostedRenderCache_ = {
+        sourceType: "IMPORT",
+        sourceId: rcvSourceId,
+        rows,
+        items: Array.isArray(iriAll) ? iriAll : [],
+        movements: Array.isArray(movements) ? movements : [],
+        lotById,
+        availOpts: { availMap: voidData.availMap, availOk: voidData.availOk }
+      };
     }
+    rcvPaintPostedReceipts_();
   }catch(e){
     console.error(e);
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#991b1b;padding:18px;">已收列表載入失敗</td></tr>`;
+    rcvPostedRenderCache_ = null;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#991b1b;padding:18px;">已收列表載入失敗</td></tr>`;
+  }
+}
+
+/** 來源類型／單號變更時同步已收列表（避免仍顯示上一種來源的收貨單） */
+async function rcvRefreshPostedList_(){
+  const panel = document.getElementById("rcvPostedPanel");
+  const tbody = document.getElementById("rcvPostedBody");
+  if(!tbody) return;
+  if(panel && panel.open){
+    await renderRcvPostedReceipts_();
+    return;
+  }
+  if(!rcvSourceType || !rcvSourceId){
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:18px;">請先選擇 PO／報單</td></tr>`;
   }
 }
 
@@ -428,6 +604,7 @@ async function receiveInit() {
           renderRcvLines();
           setRcvReceiptState_("收庫流程：未載入 — 請先選擇來源類型與單號", "warn");
           setRcvLotState_("批次狀態：未產生", "warn");
+          try{ Promise.resolve(rcvRefreshPostedList_()); }catch(_ePosted){}
         },
         onAfter: function(){
           try{ Promise.resolve(onRcvSourceTypeChange()); }catch(_e){}
@@ -573,6 +750,7 @@ async function onRcvSourceTypeChange(forceRefresh) {
     setRcvLotState_("批次狀態：未產生", "warn");
     await refreshRcvVoidReceiptOptions(force);
     setRcvPostBtnState_();
+    await rcvRefreshPostedList_();
     return;
   }
 
@@ -610,39 +788,39 @@ async function onRcvSourceTypeChange(forceRefresh) {
       // 允許分批收貨：
       // - OPEN / PARTIAL：可再收
       // - CLOSED：預設不顯示（可勾選「顯示已收完（CLOSED）」）
-      const openPOs = (pos || []).filter((p) => {
+      const openPOs = rcvSortSourceDocs_((pos || []).filter((p) => {
         const st = normStatus_(p && p.status);
         if (st === "CANCELLED") return false;
         if (st === "CLOSED") return !!showClosed;
         return true;
-      });
-      openPOs.sort((a, b) => String(b.order_date || "").localeCompare(String(a.order_date || "")));
+      }), "po_id");
       sel.innerHTML =
         '<option value="">請選擇 PO</option>' +
         openPOs
           .map((p) => {
             const v = rcvEscOptAttr_(p.po_id);
-            const t = rcvEscOptText_(rcvFormatPoOptionLabel_(p));
-            return `<option value="${v}">${t}</option>`;
+            const label = rcvFormatPoOptionLabel_(p);
+            const t = rcvEscOptText_(label);
+            return `<option value="${v}" title="${rcvEscOptAttr_(label)}">${t}</option>`;
           })
           .join("");
       if (openPOs.length === 0) sel.innerHTML = `<option value="">${showClosed ? "尚無 PO" : "尚無可收 PO（OPEN／PARTIAL）"}</option>`;
     } else {
       const docs = await getAll("import_document");
-      const list = (docs || []).filter((d) => {
+      const list = rcvSortSourceDocs_((docs || []).filter((d) => {
         const st = normStatus_(d && d.status);
         if (st === "CANCELLED") return false;
         if (!showClosed && st === "CLOSED") return false;
         return true;
-      });
-      list.sort((a, b) => String(b.order_date || "").localeCompare(String(a.order_date || "")));
+      }), "import_doc_id", ["import_date", "created_at"]);
       sel.innerHTML =
         '<option value="">請選擇報單</option>' +
         list
           .map((d) => {
             const v = rcvEscOptAttr_(d.import_doc_id);
-            const t = rcvEscOptText_(rcvFormatImportOptionLabel_(d));
-            return `<option value="${v}">${t}</option>`;
+            const label = rcvFormatImportOptionLabel_(d);
+            const t = rcvEscOptText_(label);
+            return `<option value="${v}" title="${rcvEscOptAttr_(label)}">${t}</option>`;
           })
           .join("");
       if (list.length === 0) sel.innerHTML = `<option value="">${showClosed ? "尚無報單，請先至「進口報單」建立" : "尚無可收報單（OPEN／PARTIAL）"}</option>`;
@@ -651,9 +829,11 @@ async function onRcvSourceTypeChange(forceRefresh) {
     sel.innerHTML = '<option value="">載入失敗</option>';
     console.error(e);
   }
+  rcvSyncSourceSelectTitle_(sel);
   renderRcvLines();
   setRcvPostBtnState_();
   await refreshRcvVoidReceiptOptions(force);
+  await rcvRefreshPostedList_();
 }
 
 async function onRcvSourceSelect(forceRefresh) {
@@ -667,6 +847,7 @@ async function onRcvSourceSelect(forceRefresh) {
   }
   const force = !!forceRefresh;
   rcvSourceId = document.getElementById("rcv_source_id")?.value || "";
+  rcvSyncSourceSelectTitle_(document.getElementById("rcv_source_id"));
   rcvLines = [];
   const tbody = document.getElementById("rcvLinesBody");
   if (!tbody) return;
@@ -678,6 +859,7 @@ async function onRcvSourceSelect(forceRefresh) {
     setRcvLotState_("批次狀態：未產生", "warn");
     await refreshRcvVoidReceiptOptions(force);
     setRcvPostBtnState_();
+    await rcvRefreshPostedList_();
     return;
   }
 
@@ -687,6 +869,7 @@ async function onRcvSourceSelect(forceRefresh) {
     setRcvLotState_("批次狀態：未產生", "warn");
     await refreshRcvVoidReceiptOptions(force);
     setRcvPostBtnState_();
+    await rcvRefreshPostedList_();
     return;
   }
 
@@ -881,6 +1064,7 @@ async function onRcvSourceSelect(forceRefresh) {
     }catch(_eNext){}
   }
   await refreshRcvVoidReceiptOptions(false);
+  await rcvRefreshPostedList_();
 }
 
 function rcvSumMovementQtyForLot_(movements, lotId) {
@@ -1009,20 +1193,24 @@ async function refreshRcvVoidReceiptOptions(forceRefresh) {
   try {
     if (rcvSourceType === "PO") {
       const all = await getAll("goods_receipt", force ? { refresh: true } : undefined).catch(() => []);
-      const rows = (all || []).filter(
-        (r) => r.po_id === rcvSourceId && String(r.status || "").toUpperCase() !== "CANCELLED"
+      const rows = rcvSortReceiptRows_(
+        (all || []).filter(
+          (r) => r.po_id === rcvSourceId && String(r.status || "").toUpperCase() !== "CANCELLED"
+        ),
+        "gr_id"
       );
-      rows.sort((a, b) => String(b.receipt_date || "").localeCompare(String(a.receipt_date || "")));
       sel.innerHTML =
         '<option value="">請選擇要作廢的採購收貨單（GR）</option>' +
         rows.map((r) => `<option value="${r.gr_id}">${r.gr_id} — ${r.receipt_date || ""}</option>`).join("");
     } else {
       const all = await getAll("import_receipt", force ? { refresh: true } : undefined).catch(() => []);
-      const rows = (all || []).filter(
-        (r) =>
-          r.import_doc_id === rcvSourceId && String(r.status || "").toUpperCase() !== "CANCELLED"
+      const rows = rcvSortReceiptRows_(
+        (all || []).filter(
+          (r) =>
+            r.import_doc_id === rcvSourceId && String(r.status || "").toUpperCase() !== "CANCELLED"
+        ),
+        "import_receipt_id"
       );
-      rows.sort((a, b) => String(b.receipt_date || "").localeCompare(String(a.receipt_date || "")));
       sel.innerHTML =
         '<option value="">請選擇要作廢的進口收貨單（IR）</option>' +
         rows
@@ -1033,6 +1221,27 @@ async function refreshRcvVoidReceiptOptions(forceRefresh) {
     sel.innerHTML = '<option value="">載入收貨單列表失敗</option>';
     console.error(e);
   }
+}
+
+function rcvBindQtyIntInput_(el, maxVal) {
+  if (!el) return;
+  const max = Math.max(0, Math.floor(Number(maxVal || 0)));
+  const clamp = function () {
+    let raw = String(el.value || "").replace(/\D/g, "");
+    if (!raw) {
+      el.value = "";
+      return;
+    }
+    let n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 0) n = 0;
+    if (max > 0 && n > max) n = max;
+    el.value = String(n);
+  };
+  el.addEventListener("input", function () {
+    clamp();
+    setRcvPostBtnState_();
+  });
+  el.addEventListener("change", clamp);
 }
 
 function renderRcvLines() {
@@ -1061,21 +1270,25 @@ function renderRcvLines() {
     const hasMain = (Array.isArray(rcvWarehouses) ? rcvWarehouses : []).some(w => String(w?.warehouse_id || "").trim().toUpperCase() === "MAIN");
     const whRow = String(row.warehouse_id || (hasMain ? "MAIN" : "") || whIdDefault || "").trim().toUpperCase();
     try{ row.warehouse_id = whRow; }catch(_e){}
+    const qtyCell = ru
+      ? `${row.order_qty}<span class="rcv-qty-unit">${ru}</span>`
+      : String(row.order_qty);
     tbody.innerHTML += `
       <tr>
         <td class="col-rcv-item-no" title="${String(row.item_no ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;")}">${row.item_no}</td>
         <td>${formatRcvProductDisplay_(row.product_id)}</td>
-        <td>${row.order_qty}</td>
-        <td>${row.received_qty}</td>
-        <td>${row.remaining}</td>
-        <td class="col-rcv-qty-cell"><div class="erp-input-with-suffix"><input type="number" id="rcv_qty_${idx}" min="0" max="${maxVal}" step="0.01" placeholder="${placeholder}" ${disabledAttr}><span class="erp-input-suffix">${ru}</span></div></td>
+        <td class="col-rcv-order-qty">${qtyCell}</td>
+        <td class="col-rcv-num">${row.received_qty}</td>
+        <td class="col-rcv-num">${row.remaining}</td>
+        <td class="col-rcv-qty-cell"><input type="text" class="rcv-qty-int" id="rcv_qty_${idx}" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="${placeholder}" ${disabledAttr}></td>
         <td>
           <select id="rcv_wh_${idx}" class="rcv-line-wh" ${canReceive ? "" : "disabled"}>
             ${whOptHtml}
           </select>
         </td>
-        <td><input type="date" class="rcv-input-date" id="rcv_mfg_${idx}"></td>
-        <td><input type="date" class="rcv-input-date" id="rcv_exp_${idx}"></td>
+        <td><input type="text" class="rcv-input-factory-lot" id="rcv_factory_lot_${idx}" placeholder="選填" ${canReceive ? "" : "disabled"}></td>
+        <td><input type="date" class="rcv-input-date" id="rcv_mfg_${idx}" ${canReceive ? "" : "disabled"}></td>
+        <td><input type="date" class="rcv-input-date" id="rcv_exp_${idx}" ${canReceive ? "" : "disabled"}></td>
       </tr>
     `;
   });
@@ -1083,9 +1296,9 @@ function renderRcvLines() {
   // 綁定輸入事件：即時更新「產生批次」按鈕狀態/提示
   rcvLines.forEach((row, idx) => {
     const q = document.getElementById(`rcv_qty_${idx}`);
-    if(q){
-      q.oninput = setRcvPostBtnState_;
-      q.onchange = setRcvPostBtnState_;
+    if (q) {
+      const canReceive = Number(row.remaining || 0) > 0;
+      rcvBindQtyIntInput_(q, canReceive ? row.remaining : 0);
     }
     const wh = document.getElementById(`rcv_wh_${idx}`);
     if(wh){
@@ -1102,7 +1315,10 @@ function renderRcvLines() {
 function getRcvInputQtys() {
   return rcvLines.map((_, idx) => {
     const el = document.getElementById(`rcv_qty_${idx}`);
-    return Math.max(0, Number(el?.value || 0));
+    const raw = String(el?.value || "").trim();
+    if (!raw) return 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
   });
 }
 
@@ -1118,7 +1334,8 @@ function getRcvLotDates() {
   return rcvLines.map((_, idx) => {
     const mfg = (document.getElementById(`rcv_mfg_${idx}`)?.value || "").trim();
     const exp = (document.getElementById(`rcv_exp_${idx}`)?.value || "").trim();
-    return { manufacture_date: mfg, expiry_date: exp };
+    const factoryLot = (document.getElementById(`rcv_factory_lot_${idx}`)?.value || "").trim().toUpperCase();
+    return { manufacture_date: mfg, expiry_date: exp, factory_lot: factoryLot };
   });
 }
 
@@ -1332,7 +1549,8 @@ async function postGoodsReceiptUnified(gr_id, receipt_date, warehouse, remark, q
       received_qty: String(qty),
       unit: row.unit,
       manufacture_date: dates.manufacture_date || "",
-      expiry_date: dates.expiry_date || ""
+      expiry_date: dates.expiry_date || "",
+      factory_lot: dates.factory_lot || ""
     });
   }
   const res = await callAPI({
@@ -1347,7 +1565,7 @@ async function postGoodsReceiptUnified(gr_id, receipt_date, warehouse, remark, q
     expected_existed_goods_receipt_item_count: "0",
     lines_json: JSON.stringify(lines),
     created_by: getCurrentUser(),
-    created_at: nowIso16()
+    created_at: nowIsoTaipei()
   }, { method: "POST" });
 
   // 建立批次後：立即清掉相關快取，避免列表仍顯示舊的已收/剩餘
@@ -1385,7 +1603,8 @@ async function postImportReceiptUnified(import_receipt_id, receipt_date, warehou
       received_qty: String(qty),
       unit: row.unit,
       manufacture_date: dates.manufacture_date || "",
-      expiry_date: dates.expiry_date || ""
+      expiry_date: dates.expiry_date || "",
+      factory_lot: dates.factory_lot || ""
     });
   }
   const res = await callAPI({
@@ -1400,7 +1619,7 @@ async function postImportReceiptUnified(import_receipt_id, receipt_date, warehou
     expected_existed_import_receipt_item_count: "0",
     lines_json: JSON.stringify(lines),
     created_by: getCurrentUser(),
-    created_at: nowIso16()
+    created_at: nowIsoTaipei()
   }, { method: "POST" });
 
   // 建立批次後：立即清掉相關快取，避免列表仍顯示舊的已收/剩餘

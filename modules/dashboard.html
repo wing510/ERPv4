@@ -1,5 +1,4 @@
-<h2 style="margin-bottom:8px;">Dashboard 儀表板</h2>
-<p style="color:#64748b;font-size:14px;margin:0 0 20px 0;">重點在「今天要處理什麼」與「風險提醒」，而非單純筆數統計。</p>
+<h2 style="margin-bottom:20px;">Dashboard 儀表板</h2>
 
 <div id="dashboardFirstTimeGuide" class="card" style="display:none; background:#f0f9ff; border-left:4px solid #0ea5e9; margin-bottom:20px;">
   <div class="card-body">
@@ -11,7 +10,6 @@
   </div>
 </div>
 
-<!-- 待辦與風險 -->
 <div class="card" style="margin-bottom:16px;">
   <div class="card-header card-header-flex">
     <span>待辦與風險（批次／效期）</span>
@@ -43,8 +41,39 @@
       無法讀取庫存異動彙總（available map）。目前可用量將顯示為「—/--」，請稍後重試或確認後端是否可連線。
     </p>
     <p id="db_missing_movement_note" style="display:none;margin:10px 0 0 0;font-size:13px;color:#991b1b;background:#fef2f2;padding:8px 12px;border-radius:6px;border:1px solid #fecaca;">
-      偵測到有 Lot 缺少 movement（庫存流水帳）紀錄：<strong id="db_missing_movement_count">—</strong> 筆。這些 Lot 的可用量會顯示為「--」，且出貨/扣庫會被阻擋。
+      偵測到有 Lot 缺少 movement（庫存流水帳）紀錄：<strong id="db_missing_movement_count">—</strong> 筆。這些 Lot 的可用量會顯示為「--」，且出貨／扣庫會被阻擋。
     </p>
+  </div>
+</div>
+
+<!-- 財務提醒 -->
+<div class="card" style="margin-bottom:16px;" id="db_finance_card">
+  <div class="card-header card-header-flex">
+    <span>財務提醒</span>
+  </div>
+  <div class="card-body">
+    <div class="dashboard-kpi-grid">
+      <button type="button" class="dashboard-kpi dashboard-kpi-accent" onclick="navigate('consignment_case');" title="前往 Case 案件管理">
+        <span class="dashboard-kpi-label">未結案寄賣</span>
+        <span class="dashboard-kpi-value" id="db_consignment_open">—</span>
+        <span class="dashboard-kpi-hint">OPEN 追蹤單</span>
+      </button>
+      <button type="button" class="dashboard-kpi dashboard-kpi-danger" onclick="navigate('ar');" title="前往應收／收款">
+        <span class="dashboard-kpi-label">逾期未收 AR</span>
+        <span class="dashboard-kpi-value" id="db_ar_overdue">—</span>
+        <span class="dashboard-kpi-hint">超過公司設定門檻</span>
+      </button>
+      <button type="button" class="dashboard-kpi dashboard-kpi-warn" onclick="navigate('ar');" title="前往應收／收款">
+        <span class="dashboard-kpi-label">即將逾期 AR</span>
+        <span class="dashboard-kpi-value" id="db_ar_reminder">—</span>
+        <span class="dashboard-kpi-hint" id="db_ar_reminder_hint">到期前 5 天內（公司設定）</span>
+      </button>
+      <button type="button" class="dashboard-kpi" onclick="navigate('ar');" title="前往應收／收款">
+        <span class="dashboard-kpi-label">未結案應收</span>
+        <span class="dashboard-kpi-value" id="db_ar_open">—</span>
+        <span class="dashboard-kpi-hint">OPEN / PARTIAL</span>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -54,7 +83,7 @@
     <span>進行中單據（摘要）</span>
   </div>
   <div class="card-body">
-    <div class="dashboard-doc-grid">
+    <div class="dashboard-kpi-grid">
       <div class="dashboard-doc-block">
         <div class="dashboard-doc-title">採購 PO</div>
         <div class="dashboard-doc-row"><span>進行中（OPEN／PARTIAL）</span><strong id="db_po_open">—</strong></div>
@@ -83,10 +112,10 @@
   </div>
 </div>
 
-<!-- 操作流程圖（複雜版） -->
+<!-- 操作流程圖 -->
 <div class="card" style="margin-bottom:16px;">
   <div class="card-header card-header-flex">
-    <span>操作流程圖（複雜版）</span>
+    <span>操作流程圖</span>
   </div>
   <div class="card-body">
     <div class="dashboard-flow-complex">
@@ -121,8 +150,26 @@
           出貨流程<br><small>FEFO 自動分配 Lot → 過帳扣庫</small>
         </a>
         <span class="dashboard-flow-arrow">→</span>
-        <a href="#" onclick="navigate('warehouse-stock');return false;" class="dashboard-flow-node">
+        <a href="#" onclick="navigate('warehouse_stock');return false;" class="dashboard-flow-node">
           倉庫庫存<br><small>依倉別查看可用量與效期</small>
+        </a>
+      </div>
+
+      <div class="dashboard-flow-row" style="margin-top:10px;">
+        <a href="#" onclick="navigate('consignment_case');return false;" class="dashboard-flow-node">
+          開寄賣案<br><small>Case 案件管理（OPEN）</small>
+        </a>
+        <span class="dashboard-flow-arrow">→</span>
+        <a href="#" onclick="navigate('shipping');return false;" class="dashboard-flow-node">
+          寄賣出貨<br><small>出貨過帳並指定寄賣案</small>
+        </a>
+        <span class="dashboard-flow-arrow">→</span>
+        <a href="#" onclick="navigate('consignment_settlement');return false;" class="dashboard-flow-node">
+          寄賣結算<br><small>依品項池結算並產生應收</small>
+        </a>
+        <span class="dashboard-flow-arrow">→</span>
+        <a href="#" onclick="navigate('ar');return false;" class="dashboard-flow-node">
+          AR 收款<br><small>應收帳款／多次收款結案</small>
         </a>
       </div>
 
@@ -136,23 +183,53 @@
         </a>
         <span class="dashboard-flow-arrow">→</span>
         <a href="#" onclick="navigate('lots');return false;" class="dashboard-flow-node">
-          追溯/稽核<br><small>Lots 查看追溯 / Log</small>
+          追溯／稽核<br><small>Lots 查看追溯 / Log</small>
         </a>
       </div>
     </div>
   </div>
 </div>
 
-<div class="button-group" id="dev_clear_button_group" style="margin-top:8px;display:none;" aria-hidden="true">
-  <button type="button" class="btn-secondary" id="dev_clear_btn" onclick="devClearNonMasterClick()" style="background:#fef3c7; color:#92400e;">開發測試：一鍵刪除（除主檔）</button>
+<div class="button-group dev-clear-button-group" id="dev_clear_button_group" style="margin-top:8px;display:none;" aria-hidden="true">
+  <button type="button" class="btn-secondary" id="dev_clear_btn" onclick="devClearNonMasterClick()" style="background:#fef3c7; color:#92400e;">開發測試：一鍵刪除</button>
+  <div class="dev-clear-exceptions">
+    <div class="dev-clear-exceptions-title">例外模組（不刪）</div>
+    <div class="dev-clear-exceptions-list">產品、供應商、客戶、倉庫、使用者、公司設定、空白 CI、促銷方案、經銷方案</div>
+  </div>
 </div>
 
 <style>
+  .dev-clear-button-group{
+    align-items:flex-start;
+    justify-content:flex-start;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .dev-clear-exceptions{
+    flex:0 1 auto;
+    min-width:0;
+    max-width:100%;
+    font-size:12px;
+    color:#92400e;
+    line-height:1.45;
+  }
+  .dev-clear-exceptions-title{
+    font-weight:600;
+    margin-bottom:2px;
+  }
+  .dev-clear-exceptions-list{
+    color:#a16207;
+  }
   .dashboard-kpi-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 12px;
     align-items: stretch;
+  }
+  @media (min-width: 769px) {
+    .dashboard-kpi-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
   }
   /* 覆寫全域 button { height:36px }，否則 KPI 內文會被裁切溢出卡片 */
   .dashboard-kpi {
@@ -194,13 +271,13 @@
   .dashboard-kpi-warn { border-left: 4px solid #f59e0b; background: #fffbeb; }
   .dashboard-kpi-danger { border-left: 4px solid #dc2626; background: #fef2f2; }
   .dashboard-kpi-accent { border-left: 4px solid #0ea5e9; background: #f0f9ff; }
-  .dashboard-doc-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 16px;
-  }
   .dashboard-doc-block {
-    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 14px 16px;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     background: #f8fafc;
@@ -216,7 +293,7 @@
     margin-bottom: 6px;
   }
   .dashboard-doc-row strong { color: #0f172a; font-size: 18px; }
-  .dashboard-doc-block .btn-sm { margin-top: 10px; width: 100%; }
+  .dashboard-doc-block .btn-sm { margin-top: auto; padding-top: 10px; width: 100%; }
   .dashboard-flow {
     display:flex;
     align-items:center;
@@ -254,5 +331,23 @@
     color:#94a3b8;
     font-weight:700;
     padding:0 2px;
+  }
+  @media (max-width: 768px) {
+    .dashboard-kpi-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .dashboard-kpi {
+      padding: 10px 12px;
+    }
+    .dashboard-kpi-label { font-size: 12px; }
+    .dashboard-kpi-value { font-size: 22px; margin: 4px 0; }
+    .dashboard-kpi-hint { font-size: 10px; }
+    .dashboard-doc-block {
+      padding: 10px;
+    }
+    .dashboard-doc-title { font-size: 13px; margin-bottom: 8px; }
+    .dashboard-doc-row { font-size: 12px; flex-wrap: wrap; }
+    .dashboard-doc-row strong { font-size: 16px; }
   }
 </style>

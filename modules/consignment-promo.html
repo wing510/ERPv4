@@ -1,0 +1,153 @@
+<!-- ===== Promo 促銷方案 ===== -->
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>
+      Promo 促銷方案
+      <button type="button" class="btn-sheet" onclick="openSheetLink('consignment_promo_scheme')" title="促銷方案（consignment_promo_scheme）">Sheet</button>
+      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('consignment_promo_scheme_line')" title="促銷方案明細（consignment_promo_scheme_line）">Sheet</button>
+    </span>
+    <span data-help="consignmentPromoList"></span>
+  </div>
+  <div class="card-body">
+    <div class="search-toolbar search-toolbar-master">
+      <input type="text" id="search_cc_promo_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
+      <select id="search_cc_promo_customer_id" aria-label="篩選客戶" title="顯示套用於此客戶的方案（含全站）">
+        <option value="">全部客戶</option>
+      </select>
+      <select id="search_cc_promo_status">
+        <option value="">全部狀態</option>
+        <option value="ACTIVE" selected>生效</option>
+        <option value="DRAFT">草稿</option>
+        <option value="ENDED">結束</option>
+      </select>
+      <button type="button" class="btn-secondary" onclick="ccPromoResetSearch_()">重設</button>
+      <button type="button" class="btn-primary" onclick="newMasterFromList_('cc_promo_edit_card', ccPromoClearForm_)">新增</button>
+    </div>
+
+    <br>
+
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table master-list-table">
+        <thead>
+          <tr>
+            <th class="col-master-idname" onclick="ccPromoSort_('scheme_id')"><span class="master-th-id-desk">ID</span><span class="master-th-idname-mob">ID/名稱</span></th>
+            <th class="col-master-name-desk" onclick="ccPromoSort_('scheme_name')">名稱</th>
+            <th onclick="ccPromoSort_('status')">狀態</th>
+            <th onclick="ccPromoSort_('date_from')">有效期</th>
+            <th onclick="ccPromoSort_('scope_type')">範圍</th>
+            <th onclick="ccPromoSort_('channel')">管道</th>
+            <th onclick="ccPromoSort_('line_count')">明細數</th>
+          </tr>
+        </thead>
+        <tbody id="cc_promo_list_tbody">
+          <tr><td colspan="7" class="text-muted">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 方案明細 ===== -->
+<div class="card master-edit-card master-edit-collapsed" id="cc_promo_edit_card">
+  <div class="card-header card-header-flex">
+    <span>
+      方案明細
+      <button type="button" class="btn-sheet" onclick="openSheetLink('consignment_promo_scheme')" title="促銷方案（consignment_promo_scheme）">Sheet</button>
+      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('consignment_promo_scheme_line')" title="促銷方案明細（consignment_promo_scheme_line）">Sheet</button>
+      <span id="ccPromoStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">於寄賣結算套用</span>
+    </span>
+    <span data-help="consignmentPromo"></span>
+  </div>
+  <div class="card-body">
+    <div class="form-grid-4" style="margin-bottom:8px;">
+      <div class="form-group">
+        <label>方案編號</label>
+        <input type="text" id="cc_promo_id">
+      </div>
+      <div class="form-group">
+        <label>方案名稱 *</label>
+        <input type="text" id="cc_promo_name">
+      </div>
+      <div class="form-group">
+        <label>有效期起 *</label>
+        <input type="date" id="cc_promo_date_from">
+      </div>
+      <div class="form-group">
+        <label>有效期迄 *</label>
+        <input type="date" id="cc_promo_date_to">
+      </div>
+    </div>
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label>狀態 *</label>
+        <select id="cc_promo_status">
+          <option value="ACTIVE">生效</option>
+          <option value="DRAFT">草稿</option>
+          <option value="ENDED">結束</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>適用管道 *</label>
+        <select id="cc_promo_channel" onchange="ccPromoOnChannelChange_()">
+          <option value="CONSIGNMENT">寄賣（結算套用）</option>
+          <option value="GENERAL">一般銷售（銷售單＋出貨套用）</option>
+          <option value="ALL">全部</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>適用價格 *</label>
+        <select id="cc_promo_price_basis">
+          <option value="DEALER">經銷價（預設）</option>
+          <option value="LIST">牌價（建議售價）</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>適用範圍 *</label>
+        <select id="cc_promo_scope_type" onchange="ccPromoOnScopeChange_()">
+          <option value="CUSTOMER">客戶</option>
+          <option value="CASE">寄賣案</option>
+          <option value="GLOBAL">全站</option>
+        </select>
+      </div>
+      <div class="form-group" id="cc_promo_customer_group">
+        <label>客戶 *</label>
+        <select id="cc_promo_customer_id"></select>
+      </div>
+      <div class="form-group" id="cc_promo_case_group" style="display:none;grid-column:span 2;">
+        <label>寄賣案 *</label>
+        <select id="cc_promo_case_id"></select>
+      </div>
+      <div class="form-group" style="grid-column:span 2;">
+        <label>備註</label>
+        <input type="text" id="cc_promo_remark">
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-bottom:12px;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>品項 *</th>
+            <th>促銷類型 *</th>
+            <th>促銷單價</th>
+            <th>折扣％</th>
+            <th>買</th>
+            <th>送</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="cc_promo_lines_tbody"></tbody>
+      </table>
+    </div>
+    <div class="button-group" style="margin-bottom:16px;">
+      <button type="button" class="btn-secondary btn-sm" onclick="ccPromoAddLine_()">新增明細</button>
+    </div>
+
+    <div class="button-group">
+      <button class="btn-primary" id="cc_promo_create_btn" type="button" onclick="ccPromoSave_(false)">建立</button>
+      <button class="btn-secondary" id="cc_promo_update_btn" type="button" onclick="ccPromoSave_(true)">更新</button>
+      <button class="btn-secondary" id="cc_promo_end_btn" type="button" style="display:none;" onclick="ccPromoEndEarly_(this)">提前結束</button>
+      <button class="btn-secondary" type="button" onclick="ccPromoClearForm_()">清除</button>
+    </div>
+  </div>
+</div>

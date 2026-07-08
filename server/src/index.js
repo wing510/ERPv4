@@ -37,7 +37,7 @@ app.post("/exec", handleRequest);
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    erp_version: "4.1",
+    erp_version: "4.2",
     env: process.env.ERP_ENV_NAME || "DEV"
   });
 });

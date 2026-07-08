@@ -1,0 +1,102 @@
+<!-- ===== Return 收回 ===== -->
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>
+      Return 收回
+      <button type="button" class="btn-sheet" onclick="openSheetLink('consignment_case_return')" title="寄賣案件收回">Sheet</button>
+      <span id="ccRetStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">選寄賣案 → 填收回明細 → 確認收回</span>
+    </span>
+    <span data-help="consignmentReturn"></span>
+  </div>
+  <div class="card-body">
+    <div class="form-grid-4" style="margin-bottom:12px;">
+      <div class="form-group" style="grid-column:span 2;">
+        <label>寄賣案 *</label>
+        <select id="cc_ret_case_id"></select>
+      </div>
+      <div class="form-group">
+        <label>收回原因 *</label>
+        <select id="cc_ret_reason">
+          <option value="UNSOLD">未售收回</option>
+          <option value="EXPIRED">效期不足</option>
+          <option value="DAMAGED">商品瑕疵</option>
+          <option value="WRONG_GOODS">出貨寄錯</option>
+          <option value="CASE_CLOSE">合約終止</option>
+          <option value="OTHER">其他原因</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>收回日期 *</label>
+        <input type="date" id="cc_ret_date">
+      </div>
+      <div class="form-group" id="cc_ret_other_note_group" style="display:none;">
+        <label>其他原因說明 *</label>
+        <input type="text" id="cc_ret_other_note">
+      </div>
+      <div class="form-group" id="cc_ret_wh_change_note_group" style="display:none;">
+        <label>改倉說明 *</label>
+        <input type="text" id="cc_ret_wh_change_note">
+      </div>
+      <div class="form-group" style="grid-column:span 2;">
+        <label>備註</label>
+        <input type="text" id="cc_ret_remark">
+      </div>
+    </div>
+
+    <div id="cc_ret_summary_box" style="display:none;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;line-height:1.6;"></div>
+
+    <style>
+      .cc-pool-stack-cell{ line-height:1.35; min-width:0; }
+      .cc-pool-stack-main{ line-height:1.25; }
+      .cc-pool-stack-sub{ font-size:12px; color:#64748b; margin-top:2px; }
+    </style>
+
+    <h4 style="margin:0 0 6px 0;">收回明細</h4>
+    <div class="table-wrap" style="margin-bottom:12px;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>加工廠 Lot *</th>
+            <th style="min-width:120px;">收回數量 *</th>
+            <th>退回倉庫 *</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="cc_ret_lines_tbody"></tbody>
+      </table>
+    </div>
+    <div class="button-group" style="margin-bottom:16px;">
+      <button class="btn-secondary" type="button" onclick="ccReturnAddLine_()">新增一行</button>
+      <button class="btn-primary" id="cc_ret_post_btn" type="button" onclick="ccReturnPost_(this)">確認收回</button>
+      <button class="btn-secondary" type="button" onclick="navigate('consignment_case')">案件管理</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header card-header-flex">
+    <span>收回歷史</span>
+  </div>
+  <div class="card-body">
+    <style>
+      .cc-history-row:hover { background: #f1f5f9; }
+    </style>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>收回ID</th>
+            <th>日期</th>
+            <th>原因</th>
+            <th>退回倉</th>
+            <th>備註</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="cc_ret_history_tbody">
+          <tr><td colspan="6" class="text-muted">請先選擇寄賣案</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

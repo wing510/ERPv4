@@ -1,9 +1,56 @@
-<!-- ===== 編輯卡片 ===== -->
+<!-- ===== 列表 ===== -->
 <div class="card">
 
   <div class="card-header card-header-flex">
     <span>
       Suppliers 供應商
+      <button type="button" class="btn-sheet" onclick="openSheetLink('supplier')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
+    </span>
+    <span data-help="supplierList"></span>
+  </div>
+
+  <div class="card-body">
+
+    <!-- 搜尋 -->
+    <div class="search-toolbar search-toolbar-master">
+      <input type="text" id="search_supplier_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
+      <select id="search_supplier_status">
+        <option value="">全部狀態</option>
+        <option value="ACTIVE" selected>ACTIVE（使用中）</option>
+        <option value="INACTIVE">INACTIVE（停用）</option>
+      </select>
+      <button class="btn-secondary" onclick="resetSupplierSearch()">重設</button>
+      <button type="button" class="btn-primary" onclick="newMasterFromList_('supplier_edit_card', clearSupplierForm)">新增</button>
+    </div>
+
+    <br>
+
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table master-list-table">
+        <thead>
+          <tr>
+            <th class="col-master-idname" onclick="sortSuppliers('supplier_id')"><span class="master-th-id-desk">ID</span><span class="master-th-idname-mob">ID/名稱</span> <span id="sort-supplierId"></span></th>
+            <th class="col-master-name-desk" onclick="sortSuppliers('supplier_name')">名稱 <span id="sort-supplierName"></span></th>
+            <th class="col-master-typeflow" onclick="sortSuppliers('supplier_type')"><span class="master-th-type-desk">類型</span><span class="master-th-typeflow-mob">類型/流程</span></th>
+            <th class="col-master-flow-desk" onclick="sortSuppliers('supplier_flow')">流程</th>
+            <th class="col-master-contact" onclick="sortSuppliers('contact_person')"><span class="master-th-contact-desk">聯絡人 <span id="sort-contactPerson"></span></span><span class="master-th-contactphone-mob">聯絡人/電話</span></th>
+            <th class="col-master-phone" onclick="sortSuppliers('phone')"><span class="master-th-phone-desk">電話 <span id="sort-phone"></span></span></th>
+            <th class="col-status" onclick="sortSuppliers('status')">狀態 <span id="sort-status"></span></th>
+          </tr>
+        </thead>
+        <tbody id="supplierTableBody"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== 編輯卡片 ===== -->
+<div class="card master-edit-card master-edit-collapsed" id="supplier_edit_card">
+
+  <div class="card-header card-header-flex">
+    <span>
+      供應商明細
       <button type="button" class="btn-sheet" onclick="openSheetLink('supplier')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
     </span>
     <span data-help="supplierEdit"></span>
@@ -103,7 +150,7 @@
         <label>狀態</label>
         <div class="erp-status-select-row">
           <select id="s_status">
-            <option value="ACTIVE">ACTIVE（使用中）</option>
+            <option value="ACTIVE" selected>ACTIVE（使用中）</option>
             <option value="INACTIVE">INACTIVE（停用）</option>
           </select>
           <span id="s_status_lamp" class="status-lamp status-lamp--solo status-lamp--active" role="img" title="ACTIVE（使用中）" aria-label="ACTIVE（使用中）"><span class="status-lamp-dot" aria-hidden="true"></span></span>
@@ -122,54 +169,6 @@
       <button class="btn-secondary" id="s_update_btn" onclick="updateSupplier(this)">更新</button>
       <button class="btn-secondary" onclick="clearSupplierForm()">清除</button>
       <button class="btn-secondary" onclick="openLogs('supplier', document.getElementById('s_id')?.value || '', 'master')">Log</button>
-    </div>
-
-  </div>
-</div>
-
-
-<!-- ===== 列表 ===== -->
-<div class="card">
-
-  <div class="card-header card-header-flex">
-    <span>
-      供應商列表
-      <button type="button" class="btn-sheet" onclick="openSheetLink('supplier')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
-    </span>
-    <span data-help="supplierList"></span>
-  </div>
-
-  <div class="card-body">
-
-    <!-- 搜尋 -->
-    <div class="search-toolbar">
-      <input type="text" id="search_supplier_keyword" placeholder="關鍵字（ID／名稱／聯絡／電話／Email／備註）" style="min-width:360px;" title="比對供應商ID、名稱、聯絡人、電話、Email、備註">
-      <select id="search_supplier_status">
-        <option value="">全部狀態</option>
-        <option value="ACTIVE">ACTIVE（使用中）</option>
-        <option value="INACTIVE">INACTIVE（停用）</option>
-      </select>
-      <button class="btn-secondary" onclick="resetSupplierSearch()">重設</button>
-    </div>
-
-    <br>
-
-    <div class="table-wrapper table-wrapper-master">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th onclick="sortSuppliers('supplier_id')">ID <span id="sort-supplierId"></span></th>
-            <th onclick="sortSuppliers('supplier_name')">名稱 <span id="sort-supplierName"></span></th>
-            <th onclick="sortSuppliers('supplier_type')">類型</th>
-            <th onclick="sortSuppliers('supplier_flow')">流程</th>
-            <th onclick="sortSuppliers('contact_person')">聯絡人 <span id="sort-contactPerson"></span></th>
-            <th onclick="sortSuppliers('phone')">電話 <span id="sort-phone"></span></th>
-            <th class="col-status" onclick="sortSuppliers('status')">狀態 <span id="sort-status"></span></th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="supplierTableBody"></tbody>
-      </table>
     </div>
 
   </div>

@@ -1,4 +1,4 @@
-/*********************************
+﻿/*********************************
  * Movements Module（API 版）
  * - 實際扣庫/入庫都寫入 inventory_movement
  * - 後端會阻擋負庫存，且 OUT 類型只允許 APPROVED lot
@@ -17,6 +17,8 @@ let mvWarehouses = [];
 let mvImportReceiptIdToDocId = {};
 let mvGoodsReceiptIdToPoId = {};
 let mvImportDocIdToImportNo = {};
+/** 出貨單 ID → so_type（供出貨異動顯示一般／寄賣） */
+let mvShipmentSoTypeBySid_ = {};
 let mvLoadInFlight_ = false;
 let mvPendingReload_ = false;
 
@@ -302,7 +304,9 @@ async function refreshMovementData(){
       users,
       customers,
       availPack,
-      movements
+      movements,
+      shipments,
+      salesOrders
     ] = await Promise.all([
       getAll("lot"),
       getAll("product").catch(() => []),
@@ -325,7 +329,9 @@ async function refreshMovementData(){
         }catch(_e){
           return await getAll("inventory_movement").catch(() => []);
         }
-      })()
+      })(),
+      getAll("shipment").catch(function () { return []; }),
+      getAll("sales_order").catch(function () { return []; })
     ]);
   mvLots = lots || [];
   mvProducts = products || [];
@@ -356,6 +362,7 @@ async function refreshMovementData(){
 
   // Movements 列表：預設近 90 天清單（後端支援）；若 fallback 則可能是全量
   mvMovements = Array.isArray(movements) ? movements : [];
+  mvShipmentSoTypeBySid_ = mvBuildShipmentSoTypeMap_(shipments, salesOrders);
 
   const nLots = Array.isArray(mvLots) ? mvLots.length : 0;
   const nMv = Array.isArray(mvMovements) ? mvMovements.length : 0;
@@ -369,6 +376,7 @@ async function refreshMovementData(){
     mvUsers = [];
     mvCustomers = [];
     mvMovements = [];
+    mvShipmentSoTypeBySid_ = {};
     mvAvailByLotId_ = {};
     mvAvailMapOk_ = false;
     try{
@@ -482,15 +490,9 @@ function mvFormatLotOptionText_(lot, available){
   return [lotId, prodText, whText, qaText, avText].filter(Boolean).join("│");
 }
 
-/** 列表時間：YYYY-MM-DD HH:mm（去掉 T、秒、時區） */
-function mvFormatCreatedAt_(v){
-  const s = String(v || "").trim();
-  if(!s) return "";
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
-  if(m) return m[1] + " " + m[2];
-  const d = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  if(d) return d[1];
-  return s;
+/** 列表時間：委派全站 erpFormatListDateTime_（台灣時間） */
+function mvFormatCreatedAt_(v) {
+  return typeof erpFormatListDateTime_ === "function" ? erpFormatListDateTime_(v) : String(v || "").trim();
 }
 
 /** 顯示「產品名稱（規格）」；無主檔時退回 product_id */
@@ -801,9 +803,14 @@ function mvMovementHumanLabel_(m){
   if(rt === "GOODS_RECEIPT_CANCEL") return "採購收貨-作廢回沖";
   if(rt === "IMPORT_RECEIPT_CANCEL") return "進口收貨-作廢回沖";
 
-  // 出貨扣庫/作廢回沖
-  if(mt === "SHIP_OUT" || rt === "SHIPMENT") return "出貨-扣庫";
-  if(rt === "SHIPMENT_CANCEL") return "出貨-作廢回沖";
+  // 出貨扣庫/作廢回沖（一般／寄賣前綴併入單行）
+  if(mt === "SHIP_OUT" || rt === "SHIPMENT") return mvShipMovementLabel_(m, "出貨-扣庫");
+  if(rt === "SHIPMENT_CANCEL") return mvShipMovementLabel_(m, "出貨-作廢回沖");
+
+  // 寄賣未售退回入庫
+  if(rt === "CONSIGNMENT_RETURN") return "寄賣未售退回-入庫";
+  if(rt === "CONSIGNMENT_CASE_RETURN") return "寄賣案件收回-入庫";
+  if(rt === "CONSIGNMENT_CASE_RETURN_CANCEL") return "寄賣案件收回-作廢沖銷";
 
   // 加工投料/產出
   if(mt === "PROCESS_OUT" || rt === "PROCESS_ORDER") return "加工-投料扣庫";
@@ -825,6 +832,38 @@ function mvMovementHumanLabel_(m){
   // fallback：仍保留原始代碼對照
   const base = (typeof termLabelZhOnly === "function" ? termLabelZhOnly(mt) : mt) || mt;
   return base || mt || "—";
+}
+
+function mvShipMovementLabel_(m, actionLabel){
+  const prefix = mvShipSoTypePrefixZh_(m);
+  return prefix ? prefix + actionLabel : actionLabel;
+}
+
+function mvShipSoTypePrefixZh_(m){
+  const mt = String(m?.movement_type || "").trim().toUpperCase();
+  const rt = String(m?.ref_type || "").trim().toUpperCase();
+  if(mt !== "SHIP_OUT" && rt !== "SHIPMENT" && rt !== "SHIPMENT_CANCEL") return "";
+  const refId = String(m?.ref_id || "").trim().toUpperCase();
+  const soType = mvShipmentSoTypeBySid_[refId];
+  if(soType === "CONSIGNMENT") return "寄賣";
+  if(soType === "NORMAL") return "一般";
+  return "";
+}
+
+function mvBuildShipmentSoTypeMap_(shipments, salesOrders){
+  const soMap = {};
+  (salesOrders || []).forEach(function (so) {
+    if(!so || !so.so_id) return;
+    soMap[String(so.so_id).trim().toUpperCase()] = String(so.so_type || "NORMAL").trim().toUpperCase();
+  });
+  const out = {};
+  (shipments || []).forEach(function (sh) {
+    const sid = String(sh.shipment_id || "").trim().toUpperCase();
+    const soId = String(sh.so_id || "").trim().toUpperCase();
+    if(!sid || !soMap[soId]) return;
+    out[sid] = soMap[soId];
+  });
+  return out;
 }
 
 function mvHasReversal_(movementId){
@@ -958,7 +997,7 @@ async function createMovement(triggerEl){
   if(!lot_id) return showToast("請選擇 Lot","error");
   if(!purpose) return showToast("請先選擇 用途", "error");
   if(purpose === "TRANSFER") return showToast("用途為轉倉時，請改按「轉倉」", "error");
-  if(!issuedTo) return showToast("請先選擇 給誰（領用/交付）", "error");
+  if(!issuedTo) return showToast("請先選擇 給誰（領用／交付）", "error");
   if(!userRemark) return showToast("請先填寫原因", "error");
   if(!qty || qty <= 0) return showToast("數量需大於 0","error");
 
@@ -1003,7 +1042,7 @@ async function createMovement(triggerEl){
     issued_to: issuedTo,
     remark: userRemark,
     created_by: getCurrentUser(),
-    created_at: nowIso16(),
+    created_at: nowIsoTaipei(),
     updated_by: "",
     updated_at: "",
     system_remark: systemRemark,
@@ -1208,7 +1247,6 @@ function renderMovementTable(){
     const reverseBtn = isManualOut
       ? `<button type="button" class="btn-secondary" ${canReverse ? "" : "disabled"} title="${escapeMvAttr_(reverseTitle)}" onclick="event.stopPropagation();mvReverseManualOutFromList_('${escapeMvAttr_(mid)}', this)">回沖</button>`
       : "";
-    const mtHuman = mvMovementHumanLabel_(m);
     const lotIdText = escapeMvHtml_(String(m.lot_id || ""));
     tbody.innerHTML += `
       <tr data-mv-lot-id="${lidAttr}" ${clickAttr} style="border-bottom:1px solid #eee;cursor:${rowCursor};opacity:${rowOp};" title="${titleLot}">
@@ -1217,7 +1255,7 @@ function renderMovementTable(){
           <div style="line-height:1.25;">${escapeMvHtml_(productSpec)}</div>
         </td>
         <td>${escapeMvHtml_(whText || "—")}</td>
-        <td>${escapeMvHtml_(mtHuman)}</td>
+        <td>${escapeMvHtml_(mvMovementHumanLabel_(m))}</td>
         <td>${(function(){
           const mq = String(m.qty ?? "").trim();
           const mu = String(m.unit || "").trim();

@@ -1,6 +1,7 @@
 const { getSupabase } = require("./supabase");
 const { ok, fail } = require("./response");
-const { writeAuditLog_, buildLogSnapshot_, buildLogDiff_ } = require("./bundles/shared");
+const { writeAuditLog_, buildLogSnapshot_, buildLogDiff_, nowIso, normalizeTaipeiTimestamp_ } = require("./bundles/shared");
+const { syncCustomerCumulativeTierIfNeeded_ } = require("./bundles/commercial-dealer");
 
 const { isSuperAdminUserId_ } = require("./auth-config");
 
@@ -19,7 +20,7 @@ const MASTER = {
     table: "product",
     id: "product_id",
     fields: [
-      "product_id", "product_name", "product_name_en", "hs_code", "type", "spec", "unit", "uom_config",
+      "product_id", "product_name", "product_name_en", "hs_code", "type", "spec", "unit", "suggested_retail_price", "uom_config",
       "status", "remark", "created_by", "created_at", "updated_by", "updated_at"
     ]
   },
@@ -35,10 +36,20 @@ const MASTER = {
   customer: {
     table: "customer",
     id: "customer_id",
+    nullableFields: [
+      "dealer_cumulative_price_rate",
+      "dealer_cumulative_pending_price_rate",
+      "dealer_cumulative_started_at"
+    ],
     fields: [
       "customer_id", "customer_name", "customer_type", "category", "contact_person", "phone", "email",
       "address", "country", "tax_id", "invoice_title", "invoice_email", "invoice_type_default",
-      "invoice_name_en", "invoice_address_en", "consignee_id_no", "consignee_usci",
+      "invoice_name_en", "invoice_address_en",       "consignee_id_no", "consignee_usci", "consignment_allocation_policy",
+      "dealer_scheme_id", "dealer_rebate_scheme_id", "dealer_cumulative_scheme_id",
+      "dealer_rebate_settle_mode", "dealer_rebate_excluded", "dealer_rebate_credit_balance",
+      "dealer_cumulative_amount", "dealer_cumulative_tier_label", "dealer_cumulative_price_rate",
+      "dealer_cumulative_pending_tier_label", "dealer_cumulative_pending_price_rate",
+      "dealer_cumulative_started_at",
       "status", "remark",
       "created_by", "created_at", "updated_by", "updated_at"
     ]
@@ -70,34 +81,26 @@ const MASTER = {
   }
 };
 
-function nowIso() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return (
-    d.getFullYear() +
-    "-" +
-    pad(d.getMonth() + 1) +
-    "-" +
-    pad(d.getDate()) +
-    "T" +
-    pad(d.getHours()) +
-    ":" +
-    pad(d.getMinutes()) +
-    ":" +
-    pad(d.getSeconds())
-  );
-}
-
 function pickRow(meta, params, mode) {
   const row = {};
   const actor = String(params.updated_by || params.created_by || "").trim();
+  const nullable = new Set(meta.nullableFields || []);
   meta.fields.forEach((f) => {
-    if (params[f] !== undefined && params[f] !== null) {
-      row[f] = String(params[f]);
+    if (params[f] === undefined) return;
+    const raw = params[f];
+    const s = raw === null || raw === undefined ? "" : String(raw).trim();
+    if (nullable.has(f) && (raw === null || s === "" || s.toLowerCase() === "null")) {
+      row[f] = null;
+      return;
     }
+    row[f] = String(raw);
   });
   if (mode === "create") {
     if (!row.status) row.status = "ACTIVE";
+    if (row.created_at) {
+      const norm = normalizeTaipeiTimestamp_(row.created_at);
+      if (norm) row.created_at = norm;
+    }
     if (!row.created_at) row.created_at = nowIso();
     if (!row.created_by && actor) row.created_by = actor;
   }
@@ -136,6 +139,11 @@ async function createMaster(sheetKey, p) {
   const actor = String(p.updated_by || p.created_by || "").trim();
   const newSnap = buildLogSnapshot_(row, meta.fields);
   await writeAuditLog_(meta.table, idVal, "CREATE", actor, newSnap, {});
+  if (sheetKey === "customer") {
+    try {
+      await syncCustomerCumulativeTierIfNeeded_(sb, idVal, actor);
+    } catch (_eCustTier) {}
+  }
   return ok({ message: "Created", source: "supabase" });
 }
 
@@ -172,6 +180,11 @@ async function updateMaster(sheetKey, p) {
   const actor = String(p.updated_by || p.created_by || "").trim();
   const { oldOut, newOut } = buildLogDiff_(old, patch, meta.fields);
   await writeAuditLog_(meta.table, idVal, "UPDATE", actor, newOut, oldOut);
+  if (sheetKey === "customer") {
+    try {
+      await syncCustomerCumulativeTierIfNeeded_(sb, idVal, actor);
+    } catch (_eCustTier) {}
+  }
   return ok({ message: "Updated", source: "supabase" });
 }
 

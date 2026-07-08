@@ -1,9 +1,66 @@
-<!-- ===== 編輯卡片 ===== -->
+<!-- ===== 列表 ===== -->
 <div class="card">
 
   <div class="card-header card-header-flex">
     <span>
       Customers 客戶
+      <button type="button" class="btn-sheet" onclick="openSheetLink('customer')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
+    </span>
+    <span data-help="customerList"></span>
+  </div>
+
+  <div class="card-body">
+
+    <div class="search-toolbar search-toolbar-master">
+      <input type="text" id="search_customer_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
+      <select id="search_customer_category">
+        <option value="">全部分類</option>
+        <option value="經銷">經銷</option>
+        <option value="門市">門市</option>
+        <option value="零售">零售</option>
+        <option value="KOL">KOL</option>
+        <option value="公關">公關</option>
+        <option value="企業">企業</option>
+        <option value="電商">電商</option>
+        <option value="其他">其他</option>
+      </select>
+      <select id="search_customer_status">
+        <option value="">全部狀態</option>
+        <option value="ACTIVE" selected>ACTIVE（使用中）</option>
+        <option value="INACTIVE">INACTIVE（停用）</option>
+      </select>
+      <button class="btn-secondary" onclick="resetCustomerSearch()">重設</button>
+      <button type="button" class="btn-primary" onclick="newMasterFromList_('customer_edit_card', clearCustomerForm)">新增</button>
+    </div>
+
+    <br>
+
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table master-list-table">
+        <thead>
+          <tr>
+            <th class="col-master-idname" onclick="sortCustomers('customer_id')"><span class="master-th-id-desk">ID</span><span class="master-th-idname-mob">ID/名稱</span> <span id="sort-customerId"></span></th>
+            <th class="col-master-name-desk" onclick="sortCustomers('customer_name')">名稱 <span id="sort-customerName"></span></th>
+            <th onclick="sortCustomers('category')">分類 <span id="sort-category"></span></th>
+            <th class="col-master-contact" onclick="sortCustomers('contact_person')"><span class="master-th-contact-desk">聯絡人 <span id="sort-contactPerson"></span></span><span class="master-th-contactphone-mob">聯絡人/電話</span></th>
+            <th class="col-master-phone" onclick="sortCustomers('phone')"><span class="master-th-phone-desk">電話 <span id="sort-phone"></span></span></th>
+            <th onclick="sortCustomers('country')">國家 <span id="sort-country"></span></th>
+            <th class="col-status" onclick="sortCustomers('status')">狀態 <span id="sort-status"></span></th>
+          </tr>
+        </thead>
+        <tbody id="customerTableBody"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== 編輯卡片 ===== -->
+<div class="card master-edit-card master-edit-collapsed" id="customer_edit_card">
+
+  <div class="card-header card-header-flex">
+    <span>
+      客戶設定
       <span class="cust-type-toggle" style="display:inline-flex;align-items:center;gap:12px;margin-left:14px;font-size:13px;font-weight:500;color:#334155;vertical-align:middle;">
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin:0;">
           <input type="radio" name="c_customer_type" id="c_customer_type_company" value="COMPANY" checked onchange="custSyncCountryPanels_()"> 公司
@@ -18,6 +75,147 @@
   </div>
 
   <div class="card-body">
+
+    <style>
+      #c_recipient_details > summary,
+      #c_dealer_details > summary {
+        list-style-position: inside;
+        padding-left: 2px;
+      }
+      #c_recipient_details > summary::-webkit-details-marker,
+      #c_dealer_details > summary::-webkit-details-marker {
+        margin-right: 4px;
+      }
+      /* 收件人列表：電腦版姓名上下、皆黑字、英文小字 */
+      .cust-recipient-name-desk{
+        display:flex;
+        flex-direction:column;
+        gap:2px;
+        min-width:0;
+      }
+      .cust-recipient-name-zh{
+        color:#0f172a;
+        font-size:13px;
+        line-height:1.35;
+      }
+      .cust-recipient-name-en{
+        color:#0f172a;
+        font-size:11px;
+        line-height:1.3;
+      }
+      @media (max-width:768px){
+        #customer_edit_card .form-grid-4{
+          grid-template-columns:1fr !important;
+          gap:14px;
+        }
+        #customer_edit_card .form-group{
+          grid-column:1 / -1 !important;
+          max-width:100%;
+        }
+        #customer_edit_card #c_tw_invoice_row,
+        #customer_edit_card #c_ci_export_section,
+        #customer_edit_card #c_recipient_details,
+        #customer_edit_card #c_dealer_details{
+          grid-column:1 / -1 !important;
+        }
+        .cust-recipient-table-wrap{
+          max-height:none !important;
+          height:auto !important;
+          overflow:visible !important;
+        }
+        .cust-recipient-table thead{
+          display:none;
+        }
+        .cust-recipient-table tbody tr.cust-recipient-row{
+          display:flex;
+          flex-wrap:wrap;
+          gap:0 10px;
+          border:1px solid #e2e8f0;
+          border-radius:10px;
+          margin-bottom:10px;
+          padding:10px 12px;
+          background:#fff;
+        }
+        .cust-recipient-table tbody tr.cust-recipient-row:last-child{
+          margin-bottom:0;
+        }
+        .cust-recipient-table tbody tr.cust-recipient-empty{
+          display:block;
+          border:none;
+          padding:12px;
+        }
+        .cust-recipient-table tbody td{
+          display:block;
+          border:none;
+          padding:6px 0;
+          text-align:left;
+          white-space:normal;
+          word-break:break-word;
+          box-sizing:border-box;
+        }
+        .cust-recipient-table tbody td:nth-child(2),
+        .cust-recipient-table tbody td:nth-child(3),
+        .cust-recipient-table tbody td:nth-child(4),
+        .cust-recipient-table tbody td.cust-recipient-name-cell,
+        .cust-recipient-table tbody td.cust-recipient-actions{
+          flex:1 1 100%;
+        }
+        .cust-recipient-table tbody td.cust-recipient-name-cell::before{
+          display:none;
+        }
+        .cust-recipient-name-desk{
+          display:flex;
+          flex-direction:row;
+          flex-wrap:nowrap;
+          gap:0 10px;
+          width:100%;
+        }
+        .cust-recipient-name-zh,
+        .cust-recipient-name-en{
+          flex:1 1 calc(50% - 5px);
+          min-width:0;
+        }
+        .cust-recipient-name-desk:not(:has(.cust-recipient-name-en)) .cust-recipient-name-zh{
+          flex:1 1 100%;
+        }
+        .cust-recipient-name-zh::before,
+        .cust-recipient-name-en::before{
+          display:inline;
+          font-size:13px;
+          font-weight:600;
+          color:#64748b;
+          margin-right:2px;
+        }
+        .cust-recipient-name-zh::before{
+          content:"中文姓名：";
+        }
+        .cust-recipient-name-en::before{
+          content:"英文姓名：";
+        }
+        .cust-recipient-table tbody td::before{
+          content:attr(data-label) "：";
+          display:inline;
+          font-size:13px;
+          font-weight:600;
+          color:#64748b;
+          margin-right:2px;
+        }
+        .cust-recipient-table tbody td.cust-recipient-actions{
+          padding-top:10px;
+          margin-top:4px;
+          border-top:1px solid #f1f5f9;
+        }
+        .cust-recipient-table tbody td.cust-recipient-actions::before{
+          display:none;
+        }
+        .cust-recipient-table tbody td.cust-recipient-actions .btn-edit,
+        .cust-recipient-table tbody td.cust-recipient-actions .btn-secondary{
+          min-height:40px;
+          margin-right:8px;
+          margin-bottom:4px;
+        }
+      }
+    </style>
 
     <div class="form-grid-4">
 
@@ -61,7 +259,7 @@
         <input type="text" id="c_email">
       </div>
 
-      <div class="form-group" style="grid-column:span 2;">
+      <div class="form-group form-group-span-2">
         <label>地址</label>
         <input type="text" id="c_address">
       </div>
@@ -92,7 +290,7 @@
         <label>狀態</label>
         <div class="erp-status-select-row">
           <select id="c_status">
-            <option value="ACTIVE">ACTIVE（使用中）</option>
+            <option value="ACTIVE" selected>ACTIVE（使用中）</option>
             <option value="INACTIVE">INACTIVE（停用）</option>
           </select>
           <span id="c_status_lamp" class="status-lamp status-lamp--solo status-lamp--active" role="img" title="ACTIVE（使用中）" aria-label="ACTIVE（使用中）"><span class="status-lamp-dot" aria-hidden="true"></span></span>
@@ -133,7 +331,7 @@
         <div style="font-weight:600;font-size:13px;color:#334155;">Commercial Invoice（出口英文）</div>
       </div>
       <div class="form-grid-4" style="margin:0;">
-      <div class="form-group" style="grid-column:span 2;">
+      <div class="form-group form-group-span-2">
         <label>Invoice Name (English)</label>
         <input type="text" id="c_invoice_name_en" placeholder="Buyer company name in English">
       </div>
@@ -152,23 +350,23 @@
       </div>
       </div>
 
-      <div id="c_recipient_section" style="grid-column:1/-1;margin-top:4px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-          <span style="font-weight:600;font-size:13px;color:#334155;">收件人（可多筆）</span>
-          <button type="button" class="btn-sheet" onclick="openSheetLink('customer_recipient')" title="在資料庫後台開啟 customer_recipient 表">Sheet</button>
-        </div>
+      <details id="c_recipient_details" style="grid-column:1/-1;margin-top:4px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;min-width:0;max-width:100%;box-sizing:border-box;">
+        <summary style="cursor:pointer;font-weight:600;font-size:13px;color:#334155;line-height:1.35;">
+          收件人（可多筆）
+          <button type="button" class="btn-sheet" style="margin-left:8px;vertical-align:middle;" onclick="event.preventDefault();event.stopPropagation();openSheetLink('customer_recipient')" title="在資料庫後台開啟 customer_recipient 表">Sheet</button>
+        </summary>
+        <div style="margin-top:8px;">
         <p id="c_recipient_hint" style="font-size:12px;color:#64748b;margin:0 0 8px;">請先建立或載入客戶後，再新增收件人。</p>
         <div id="c_recipient_panel" style="display:none;">
-          <div class="table-wrapper" style="max-height:180px;margin-bottom:10px;">
-            <table class="data-table">
+          <div class="table-wrapper cust-recipient-table-wrap" style="max-height:180px;margin-bottom:10px;">
+            <table class="data-table cust-recipient-table">
               <thead>
                 <tr>
-                  <th>中文姓名</th>
-                  <th>英文姓名</th>
+                  <th>姓名</th>
                   <th>地址</th>
                   <th>電話</th>
                   <th>備註</th>
-                  <th style="width:120px;">操作</th>
+                  <th class="cust-recipient-actions-head" style="width:120px;">操作</th>
                 </tr>
               </thead>
               <tbody id="cRecipientBody"></tbody>
@@ -202,7 +400,22 @@
             <button type="button" class="btn-secondary" onclick="custClearRecipientForm_()">清除收件人表單</button>
           </div>
         </div>
-      </div>
+        </div>
+      </details>
+
+      <details id="c_dealer_details" style="grid-column:1/-1;margin-top:4px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;min-width:0;max-width:100%;box-sizing:border-box;">
+        <summary style="cursor:pointer;font-weight:600;font-size:13px;color:#334155;line-height:1.35;">商業方案（唯讀摘要）</summary>
+        <div id="c_dealer_section" style="margin-top:10px;">
+          <div style="font-size:13px;color:#334155;line-height:1.7;margin-bottom:10px;">
+            <div style="margin-bottom:4px;"><strong>月結回饋方案</strong>：<span id="c_dealer_summary_rebate">—</span></div>
+            <div style="margin-bottom:10px;">折抵餘額：<span id="c_dealer_summary_credit">—</span></div>
+            <div style="margin-bottom:4px;"><strong>經銷等級方案</strong>：<span id="c_dealer_summary_cumulative">—</span></div>
+            <div style="margin-bottom:4px;">月結累積：<span id="c_dealer_summary_cumulative_amt">—</span></div>
+            <div>目前等級／經銷價：<span id="c_dealer_summary_tier">—</span></div>
+          </div>
+          <button type="button" class="btn-secondary" onclick="custGoDealerCustomerSettings_()">前往 Dealer 方案客戶</button>
+        </div>
+      </details>
 
     </div>
 
@@ -211,63 +424,6 @@
       <button class="btn-secondary" id="c_update_btn" onclick="updateCustomer(this)">更新</button>
       <button class="btn-secondary" onclick="clearCustomerForm()">清除</button>
       <button class="btn-secondary" onclick="openLogs('customer', document.getElementById('c_id')?.value || '', 'master')">Log</button>
-    </div>
-
-  </div>
-</div>
-
-<!-- ===== 列表 ===== -->
-<div class="card">
-
-  <div class="card-header card-header-flex">
-    <span>
-      客戶列表
-      <button type="button" class="btn-sheet" onclick="openSheetLink('customer')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
-    </span>
-    <span data-help="customerList"></span>
-  </div>
-
-  <div class="card-body">
-
-    <div class="search-toolbar">
-      <input type="text" id="search_customer_keyword" placeholder="關鍵字（ID／名稱／分類／聯絡／電話／Email／備註）" style="min-width:360px;" title="比對客戶ID、名稱、分類、聯絡人、電話、Email、備註">
-      <select id="search_customer_category">
-        <option value="">全部分類</option>
-        <option value="經銷">經銷</option>
-        <option value="門市">門市</option>
-        <option value="零售">零售</option>
-        <option value="KOL">KOL</option>
-        <option value="公關">公關</option>
-        <option value="企業">企業</option>
-        <option value="電商">電商</option>
-        <option value="其他">其他</option>
-      </select>
-      <select id="search_customer_status">
-        <option value="">全部狀態</option>
-        <option value="ACTIVE">ACTIVE（使用中）</option>
-        <option value="INACTIVE">INACTIVE（停用）</option>
-      </select>
-      <button class="btn-secondary" onclick="resetCustomerSearch()">重設</button>
-    </div>
-
-    <br>
-
-    <div class="table-wrapper table-wrapper-master">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th onclick="sortCustomers('customer_id')">ID <span id="sort-customerId"></span></th>
-            <th onclick="sortCustomers('customer_name')">名稱 <span id="sort-customerName"></span></th>
-            <th onclick="sortCustomers('category')">分類 <span id="sort-category"></span></th>
-            <th onclick="sortCustomers('contact_person')">聯絡人 <span id="sort-contactPerson"></span></th>
-            <th onclick="sortCustomers('phone')">電話 <span id="sort-phone"></span></th>
-            <th onclick="sortCustomers('country')">國家 <span id="sort-country"></span></th>
-            <th class="col-status" onclick="sortCustomers('status')">狀態 <span id="sort-status"></span></th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="customerTableBody"></tbody>
-      </table>
     </div>
 
   </div>

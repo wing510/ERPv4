@@ -1,4 +1,4 @@
-let editingMode = false;
+﻿let editingMode = false;
 let productLoadInFlight_ = false;
 let productPendingLoadId_ = "";
 
@@ -35,6 +35,22 @@ function prodClear_(ids){
   }
 }
 
+function parseProductSuggestedRetailPrice_(raw) {
+  const s = String(raw != null ? raw : "").trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0) return NaN;
+  return Math.round(n * 100) / 100;
+}
+
+function prodFmtSuggestedPrice_(row) {
+  const n = row && row.suggested_retail_price;
+  if (n == null || n === "") return "";
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "";
+  return v % 1 === 0 ? String(v) : v.toFixed(2);
+}
+
 /* ===== 初始化 ===== */
 async function productsInit(){
   bindUppercaseInput("p_id");
@@ -52,7 +68,6 @@ async function productsInit(){
   if(unitEl && !unitEl.dataset.bound){
     unitEl.dataset.bound = "1";
     unitEl.addEventListener("change", function(){
-      syncProductBaseUnitFromUnit_();
       refreshProductUnitRatioHints_();
     });
   }
@@ -65,7 +80,8 @@ async function productsInit(){
   }
   applyProductMultiUnitMode_();
   ensureProductUnitRatioRows_();
-  await renderProducts();
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("search_status");
+  await searchProducts();
   clearForm();
   if(typeof bindStatusSelectLamp_ === "function") bindStatusSelectLamp_("p_status");
   if(typeof erpLockStatusSelect_ === "function") erpLockStatusSelect_("p_status");
@@ -89,19 +105,8 @@ function isProductMultiUnitEnabled_(){
 }
 
 function applyProductMultiUnitMode_(){
-  const enabled = isProductMultiUnitEnabled_();
-  if(!enabled){
-    syncProductBaseUnitFromUnit_();
-  }
   refreshProductUnitRatioHints_();
   syncProductUnitRatioJson_();
-}
-
-function syncProductBaseUnitFromUnit_(){
-  if(isProductMultiUnitEnabled_()) return;
-  const unit = normalizeUnit(document.getElementById("p_unit")?.value || "");
-  const baseEl = document.getElementById("p_base_unit");
-  if(baseEl) baseEl.value = unit;
 }
 
 function productUnitOptionsHtml_(){
@@ -138,7 +143,7 @@ function syncProductUnitRatioJson_(){
 }
 
 function refreshProductUnitRatioHints_(){
-  const baseUnit = normalizeUnit(document.getElementById("p_base_unit")?.value || document.getElementById("p_unit")?.value || "");
+  const baseUnit = normalizeUnit(document.getElementById("p_base_unit")?.value || "");
   const host = document.getElementById("p_unit_ratio_rows");
   if(!host) return;
   Array.from(host.querySelectorAll('[data-role="ratio-row"]')).forEach(row => {
@@ -164,8 +169,8 @@ function addProductUnitRatioRow(unit="", rate=""){
   line.setAttribute("data-role", "ratio-row");
   line.innerHTML =
     '<div class="p-unit-ratio-matrix-line-main">' +
-    '<span class="p-unit-ratio-matrix-row-arrow" aria-hidden="true">⇒</span>' +
-    '<input data-role="per_base" type="number" min="0" step="0.000001">' +
+    '<span class="p-unit-ratio-matrix-lead">可產生</span>' +
+    '<input data-role="per_base" type="number" min="0" step="0.000001" placeholder="數量">' +
     '<select data-role="unit">' + productUnitOptionsHtml_() + "</select>" +
     '<button type="button" class="btn-secondary" data-role="remove">刪除</button>' +
     "</div>" +
@@ -242,12 +247,13 @@ async function createProduct(triggerEl){
   const remark = p_remark.value.trim();
   const type = p_type.value;
   const unit = String(p_unit.value || "").trim().toUpperCase();
-  const baseUnit = normalizeUnit(document.getElementById("p_base_unit")?.value || p_unit.value || "");
+  const baseUnit = normalizeUnit(document.getElementById("p_base_unit")?.value || "");
   syncProductUnitRatioJson_();
   const ratioRaw = (document.getElementById("p_unit_ratio_to_base_json")?.value || "").trim();
   const ratioMap = parseUnitRatioToBaseMap(ratioRaw || "{}");
   const multiUnitEnabled = isProductMultiUnitEnabled_();
   const saveRemark = stripProductUomRemark(remark);
+  if(multiUnitEnabled && !baseUnit) return showToast("請選投料單位","error");
   const uom_config =
     multiUnitEnabled && baseUnit && ratioMap !== null
       ? JSON.stringify({ base_unit: baseUnit, map: ratioMap || {} })
@@ -283,6 +289,12 @@ async function createProduct(triggerEl){
   if(ratioMap === null)
     return showToast("單位轉基準倍率(JSON) 格式錯誤","error");
 
+  const suggestedRetailPrice = parseProductSuggestedRetailPrice_(
+    document.getElementById("p_suggested_retail_price")?.value
+  );
+  if(Number.isNaN(suggestedRetailPrice))
+    return showToast("牌價須為 0 以上的數字","error");
+
   showSaveHint(triggerEl);
   try {
   const list = await getAll("product");
@@ -298,11 +310,12 @@ async function createProduct(triggerEl){
     type,
     spec,
     unit,
+    suggested_retail_price: suggestedRetailPrice,
     uom_config,
     remark: saveRemark,
     status: p_status.value,
     created_by: getCurrentUser(),
-    created_at: nowIso16(),
+    created_at: nowIsoTaipei(),
     updated_by: "",
     updated_at: ""
   };
@@ -364,6 +377,12 @@ async function updateProduct(triggerEl){
 
   const oldData = {...product};
 
+  const suggestedRetailPrice = parseProductSuggestedRetailPrice_(
+    document.getElementById("p_suggested_retail_price")?.value
+  );
+  if(Number.isNaN(suggestedRetailPrice))
+    return showToast("牌價須為 0 以上的數字","error");
+
   const newData = {
     product_name: p_name.value.trim(),
     product_name_en: String(document.getElementById("p_name_en")?.value || "").trim(),
@@ -371,11 +390,12 @@ async function updateProduct(triggerEl){
     type: p_type.value,
     spec: p_spec.value.trim(),
     unit: String(p_unit.value || "").trim().toUpperCase(),
+    suggested_retail_price: suggestedRetailPrice,
     remark: "",
     uom_config: "",
     status: newStatus,
     updated_by: getCurrentUser(),
-    updated_at: nowIso16()
+    updated_at: nowIsoTaipei()
   };
   // 主檔一致化：更新也做必填/長度檢核（避免更新成空值或超長）
   if(!newData.product_name)
@@ -395,8 +415,9 @@ async function updateProduct(triggerEl){
   if(ratioMap === null){
     return showToast("單位轉基準倍率(JSON) 格式錯誤","error");
   }
-  const baseUnit = normalizeUnit(document.getElementById("p_base_unit")?.value || p_unit.value || "");
+  const baseUnit = normalizeUnit(document.getElementById("p_base_unit")?.value || "");
   const remark = p_remark.value.trim();
+  if(multiUnitEnabled && !baseUnit) return showToast("請選投料單位","error");
   newData.remark = stripProductUomRemark(remark);
   newData.uom_config =
     multiUnitEnabled && baseUnit && ratioMap !== null
@@ -418,7 +439,7 @@ function clearForm(){
   editingMode = false;
   p_id.disabled = false;
 
-  prodClear_(["p_id","p_name","p_name_en","p_hs_code","p_spec","p_remark","p_base_unit"]);
+  prodClear_(["p_id","p_name","p_name_en","p_hs_code","p_spec","p_remark","p_base_unit","p_suggested_retail_price"]);
   const detailsEl = document.getElementById("p_multi_unit_details");
   if(detailsEl) detailsEl.open = false;
   setProductUnitRatioRowsFromMap_({});
@@ -447,6 +468,7 @@ function productSnapshotFromForm_(){
       type: v("p_type"),
       spec: v("p_spec"),
       unit: v("p_unit"),
+      suggested_retail_price: v("p_suggested_retail_price"),
       base_unit: String(baseUnitEl?.value || "").trim(),
       ratio_json: ratioRaw,
       details_open: !!(detailsEl && detailsEl.open),
@@ -462,6 +484,14 @@ function productSnapshotFromForm_(){
 async function loadProduct(id){
   const nextId = String(id || "").trim();
   if(!nextId) return;
+  const curIdEarly = String(p_id?.value || "").trim();
+  if(
+    editingMode &&
+    typeof erpTryToggleCloseMasterListRow_ === "function" &&
+    erpTryToggleCloseMasterListRow_(curIdEarly, nextId, "product_edit_card", clearForm, "productTableBody")
+  ){
+    return;
+  }
   if(productLoadInFlight_){
     productPendingLoadId_ = nextId;
     showToast(`載入中：已排隊 ${nextId}（完成後自動載入）`, "warn", 6000);
@@ -484,7 +514,7 @@ async function loadProduct(id){
   }catch(_e0){}
   productLoadInFlight_ = true;
   try{
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("product_edit_card");
     const p = await getOne("product","product_id",nextId);
     if(!p) return;
 
@@ -499,9 +529,14 @@ async function loadProduct(id){
     p_type.value = p.type;
     p_spec.value = p.spec;
     p_unit.value = p.unit;
+    const priceEl = document.getElementById("p_suggested_retail_price");
+    if(priceEl){
+      const pr = p.suggested_retail_price;
+      priceEl.value = pr != null && pr !== "" && Number.isFinite(Number(pr)) ? String(pr) : "";
+    }
     const baseUnitEl = document.getElementById("p_base_unit");
     const cfg = typeof getProductUomConfig === "function" ? getProductUomConfig(p) : parseProductUomConfigFromRemark_(p.remark);
-    if(baseUnitEl) baseUnitEl.value = (cfg?.base_unit || p.unit || "");
+    if(baseUnitEl) baseUnitEl.value = normalizeUnit(cfg?.base_unit || "");
     const parsed = cfg?.map || {};
     const detailsEl = document.getElementById("p_multi_unit_details");
     if(detailsEl) detailsEl.open = !!(parsed && Object.keys(parsed).length);
@@ -513,7 +548,7 @@ async function loadProduct(id){
     if(typeof erpLockStatusSelect_ === "function") erpLockStatusSelect_("p_status");
 
     p_id.disabled = true;
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof scrollToMasterForm_ === "function") scrollToMasterForm_("product_edit_card");
     try{
       if(window.erpDirty_){
         window.erpDirty_.bind("product", productSnapshotFromForm_);
@@ -521,6 +556,7 @@ async function loadProduct(id){
       }
     }catch(_eS){}
     setProductButtons_();
+    if(typeof erpSyncListRowHighlight_ === "function") erpSyncListRowHighlight_("productTableBody", "data-row-id", nextId);
   } finally {
     productLoadInFlight_ = false;
     try{
@@ -557,9 +593,10 @@ async function searchProducts(){
 
 /* ===== 重設搜尋 ===== */
 async function resetSearch(){
-  prodClear_(["search_product_keyword","search_type","search_status"]);
-
-  await renderProducts();
+  prodClear_(["search_product_keyword","search_type"]);
+  if(typeof masterSearchStatusDefault_ === "function") masterSearchStatusDefault_("search_status");
+  await searchProducts();
+  if(typeof resetMasterListView_ === "function") resetMasterListView_("product_edit_card", clearForm);
 }
 
 /* ===== 排序 ===== */
@@ -580,6 +617,9 @@ async function renderProducts(list=null){
     setTbodyLoading_(tbody, 7);
     list = await getAll("product");
   }
+  if (!productSort.field && typeof erpSortRowsNewestFirst_ === "function") {
+    list = erpSortRowsNewestFirst_(list, ["updated_at", "created_at"], "product_id");
+  }
 
   tbody.innerHTML="";
   if(!list.length){
@@ -589,18 +629,19 @@ async function renderProducts(list=null){
   list.forEach(p=>{
 
     const badge = termStatusLampHtml(p.status);
+    const pid = String(p.product_id || "");
+    const safePid = pid.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const selId = String(document.getElementById("p_id")?.value || "").trim().toUpperCase();
+    const open = selId === pid.trim().toUpperCase();
 
     tbody.innerHTML+=`
-      <tr>
-        <td>${p.product_id}</td>
-        <td>${p.product_name}</td>
+      <tr class="erp-list-row-selectable${open ? " erp-list-row-open" : ""}" data-row-id="${pid.replace(/"/g, "&quot;")}" onclick="loadProduct('${safePid}')">
+        ${typeof masterListIdNameCells_ === "function" ? masterListIdNameCells_(p.product_id, p.product_name) : `<td>${p.product_id}</td><td>${p.product_name}</td>`}
         <td>${p.spec||""}</td>
         <td>${p.unit}</td>
+        <td>${prodFmtSuggestedPrice_(p)}</td>
         <td>${(typeof termLabelZhOnly === "function" ? termLabelZhOnly(p.type) : p.type)}</td>
         <td class="col-status">${badge}</td>
-        <td>
-          <button class="btn-edit" onclick="loadProduct('${p.product_id}')">Load</button>
-        </td>
       </tr>
     `;
   });

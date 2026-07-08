@@ -130,164 +130,63 @@ function formatCallApiUserMessage_(err) {
   const name = String(err && err.name ? err.name : "");
   const httpStatus = err && err.httpStatus != null ? err.httpStatus : null;
   const backendErrors = err && Array.isArray(err.backendErrors) ? err.backendErrors : null;
-  const fullText = (
-    msg +
-    " " +
-    (backendErrors && backendErrors.length ? backendErrors.join(" ") : "")
-  ).toLowerCase();
-
-  if (
-    /session_token\s+required/i.test(msg) ||
-    (backendErrors && backendErrors.some(e => /session_token\s+required/i.test(String(e || ""))))
-  ) {
-    return (
-      "登入狀態已過期或尚未完成登入。\n\n" +
-      "建議：請重新登入（或重新整理頁面後再試）；若仍持續出現，請回報管理員檢查後端 session 設定。"
-    );
-  }
-
-  if (
-    /permission\s+denied/i.test(msg) ||
-    (backendErrors && backendErrors.some(e => /permission\s+denied/i.test(String(e || ""))))
-  ) {
-    return (
-      "登入狀態已失效，無法完成此操作。\n\n" +
-      "常見原因：本機 API（1314）重啟後 session 清空、或登入逾時。\n\n" +
-      "請先重新登入，再試一次「產生批次」。\n\n" +
-      "若重新登入後仍失敗，再請管理員檢查 Users 的模組權限（allowed_modules）。"
-    );
-  }
-
-  if (
-    /(po|import)\s+source\s+changed/i.test(fullText) ||
-    /please\s+reload\s+and\s+try\s+again/i.test(fullText) ||
-    /來源.*(已被更新|已更新)|請重新載入再試/i.test(fullText) ||
-    /already\s+(posted|cancelled|canceled)/i.test(fullText) ||
-    /狀態.*(已過帳|已作廢|不可重做)/i.test(fullText) ||
-    /duplicate|idempotent|重複送出|重覆送出|重送|重複過帳/i.test(fullText)
-  ) {
-    return (
-      "資料已被其他人或其他分頁更新，系統已安全擋下這次送出。\n\n" +
-      "請先按「Load」重新載入最新狀態，再重新確認數量後送出。"
-    );
-  }
-
-  if (/forbidden\s*\(transactional\s+table\)\s*:\s*use\s+bundle\/command/i.test(fullText)) {
-    return (
-      "此資料屬於「交易型資料」，為避免庫存/追溯不一致，系統已禁止直接新增/修改/刪除。\n\n" +
-      "建議：請改走該流程的「過帳/作廢」或對應的命令（bundle/command）操作；若你是在做特殊作業（如合批/拆批/加工回沖），請回報管理員補齊對應命令後再開放。"
-    );
-  }
-
-  if (
-    /has\s+receipts\.\s+only\s+remark\/document_link\s+is\s+allowed/i.test(fullText) ||
-    /already\s+received\.\s+only\s+remark\s+is\s+allowed/i.test(fullText) ||
-    /import\s+document\s+has\s+receipts\.\s+only\s+remark\/document_link\s+is\s+allowed/i.test(fullText) ||
-    /import\s+item\s+already\s+received\.\s+only\s+remark\s+is\s+allowed/i.test(fullText) ||
-    /already\s+shipped\.\s+only\s+remark\s+is\s+allowed/i.test(fullText) ||
-    /item\s+already\s+shipped\.\s+only\s+remark\s+is\s+allowed/i.test(fullText)
-  ) {
-    return (
-      "此單據已產生下游紀錄（已收貨/已出貨），為避免追溯不一致，系統僅允許更新「備註」（與少數非結構欄位）。\n\n" +
-      "建議：若要改數量/品項，請改走對應的更正/作廢流程，或先確認是否需要新開單據。"
-    );
-  }
-
-  if (
-    /has\s+receipts\.\s+creating\s+new\s+items\s+is\s+not\s+allowed/i.test(fullText) ||
-    /import\s+document\s+has\s+receipts\.\s+creating\s+new\s+items\s+is\s+not\s+allowed/i.test(fullText) ||
-    /already\s+shipped\.\s+creating\s+new\s+items\s+is\s+not\s+allowed/i.test(fullText) ||
-    /\bis\s+(cancelled|closed|posted|shipped)\.\s+creating\s+new\s+items\s+is\s+not\s+allowed/i.test(fullText)
-  ) {
-    return (
-      "此單據已產生下游紀錄（已收貨/已出貨），因此禁止再新增明細，避免追溯不一致。\n\n" +
-      "建議：如需新增品項，請改用新單據或走更正流程；若不確定，請先向管理員確認作業規範。"
-    );
-  }
-
-  if (/\bis\s+(cancelled|closed|posted|shipped)\.\s+only\s+remark/i.test(fullText)) {
-    return (
-      "此單據目前已是終態（已關閉/已作廢/已過帳），因此僅允許更新「備註」（與少數非結構欄位）。\n\n" +
-      "建議：若要更正數量/品項，請改走作廢/沖銷/更正流程，或開新單據。"
-    );
-  }
+  const combinedRaw = [msg].concat(backendErrors || []).join(" ");
 
   if (err && err.apiBaseMissing) {
     return (
       "未設定 API 網址（API_BASE）。\n\n" +
-      "建議：確認 index.html 已載入 js/core/config.js，且順序在 service.js 之前；或於載入 config 前設定 window.__ERP_CONFIG__.API_BASE。"
+      "建議：確認 index.html 已載入 js/core/config.js，且順序在 service.js 之前。"
     );
   }
 
-  if (backendErrors && backendErrors.length) {
-    // Apps Script Web App：直接打 /exec（或參數遺失）會回 Unknown or missing action
-    if (backendErrors.some(e => /unknown\s+or\s+missing\s+action/i.test(String(e || "")))) {
-      return (
-        "系統無法判斷要執行的操作（後端沒有收到 action 指令）。\n\n" +
-        "建議：請先重新整理頁面（Ctrl+F5）；若仍發生，請確認目前連線的 API 端點（/exec）是否已重新部署並更新到正確環境。"
-      );
-    }
-    return (
-      "後端回報：" +
-      backendErrors.join("；") +
-      "\n\n建議：依訊息修正資料或必填欄位後再試；若為權限或規則問題請聯絡管理員。"
-    );
+  if (typeof translateBackendErrorText_ === "function") {
+    const zh = translateBackendErrorText_(combinedRaw);
+    if (zh) return zh;
+  }
+
+  if (backendErrors && backendErrors.length && typeof translateBackendErrorLine_ === "function") {
+    const lines = [];
+    const seen = {};
+    backendErrors.forEach(function (e) {
+      const line = translateBackendErrorLine_(String(e || ""));
+      if (line && !seen[line]) {
+        seen[line] = 1;
+        lines.push(line);
+      }
+    });
+    if (lines.length) return lines.join("\n\n");
   }
 
   if (name === "TypeError" && /fetch|Failed to fetch|Load failed|NetworkError/i.test(msg)) {
-    return (
-      "無法連線至後端。\n\n" +
-      "建議：請確認網路連線正常。"
-    );
+    return "無法連線至後端。\n\n建議：請確認本機 API 已啟動（npm run dev）。";
   }
 
   if (name === "SyntaxError" || /JSON|Unexpected token/i.test(msg)) {
-    return (
-      "無法解讀伺服器回傳內容（可能不是預期的 JSON）。\n\n" +
-      "建議：稍後再試；若持續發生請聯絡管理員檢查 Apps Script 部署與執行記錄。"
-    );
+    return "無法解讀伺服器回傳內容。\n\n建議：稍後再試；若持續發生請聯絡管理員。";
   }
 
   if (httpStatus === 404) {
-    return (
-      "找不到 API 部署網址（HTTP 404）。\n\n" +
-      "建議：至 js/core/config.js 確認 API_BASE 與 Google Apps Script「部署」取得的網址一致（含 /exec）。"
-    );
+    return "找不到 API 網址（HTTP 404）。\n\n建議：至 js/core/config.js 確認 API 位址。";
   }
   if (httpStatus === 401 || httpStatus === 403) {
-    return (
-      "無權限存取 API（HTTP " +
-      httpStatus +
-      "）。\n\n" +
-      "建議：確認部署為「具有連結的使用者」或依貴司政策調整存取權；必要時重新部署 Web App。"
-    );
+    return "無權限存取 API（HTTP " + httpStatus + "）。\n\n建議：請重新登入。";
   }
   if (httpStatus != null && httpStatus >= 500) {
-    return (
-      "伺服器暫時無法處理（HTTP " +
-      httpStatus +
-      "）。\n\n" +
-      "建議：稍後再試；Apps Script 冷啟動時可能需多等幾秒。"
-    );
+    return "伺服器暫時無法處理（HTTP " + httpStatus + "）。\n\n建議：稍後再試；API 重啟後請重新登入。";
   }
   if (httpStatus != null && httpStatus >= 400) {
-    return (
-      "無法完成請求（HTTP " +
-      httpStatus +
-      "）。\n\n" +
-      "建議：重新整理頁面後再操作；若仍失敗請聯絡管理員。"
-    );
+    return "無法完成請求（HTTP " + httpStatus + "）。\n\n建議：重新整理頁面後再操作。";
   }
 
   if (/^HTTP\s+\d+/i.test(msg)) {
-    return "無法與後端通訊。\n\n建議：重新整理頁面或稍後再試；並以 F12 主控台查看細節。";
+    return "無法與後端通訊。\n\n建議：重新整理頁面或稍後再試。";
   }
 
-  if (msg && msg.length <= 200) {
-    return msg + "\n\n建議：若為欄位或資料問題請修正後重試；否則請聯絡管理員並保留此訊息。";
+  if (/[\u4e00-\u9fff]/.test(msg) && msg.length <= 400) {
+    return msg + (msg.indexOf("建議") >= 0 ? "" : "\n\n建議：若仍失敗請聯絡管理員。");
   }
 
-  return "操作失敗。\n\n建議：按 F12 開啟主控台查看錯誤細節，或稍後重試。";
+  return "操作未成功。\n\n建議：Ctrl+F5 強刷後再試；請記下操作步驟與單據編號，聯絡管理員協助。";
 }
 
 /* =========================================================
@@ -677,11 +576,12 @@ async function callAPI(params, options = {}){
       throw e;
     }
 
-    // URLSearchParams 會把 undefined 變成字串 "undefined" 送出，導致試算表寫入錯誤
+    // URLSearchParams 會把 undefined 變成字串 "undefined"、null 變成 "null" 送出
     const clean = {};
     Object.keys(params || {}).forEach(function (k) {
       const v = params[k];
-      if (v !== undefined) clean[k] = v;
+      if (v === undefined) return;
+      clean[k] = v === null ? "" : v;
     });
     // 後端 doGet/doPost 統一驗人：除 login/google_login 外須帶有效操作者（與 getCurrentUser 一致）
     const act = String(clean.action || "").trim();
@@ -723,8 +623,31 @@ async function callAPI(params, options = {}){
         : await fetch(`${apiBase}?${payload.toString()}`, ctrl ? { signal: ctrl.signal } : undefined);
 
     if(!response.ok){
-      const e = new Error("HTTP " + response.status);
+      let backendErrors = null;
+      let errorCode = null;
+      try {
+        const errBody = await response.json();
+        if (errBody && Array.isArray(errBody.errors)) {
+          backendErrors = errBody.errors
+            .filter(function (x) {
+              return x != null && String(x).trim() !== "";
+            })
+            .map(function (x) {
+              return String(x);
+            });
+        } else if (errBody && errBody.errors != null && String(errBody.errors).trim() !== "") {
+          backendErrors = [String(errBody.errors)];
+        } else if (errBody && errBody.error != null && String(errBody.error).trim() !== "") {
+          backendErrors = [String(errBody.error)];
+        }
+        if (errBody && errBody.error_code) errorCode = String(errBody.error_code).trim();
+      } catch (_eParseBody) {}
+      const e = new Error(
+        backendErrors && backendErrors.length ? backendErrors.join(", ") : "HTTP " + response.status
+      );
       e.httpStatus = response.status;
+      if (backendErrors && backendErrors.length) e.backendErrors = backendErrors;
+      if (errorCode) e.erpErrorCode = errorCode;
       throw e;
     }
 
