@@ -1,7 +1,7 @@
 ---
 description: ERP UI API 操作相容性規則（高風險必做；詳見 00 路由）
 alwaysApply: false
-globs: js/**
+globs: server/**
 ---
 
 # ERP UI and API Compatibility

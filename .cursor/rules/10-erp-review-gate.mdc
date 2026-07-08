@@ -81,7 +81,7 @@ globs: server/**
 ## 最終輸出
 - Task Level：A / B / C
 - Risk Severity：BLOCKER / HIGH / MEDIUM / LOW
-- Gate Result：NO-GO / GO FOR IMPLEMENTATION / GO FOR TESTING / GO FOR PRODUCTION
+- Gate Result：NO-GO / GO FOR TESTING / GO FOR PRODUCTION
 
 ## Final Result
 
