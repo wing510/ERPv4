@@ -1,0 +1,14 @@
+---
+description: ERP 商業規則 parity（modules/ 變更時提醒；高風險才完整）
+alwaysApply: false
+globs: modules/**
+---
+
+# ERP Business Rule Parity（modules reminder）
+
+若 `modules/` 改動會改變金額顯示口徑、狀態顯示或流程（Task Level A/B），至少要求：
+- 列出「舊畫面/舊流程」 vs 「新畫面/新流程」差異
+- 任何差異未核准：不得默默改口徑
+
+完整 parity 清單請見 `06-erp-business-rule-parity.mdc`。
+

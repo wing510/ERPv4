@@ -1,0 +1,14 @@
+---
+description: ERP 權限/稽核（modules/ 變更時提醒；高風險才完整）
+alwaysApply: false
+globs: modules/**
+---
+
+# ERP Permission and Audit（modules reminder）
+
+若 `modules/` 改動會影響操作可見性/可按/提示文案（Task Level A/B），至少確認：
+- UI 變更不等於權限變更；server 仍要驗證
+- 不要讓使用者誤以為「看得到就能做」
+
+完整規則請見 `05-erp-permission-audit.mdc`。
+

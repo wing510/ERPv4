@@ -7,5 +7,11 @@ globs: modules/**
 # ERP Impact Analysis（modules）
 
 當你正在修改 `modules/`（畫面 HTML）且任務被判定為 A/B 級時，仍需做 impact analysis。  
-完整檢核清單請參考 `01-erp-impact-analysis.mdc`。
+最小必答（精簡）：
+- 這個畫面變更是否改到 POST/VOID/過帳/作廢操作流程或限制？
+- 是否改到金額/數量/狀態/權限（若是 → Task Level A）？
+- 是否需要調整 error mapping 或 routing？
+- 需要補哪些測項（Happy / Retry / relevant concurrency）？
+
+完整檢核清單請參考 `01-erp-impact-analysis.mdc`（server 側）。
 

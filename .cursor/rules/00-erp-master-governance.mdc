@@ -82,6 +82,9 @@ A 級僅限：
 - Gate Result: NO-GO / GO FOR IMPLEMENTATION / GO FOR TESTING / GO FOR PRODUCTION
 - Notes: <最小必要說明>
 
+補充：
+- Gate Result 是「全局字典」；但不同階段/檢核點可限制可用子集合（例如 Final Gate 不會產出 GO FOR IMPLEMENTATION）。
+
 ## Fallback 衝突處理（統一規則）
 - 預設禁止 silent fallback
 - 僅允許「人工核准過渡方案」，且必須記錄：

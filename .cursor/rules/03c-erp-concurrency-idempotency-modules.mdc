@@ -1,0 +1,14 @@
+---
+description: ERP 競態與冪等（modules/ 變更時提醒；高風險才完整）
+alwaysApply: false
+globs: modules/**
+---
+
+# ERP Concurrency and Idempotency（modules reminder）
+
+若 `modules/` 改動會引發重送/重複提交/並行操作差異（Task Level A/B），至少確認：
+- double click / retry 時不會重複 mutation
+- 錯誤訊息與操作限制不會讓使用者誤觸造成並行
+
+完整規則請見 `03-erp-concurrency-idempotency.mdc`。
+

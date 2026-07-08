@@ -8,7 +8,7 @@ globs: server/**
 
 本 Gate 屬於 **高風險變更** 的最終審查（是否 production-ready）。
 
-低風險（00 的 C 級）不必跑完整 Gate A–L；中風險（00 的 B 級）可擇相關 Gate 子集。
+低風險（00 的 C 級）不必跑完整 Gate A–L；中風險（00 的 B 級）可擇相關 Gate 子集，但不得低於 `00` 的 B 級最小交付物。
 
 ## Gate A - Functional
 需求是否完成？
@@ -82,6 +82,8 @@ globs: server/**
 - Task Level：A / B / C
 - Risk Severity：BLOCKER / HIGH / MEDIUM / LOW
 - Gate Result：NO-GO / GO FOR TESTING / GO FOR PRODUCTION
+
+說明：本檔是「實作後」最終覆核，因此不輸出 `GO FOR IMPLEMENTATION`。
 
 ## Final Result
 
