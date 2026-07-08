@@ -24,6 +24,19 @@ alwaysApply: true
 ### C. 低風險（快速通道）
 純文案/樣式/顯示/不碰商業邏輯：只需影響一句話 + smoke 測試一步。
 
+**低風險快速通道（明確例外）**：
+- 文字修正（錯字、用語、提示文案）
+- CSS/排版調整、間距、顏色（不影響資料與權限）
+- 只改「顯示」不改「計算/寫入/狀態」的 UI（例如欄位顯示順序、顯示格式）
+
+低風險輸出模板（固定四行）：
+- Risk tier: LOW
+- Impact: <一句話說明影響範圍>
+- Smoke: <一步操作驗證 + 成功判斷>
+- Result: GO / NO-GO
+
+**注意**：若改到金額/數量/狀態/權限/SQL/RPC/作廢鏈，即使看起來很小也不是低風險。
+
 ## 交付物（高風險必交）
 - 影響分析（跨模組讀寫/報表/作廢鏈）
 - Source of Truth（權威、cache、snapshot、derived）
@@ -35,4 +48,11 @@ alwaysApply: true
 - POST/VOID 對稱設計
 - 相容性（UI/API contract/錯誤訊息）
 - 測試矩陣 + GO/NO-GO
+
+## Repo 提醒：`.cursor/rules` 可能被 gitignore
+
+本 repo 預設忽略 `.cursor/`。若要讓團隊與 CI 共享治理規則，需：
+
+- git 認可方式 A：`git add -f .cursor/rules/*.mdc`
+- 或方式 B：調整 `.gitignore` 允許納入 `.cursor/rules/`
 

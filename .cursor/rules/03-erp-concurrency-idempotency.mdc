@@ -5,6 +5,8 @@ alwaysApply: true
 
 # ERP Concurrency and Idempotency
 
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
 任何修改 quantity、amount、balance、status、allocation、credit、cumulative 的功能，必須分析 concurrency 與 retry。
 
 ## 必測競態

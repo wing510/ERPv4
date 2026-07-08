@@ -5,6 +5,8 @@ alwaysApply: true
 
 # ERP POST / VOID Symmetry
 
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
 任何 POST 功能設計時，必須同步設計 VOID / CANCEL / REVERSAL。
 
 ## POST（必須列出）

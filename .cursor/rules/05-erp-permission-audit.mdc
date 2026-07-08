@@ -5,6 +5,8 @@ alwaysApply: true
 
 # ERP Permission and Audit
 
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
 UI 權限不是安全邊界。所有 mutation 必須 server-side 驗證。
 
 ## 權限（Permission）

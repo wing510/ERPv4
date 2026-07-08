@@ -5,6 +5,8 @@ alwaysApply: true
 
 # ERP UI and API Compatibility
 
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
 安全重構不得自行改亂使用者操作。
 
 ## 除非需求明確要求，禁止自行修改
@@ -30,7 +32,6 @@ alwaysApply: true
 - Same Business Result
 - Same API Contract
 
-## 切換策略（建議）
 ## Routing Safety
 
 若新流程只支援部分類型（例如 NORMAL -> new RPC、CONSIGNMENT -> legacy）：
@@ -38,7 +39,6 @@ alwaysApply: true
 - 必須明確 routing
 - 禁止全部切換後才發現 unsupported flow
 
-## 錯誤訊息
 ## Error Mapping
 
 - DB error code 不得直接裸露給使用者

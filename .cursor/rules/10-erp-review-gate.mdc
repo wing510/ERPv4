@@ -5,7 +5,9 @@ alwaysApply: true
 
 # ERP Final Gate
 
-任何功能完成後必須執行最終 Gate Review。
+本 Gate 屬於 **高風險變更** 的最終審查（是否 production-ready）。
+
+低風險（00 的 C 級）不必跑完整 Gate A–L；中風險（00 的 B 級）可擇相關 Gate 子集。
 
 ## Gate A - Functional
 需求是否完成？

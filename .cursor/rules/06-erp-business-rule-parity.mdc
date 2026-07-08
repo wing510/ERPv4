@@ -5,6 +5,8 @@ alwaysApply: true
 
 # ERP Business Rule Parity
 
+本規則屬於 **高風險變更（見 00 的 A 級條件）** 的強制 Gate；低風險（00 的 C 級）可走快速通道。
+
 任何重構、RPC 化、SQL 化、效能優化、安全修復，不得自行改變現行商業規則。
 
 實作前必須建立：**OLD -> NEW parity matrix**。
