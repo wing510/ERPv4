@@ -24,6 +24,7 @@
     logs: 1,
     sales_order: 1,
     sales_order_item: 1,
+    so_item_pricing_snapshot: 1,
     shipment: 1,
     shipment_item: 1,
     process_order: 1,
