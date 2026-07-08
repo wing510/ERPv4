@@ -770,7 +770,7 @@ async function buildShipmentArPricing_(sb, opts) {
   if (!snapIds.length) {
     return {
       err:
-        "SO 計價快照缺失：請先執行 server/sql/v4.2.15.00_銷售與出貨計價快照.sql，並重新儲存銷售單（讓 server 產生 pricing_snapshot_id）"
+        "SO 計價快照缺失：請先執行 server/sql/v4.3.1_銷售與出貨計價快照.sql，並重新儲存銷售單（讓 server 產生 pricing_snapshot_id）"
     };
   }
   const { data: snaps, error: snapErr } = await sb
@@ -857,7 +857,7 @@ async function createGeneralShipmentArWithCommercial_(ctx) {
       if (updErr) {
         if (/column.*does not exist|Could not find|relation .* does not exist/i.test(updErr.message || "")) {
           return fail(
-            "出貨計價快照欄位尚未建置，請先執行 server/sql/v4.2.15.00_銷售與出貨計價快照.sql：" +
+            "出貨計價快照欄位尚未建置，請先執行 server/sql/v4.3.1_銷售與出貨計價快照.sql：" +
               (updErr.message || String(updErr))
           );
         }

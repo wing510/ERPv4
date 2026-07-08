@@ -222,8 +222,7 @@ async function resetSalesOrderItemsCmd(p) {
       } catch (snapErr) {
         if (/does not exist|relation .* does not exist|Could not find/i.test(snapErr?.message || "")) {
           return fail(
-            "計價快照表尚未建置，請先執行 server/sql/v4.2.15.00_銷售與出貨計價快照.sql：" +
-              (snapErr?.message || String(snapErr))
+            "計價快照表尚未建置，請先執行 server/sql/v4.3.1_銷售與出貨計價快照.sql：" + (snapErr?.message || String(snapErr))
           );
         }
         return fail("建立計價快照失敗：" + (snapErr?.message || String(snapErr)));

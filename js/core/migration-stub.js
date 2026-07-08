@@ -1,5 +1,5 @@
 /**
- * v4.2：Supabase 遷移過渡 — API 回 source:"stub" 時提示使用者
+ * v4.3：Supabase 遷移過渡 — API 回 source:"stub" 時提示使用者
  */
 (function () {
   /** 已在 Supabase + Node API 實作讀取的表 */
@@ -216,7 +216,7 @@
     el.className = "erp-migration-stub-banner";
     el.setAttribute("role", "status");
     el.innerHTML =
-      "<strong>此模組尚未遷移（v4.2 Supabase）</strong>" +
+      "<strong>此模組尚未遷移（v4.3 Supabase）</strong>" +
       "<span>目前列表可能為空，不代表正式環境無資料。待遷移：" +
       uniq.join("、") +
       "。</span>";
