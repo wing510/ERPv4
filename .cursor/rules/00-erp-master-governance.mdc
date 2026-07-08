@@ -44,7 +44,7 @@ A 級僅限：
 - CSS/排版調整、間距、顏色（不影響資料與權限）
 - 只改「顯示」不改「計算/寫入/狀態」的 UI（例如欄位顯示順序、顯示格式）
 
-低風險輸出模板（固定四行；Task Level = C）：
+低風險輸出模板（固定五行；Task Level = C）：
 - Task Level: C
 - Risk Severity: LOW
 - Impact: <一句話說明影響範圍>
@@ -70,6 +70,17 @@ A 級僅限：
 - **GO FOR IMPLEMENTATION**：可進入實作（可建立 branch、寫 code）
 - **GO FOR TESTING**：可進 DEV/測試環境驗證（含 migration preflight、parity、並行）
 - **GO FOR PRODUCTION**：可上正式（需完成指定測試與回滾/備份）
+
+## A 級最小交付物（Task Level = A）
+- Pre-Implementation Gate：01（Impact）+ 02（Transaction）+ 03（Concurrency/Idempotency）+ 04（POST/VOID）+ 05（Permission/Audit）+ 06（Parity）+ 07（Compatibility）+ 08（Migration 若有）+ 09（Test matrix）
+- 最終審查：10（Final Gate）
+
+## Gate 結果與輸出（統一格式）
+每次交付至少輸出：
+- Task Level: A/B/C
+- Risk Severity: BLOCKER/HIGH/MEDIUM/LOW
+- Gate Result: NO-GO / GO FOR IMPLEMENTATION / GO FOR TESTING / GO FOR PRODUCTION
+- Notes: <最小必要說明>
 
 ## Fallback 衝突處理（統一規則）
 - 預設禁止 silent fallback

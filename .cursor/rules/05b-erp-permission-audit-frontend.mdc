@@ -1,0 +1,11 @@
+---
+description: ERP 權限/稽核（前端/畫面變更時提醒；高風險才完整）
+alwaysApply: false
+globs: js/**
+---
+
+# ERP Permission and Audit（Frontend reminder）
+
+當前端變更會影響權限判斷、操作可見性、actor 來源或 audit 欄位（Task Level A/B）時，仍必須滿足權限與稽核要求。  
+完整規則請見 `05-erp-permission-audit.mdc`。
+

@@ -79,8 +79,9 @@ globs: server/**
 - UI regression / API regression / report regression
 
 ## 最終輸出
-- 風險分級：HIGH / MEDIUM / LOW / BLOCKER
-- Gate：GO / NO-GO（有 BLOCKER → NO-GO）
+- Task Level：A / B / C
+- Risk Severity：BLOCKER / HIGH / MEDIUM / LOW
+- Gate Result：NO-GO / GO FOR IMPLEMENTATION / GO FOR TESTING / GO FOR PRODUCTION
 
 ## Final Result
 

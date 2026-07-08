@@ -1,0 +1,11 @@
+---
+description: ERP 競態與冪等（前端/畫面變更時提醒；高風險才完整）
+alwaysApply: false
+globs: js/**
+---
+
+# ERP Concurrency and Idempotency（Frontend reminder）
+
+當前端變更會影響重送/重複提交/並行操作結果（Task Level A/B）時，仍必須滿足競態與冪等。  
+完整規則請見 `03-erp-concurrency-idempotency.mdc`。
+

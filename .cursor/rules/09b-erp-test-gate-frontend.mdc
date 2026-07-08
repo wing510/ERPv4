@@ -1,0 +1,11 @@
+---
+description: ERP 測試 Gate（前端/畫面變更時提醒；高風險才完整）
+alwaysApply: false
+globs: js/**
+---
+
+# ERP Test Gate（Frontend reminder）
+
+當前端變更屬 Task Level A/B，必須補齊至少 Happy Path / Retry / relevant concurrency 測試與紀錄。  
+完整規則請見 `09-erp-test-gate.mdc`。
+

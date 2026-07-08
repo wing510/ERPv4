@@ -4,7 +4,7 @@ Thumbs.db
 Desktop.ini
 
 # Cursor / VS Code
-.cursor/
+.cursor/*
 .vscode/
 !.cursor/rules/
 !.cursor/rules/*.mdc

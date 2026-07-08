@@ -1,0 +1,11 @@
+---
+description: ERP 原子交易與回滾安全（前端/畫面變更時提醒；高風險才完整）
+alwaysApply: false
+globs: js/**
+---
+
+# ERP Transaction Safety（Frontend reminder）
+
+當前端變更會影響金額/POST-VOID/權限/交易流程（Task Level A/B）時，仍必須滿足交易安全。  
+完整規則請見 `02-erp-transaction-safety.mdc`。
+

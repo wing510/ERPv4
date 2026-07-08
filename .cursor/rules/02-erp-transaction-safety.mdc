@@ -43,7 +43,7 @@ globs: server/**
 - Node 多次 API 呼叫模擬 transaction
 - RPC A 成功後再由 Node 呼叫 RPC B
 - catch error 後人工補 rollback 作為主要策略
-- RPC missing 時 silent fallback legacy
+- RPC missing 時 silent fallback legacy（除非符合 00 的「人工核准過渡方案」並記錄 Compatibility/Parity/Test/Removal Plan）
 - 部分成功後只顯示「失敗」
 
 ## 必須覆蓋的失敗情境（至少想過/測過）

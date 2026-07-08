@@ -1,7 +1,7 @@
 ---
 description: ERP Domain Invariants（詳細版：僅在相關模組/文件時載入）
 alwaysApply: false
-globs: server/sql/v4.2.12.*
+globs: server/sql/v4.2.*
 ---
 
 # ERP Domain Invariants（詳細版）

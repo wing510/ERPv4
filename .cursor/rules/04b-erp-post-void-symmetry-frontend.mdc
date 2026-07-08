@@ -1,0 +1,11 @@
+---
+description: ERP POST/VOID 對稱（前端/畫面變更時提醒；高風險才完整）
+alwaysApply: false
+globs: js/**
+---
+
+# ERP POST/VOID Symmetry（Frontend reminder）
+
+當前端變更會影響 POST/VOID 操作、限制條件、錯誤訊息或流程（Task Level A/B）時，仍必須滿足對稱性。  
+完整規則請見 `04-erp-post-void-symmetry.mdc`。
+
