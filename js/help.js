@@ -624,8 +624,8 @@ const HelpConfig = {
   consignmentMain: `
     <strong>這是什麼？</strong><br>
     • <strong>寄賣（Consignment）</strong>：貨先出給客戶，售出後再結算收款；出貨仍會扣庫，但<strong>不立刻建應收</strong><br>
-    • v4.2.2 起以<strong>寄賣案件</strong>為中心：手動開案 → 多次出貨累加品項池 → 結算／收回<br>
-    • v4.2.3 起可維護<strong>促銷方案</strong>，於結算時自動套用（見 COMMERCIAL 區 Promo 頁）<br>
+    • v4.3 起以<strong>寄賣案件</strong>為中心：手動開案 → 多次出貨累加品項池 → 結算／收回<br>
+    • v4.3 起可維護<strong>促銷方案</strong>，於結算時自動套用（見 COMMERCIAL 區 Promo 頁）<br>
     <strong>左側選單（寄賣）：</strong><br>
     • <strong>Case 案件管理</strong>：開案、列表、品項池、歷史；可捷徑到結算／收回<br>
     • <strong>Settlement 結算</strong>：填結算量 → 產生 AR；含結算歷史與作廢<br>
@@ -726,7 +726,7 @@ const HelpConfig = {
     • <strong>寄賣</strong>：於寄賣<strong>結算</strong>過帳套用<br>
     • <strong>一般銷售</strong>：於<strong>銷售單建明細</strong>與<strong>出貨過帳</strong>套用（買N送M 每批出貨各自計算）<br>
     • <strong>全部</strong>：兩者皆可<br>
-    <strong>適用價格（v4.2.10）：</strong><br>
+    <strong>適用價格（v4.3）：</strong><br>
     • <strong>經銷價</strong>（預設）：依客戶當下經銷等級 × 建議售價<br>
     • <strong>牌價</strong>：產品建議售價；買N送M 與折扣％ 皆以此為底<br>
     <strong>促銷類型：</strong><br>
