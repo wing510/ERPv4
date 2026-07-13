@@ -41,7 +41,7 @@ const HelpConfig = {
 
   productList: `
     <strong>流程：</strong><br>
-    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」會收合明細回到列表<br>
+    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」等同點左側選單重新進入本模組<br>
     <strong>規則：</strong><br>
     • 篩選條件：關鍵字／類型／狀態<br>
     • 關鍵字比對：產品ID／名稱／規格／備註<br>
@@ -73,7 +73,7 @@ const HelpConfig = {
 
   supplierList: `
     <strong>流程：</strong><br>
-    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」會收合明細回到列表<br>
+    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」等同點左側選單重新進入本模組<br>
     <strong>規則：</strong><br>
     • 篩選條件：關鍵字／狀態<br>
     • 關鍵字比對：供應商ID／名稱／聯絡人／電話／Email／備註<br>
@@ -106,7 +106,7 @@ const HelpConfig = {
 
   customerList: `
     <strong>流程：</strong><br>
-    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」會收合明細回到列表<br>
+    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」等同點左側選單重新進入本模組<br>
     <strong>規則：</strong><br>
     • 篩選條件：關鍵字／分類／狀態<br>
     • 關鍵字比對：客戶ID／名稱／分類／聯絡人／電話／Email／備註<br>
@@ -298,7 +298,8 @@ const HelpConfig = {
     • 請至少新增 1 筆出貨明細<br>
     • 找不到出貨單／請先載入出貨單<br>
     • 僅 POSTED 出貨單可作廢／作廢完成：已反沖庫存並回寫 SO<br>
-    • 「已有商業發票尚未作廢」→ 請先到 Invoice 商業發票作廢該張 CI
+    • 「已有商業發票尚未作廢」→ 請先到 Invoice 商業發票作廢該張 CI<br>
+    • 若該月<strong>月結統計已過帳</strong>，<strong>一般出貨過帳</strong>將被系統阻擋；須先到 FINANCE 財務 → 月結統計作廢後重新過帳，方可補單；若已產生<strong>月結回饋</strong>亦須一併作廢（寄賣出貨仍可過帳，請款以結算為準）
   `,
   shippingItems: `
     <strong>流程：</strong><br>
@@ -309,7 +310,7 @@ const HelpConfig = {
     • 只改備註：用「儲存備註」；完成後按下方「建立並過帳出貨（扣庫）」<br>
     <strong>規則：</strong><br>
     • Lot 與銷售品項的產品需一致（有綁品項時）<br>
-    • 出貨不可超過可用量，亦不可超過銷售單剩餘未出貨量（若有綁 SO）<br>
+    • 出貨不可超過可用量，亦不可超過銷售單剩餘未出貨量（同一品項多筆明細會合計檢查）<br>
     • 明細「狀態」：草稿／已過帳；備註僅在上方表單編輯<br>
     <strong>常見提示：</strong><br>
     • 找不到 Lot／Lot 單位缺失／出貨數量需大於 0<br>
@@ -394,11 +395,12 @@ const HelpConfig = {
     • 先填主檔（客戶／銷售人員／下單日期／幣別／類型），再到下方新增明細，最後按下方「建立」建立銷售單（主檔+明細一併寫入）<br>
     • 需要出貨：到「Shipment 出貨管理」建立出貨單，按「建立並過帳出貨（扣庫）」後才會扣庫<br>
     • 類型選「補寄（RESHIP）」時：需填「補寄參考（原 SO／原出貨）」以便稽核對照<br>
-    • 類型選「<strong>寄賣（CONSIGNMENT）</strong>」：出貨時須選寄賣案；應收於 Consignment 結算產生，非出貨當下建 AR<br>
+    • 類型選「<strong>寄賣補貨（CONSIGNMENT）</strong>」：此單為<strong>內部補貨依據、不給店家</strong>；出貨時須選寄賣案；應收於 Consignment 結算產生，非出貨當下建 AR<br>
     <strong>規則：</strong><br>
     • Sales Orders（銷售單，SO）不直接扣庫；實際扣庫發生在 Shipment 出貨管理<br>
     • 幣別：選客戶時自動建議（台灣客戶 TWD、其餘 USD），可手改；開立 Commercial Invoice 時預設帶入銷售單幣別<br>
-    • 已有出貨或單據已結束（SHIPPED/CANCELLED）：不可「編輯主檔／儲存主檔」整批欄位；主檔備註隨時可用「儲存備註」<br>
+    • 已有<strong>有效</strong>出貨或單據已結束（SHIPPED/CANCELLED）：不可「編輯主檔／儲存明細」整批欄位；主檔備註隨時可用「儲存備註」<br>
+    • <strong>出貨已作廢</strong>：可重新編輯明細（按「編輯明細」會重新檢查；若仍鎖住請重新 Load 該銷售單）<br>
     <strong>常見提示：</strong><br>
     • 銷售單ID 必填／請選擇客戶／下單日期必填<br>
     • 請至少新增 1 筆品項<br>
@@ -407,14 +409,14 @@ const HelpConfig = {
   `,
   salesItems: `
     <strong>流程：</strong><br>
-    • 新單：選產品、數量、牌價／折數（一般為單價；寄賣為經銷價）後按「新增明細」加入草稿，最後按「建立」<br>
-    • <strong>可用量</strong>：選產品後顯示全倉可出貨合計（ACTIVE＋QA已放行＋未過期）；寄賣單顯示「—」<br>
+    • 新單：選產品、數量、牌價／折數（<strong>一般買斷</strong>為單價；<strong>寄賣補貨</strong>為<strong>參考價（入池、結算對照）</strong>）後按「新增明細」加入草稿，最後按「建立」<br>
+    • <strong>可用量</strong>：選產品後顯示全倉可出貨合計（ACTIVE＋QA已放行＋未過期）；寄賣單同口徑（出貨時從倉庫扣庫）<br>
     • <strong>灰底欄位</strong>＝系統帶入或不可手改（牌價、金額、可用量、鎖住的折數）；白底可編輯<br>
-    • 已載入且<strong>全部未出貨</strong>：按「編輯明細」→ 點列帶入 → 改數量／價格後「套用至本列」→「儲存明細」；草稿列點列可帶入修改<br>
+    • 已載入且<strong>全部未出貨</strong>（含出貨已作廢、尚無有效出貨單）：按「編輯明細」→ 點列帶入 → 改數量／價格後「套用至本列」→「儲存明細」；草稿列點列可帶入修改<br>
     • 只改備註（已存檔列）：點列後按「儲存備註」（不必先按「編輯明細」；有出貨或已結束單亦可）<br>
     • <strong>牌價</strong>：選產品後自產品主檔帶入（唯讀）；<strong>折數(%)</strong>：填 85 表示牌價 85 折，會自動算價格<br>
-    • <strong>一般</strong>：表單／明細表欄位為「單價」，可手改；若客戶在有效期內有<strong>一般管道促銷</strong>，選品項後會顯示「促銷預覽」（計價量／贈送），金額依<strong>計價量</strong>×單價；儲存明細時寫入促銷快照<br>
-    • <strong>寄賣</strong>：折數依客戶經銷等級自動帶入且不可手改；表單／明細表欄位為「<strong>經銷價</strong>」＝牌價×折數（如 2800×80%＝2240）<br>
+    • <strong>一般買斷</strong>：表單／明細表欄位為「單價」，可手改；客戶<strong>無經銷等級方案</strong>時，選產品後單價預設<strong>牌價</strong>；有經銷等級則依折數帶入；若客戶在有效期內有<strong>一般管道促銷</strong>，選品項後會顯示「促銷預覽」（計價量／贈送），金額依<strong>計價量</strong>×單價；儲存明細時寫入促銷快照<br>
+    • <strong>寄賣補貨</strong>：折數、參考價皆依客戶經銷等級自動帶入且<strong>不可手改</strong>；「<strong>參考價（入池、結算對照）</strong>」＝牌價×折數；「<strong>參考金額</strong>」非應收；促銷於<strong>結算頁</strong>套用<br>
     • 價格變更會即時計算金額<br>
     <strong>規則：</strong><br>
     • 明細決定後續可出貨的品項與上限<br>
@@ -436,7 +438,7 @@ const HelpConfig = {
 
   usersList: `
     <strong>流程：</strong><br>
-    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」會收合明細回到列表<br>
+    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」等同點左側選單重新進入本模組<br>
     <strong>規則：</strong><br>
     • 篩選條件：關鍵字／角色／狀態<br>
     • 關鍵字比對：User ID／姓名／Email／角色／備註<br>
@@ -449,14 +451,14 @@ const HelpConfig = {
 
   outsourceHeader: `
     <strong>流程：</strong><br>
-    • 先填主檔後按「1) 建立加工單」建立（或從列表 Load 載入既有加工單）<br>
+    • 「加工單明細」：填主檔後按「1) 建立加工單」建立，或從上方列表點列載入<br>
     • 投料：在投料區新增草稿後按「2) 送加工（扣庫）」可分批、多次扣庫<br>
     • 回收：在回收區新增草稿後按「3) 回收加工品」入庫；每次有效回收會產生新 Lot（預設 PENDING）<br>
-    • 需要修改主檔：用「更新備註／預計到貨日期」；取消加工單用「取消加工單（回沖）」<br>
+    • 需要修改主檔：用「更新備註／預計到貨日期」；整單作廢用「作廢加工單」<br>
     <strong>規則：</strong><br>
     • 投料只允許 QA已放行 且庫存 ACTIVE、可用量 &gt; 0 的批次（選 Lot 視窗已過濾）<br>
     • 回收中通常維持 OPEN；回收完畢會轉 POSTED（已結案）<br>
-    • 取消加工單為整張回沖；若產出 Lot 已被下游使用會被阻擋；多筆原因時畫面會顯示可展開的阻擋明細<br>
+    • 作廢加工單為整張回沖；若產出 Lot 已被下游使用會被阻擋；多筆原因時畫面會顯示可展開的阻擋明細<br>
     • 投料與產出若單位不同，需先在「產出產品」主檔設定多單位換算，系統才會換算到同一基準後比較總量<br>
     • 加工類型代碼：PROCESS / PACKING / REPACK / REWORK / SPLIT / MERGE<br>
     • 來源類別：RM（原料）/ WIP（半成品）/ FG（成品）供管理與篩選<br>
@@ -469,7 +471,7 @@ const HelpConfig = {
     <strong>流程：</strong><br>
     • 按「選擇 Lot」開啟視窗（僅 ACTIVE + QA已放行 + 可用量&gt;0），可搜尋並切換 flat／group_source；點選列帶回 Lot<br>
     • 填投料數量後按「新增投料」加入草稿；可重複新增多筆草稿<br>
-    • 按「2) 送加工（扣庫）」會把草稿投料過帳為扣庫（可分批多次送加工）<br>
+    • 按「2) 送加工（扣庫）」會把草稿投料過帳為扣庫（可分批多次送加工）；完成後畫面會回到上方列表<br>
     • 點選某一列後可更新備註；「儲存備註」只改備註、不影響已扣庫數量<br>
     <strong>規則：</strong><br>
     • 選單／列表僅顯示 QA已放行、庫存 ACTIVE、可用量 &gt; 0 的 Lot<br>
@@ -485,7 +487,7 @@ const HelpConfig = {
     • 選產出產品、填<strong>加工廠 Lot</strong>、可選填<strong>加工廠 EXP</strong>、輸入回收數量後按「新增產出」；可累積多筆草稿再按「3) 回收加工品」<br>
     • 加工廠 Lot 為標籤批號，回收入庫時必填（新 Lot 預設 PENDING，須至 Lots QA 放行）<br>
     • 「預估損耗」主要依「尚未入帳的草稿產出」與已送加工總量（換算後）即時估算<br>
-    • 可勾選「本次回收後結案（允許耗損）」：仍有合理耗損、總量未完全對齊時，回收後可結案；新增產出或按 3) 回收時，若仍有耗損會提示是否需勾選<br>
+    • 可勾選「本次回收後結案（允許耗損）」：仍有合理耗損、總量未完全對齊時，回收後可結案；新增產出或按 3) 回收時，若仍有耗損會提示是否需勾選；完成後畫面會回到上方列表<br>
     <strong>規則：</strong><br>
     • 新 Lot 預設 PENDING；<strong>委外加工產出</strong>須有加工廠 Lot 才能 QA 放行<br>
     • 回收總量（換算後）不可超過已送加工<br>
@@ -494,9 +496,11 @@ const HelpConfig = {
   `,
   outsourceList: `
     <strong>流程：</strong><br>
-    • 在加工單列表點「Load」：帶回主檔並刷新投料／回收明細<br>
+    • 在「Outsource 委外加工單」列表點某一列：載入下方加工單明細並刷新投料／回收<br>
+    • 「重設」：等同再點一次左側選單，整頁回到剛進模組<br>
+    • 要開新單：在加工單明細按「清除」，再填主檔按「1) 建立加工單」<br>
     • 最下方「已載入加工單明細」以文字區摘要投料、產出與 lot_relation 關聯（核對用）<br>
-    • 需要稽核單筆異動時可用主檔卡片的「Log」<br>
+    • 需要稽核單筆異動時可用加工單明細的「Log」<br>
     <strong>規則：</strong><br>
     • 列表可依狀態等條件篩選（與畫面上方條件一致）<br>
     • 明細操作以「投料／回收」兩張卡片內的表格為準；摘要區僅供閱讀、不提供按鈕<br>
@@ -572,7 +576,7 @@ const HelpConfig = {
 
   warehouseList: `
     <strong>流程：</strong><br>
-    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」會收合明細回到列表<br>
+    • 點欄位標題可排序；點「Load」會展開下方明細區；按「新增」可開空白明細；「重設」等同點左側選單重新進入本模組<br>
     <strong>規則：</strong><br>
     • 篩選條件：關鍵字／類別／狀態<br>
     • 關鍵字比對：倉庫 ID／名稱／備註<br>
@@ -627,14 +631,14 @@ const HelpConfig = {
     • v4.3 起以<strong>寄賣案件</strong>為中心：手動開案 → 多次出貨累加品項池 → 結算／收回<br>
     • v4.3 起可維護<strong>促銷方案</strong>，於結算時自動套用（見 COMMERCIAL 區 Promo 頁）<br>
     <strong>左側選單（寄賣）：</strong><br>
-    • <strong>Case 案件管理</strong>：開案、列表、品項池、歷史；可捷徑到結算／收回<br>
+    • <strong>Case 寄賣客戶</strong>：開案、列表、品項池、歷史；可捷徑到結算／收回<br>
     • <strong>Settlement 結算</strong>：填結算量 → 產生 AR；含結算歷史與作廢<br>
     • <strong>Return 收回</strong>：依加工廠 Lot 收回 → 入庫；含收回歷史與作廢<br>
     <strong>COMMERCIAL 區：</strong><br>
     • <strong>Promo 促銷方案(寄賣)</strong>：維護促銷條件（本版套用點為寄賣結算）<br>
     • <strong>Dealer 經銷方案</strong>：月結回饋級距（COMMERCIAL 區維護；月結作業見 FINANCE 財務 → 月結統計）<br>
     <strong>前置條件：</strong><br>
-    • 銷售單類型須為 <strong>CONSIGNMENT（寄賣）</strong>；出貨時<strong>必選寄賣案</strong>，過帳後品項進入該案池子<br>
+    • 銷售單類型須為 <strong>CONSIGNMENT（寄賣補貨）</strong>；出貨時<strong>必選寄賣案</strong>，過帳後品項進入該案池子<br>
     <strong>規則：</strong><br>
     • 可操作：會計（FN）／CEO／GA／ADMIN；Users 須勾選 consignment 模組<br>
     • 收回改倉：退回倉與原出貨倉不同時<strong>備註必填</strong><br>
@@ -642,13 +646,17 @@ const HelpConfig = {
   `,
 
   consignmentCaseMain: `
-    <strong>Case 案件管理</strong><br>
+    <strong>Case 寄賣客戶</strong><br>
     <strong>流程：</strong><br>
     • 列表上方「開新寄賣案」→ 案件 ID 自動產生（如 <code>CC260616-A3</code>）<br>
     • 列表<strong>點整列</strong>展開下方品項池／歷史；再點同一列收回；點其他列切換案件<br>
     • 「結算／收回」會帶入同一寄賣案到對應頁面<br>
     <strong>列表欄：</strong><br>
     • <strong>已收/預估應收(%)</strong>：分母＝淨額−促銷折讓；百分比＝已收÷預估應收<br>
+    • <strong>本月結算</strong>：當月已過帳結算（POSTED）筆數；作廢不計<br>
+    • <strong>結算未收金額</strong>：本案有效結算 AR 尚未收回合計（OPEN／PARTIAL）<br>
+    • <strong>備註</strong>：摘要區只讀顯示；按「編輯備註」才可修改並儲存<br>
+    • <strong>刪除空案</strong>：展開明細後，若無出貨品項池、無結算、無收回，可按「刪除空案」（須會計／CEO／GA／ADMIN）<br>
     <strong>案件摘要金額：</strong><br>
     • <strong>收款</strong>＝有效結算 AR 已收合計<br>
     • <strong>結算</strong>＝有效結算實際應收（POSTED 結算 AR 合計）<br>
@@ -671,7 +679,7 @@ const HelpConfig = {
 
   consignmentDetail: `
     <strong>（舊版單頁說明，已改為案件三頁）</strong><br>
-    請使用左側「Case 案件管理／Settlement 結算／Return 收回／Promo 促銷方案(寄賣)」。
+    請使用左側「Case 寄賣客戶／Settlement 結算／Return 收回／Promo 促銷方案(寄賣)」。
   `,
 
   consignmentReturn: `
@@ -695,7 +703,7 @@ const HelpConfig = {
     <strong>Settlement 結算</strong><br>
     <strong>流程：</strong><br>
     • 選寄賣案 → 上方顯示案件摘要與<strong>適用促銷</strong><br>
-    • 品項池填「本次結算量」→ 自動預覽<strong>贈送／折扣%／促銷單價／計價量／小計</strong>（僅顯示本案有用到的促銷欄）<br>
+    • 品項池填「本次結算量」→ 自動預覽<strong>折扣%／促銷單價／贈送／計價量／小計</strong>（僅顯示本案有用到的促銷欄）<br>
     • 填結算日、備註 →「提交結算（產生 AR）」；結算單自動配號（如 <code>CS-…</code>）<br>
     • 每次結算產生 <strong>1 張 AR</strong>；同一案件可多次部分結算<br>
     • 客戶若有<strong>經銷折抵餘額</strong>，僅<strong>回饋月份次月（含）起</strong>的寄賣結算提交時才自動抵扣 AR（作廢結算會還原餘額）<br>
@@ -708,9 +716,11 @@ const HelpConfig = {
     <strong>結算歷史：</strong><br>
     • 欄<strong>結算ID/促銷ID</strong>：上為結算單號，下為套用方案 ID（灰字）<br>
     • 點列展開明細：產品下灰字為「方案名：條件」（如 618促銷：70%）<br>
-    • 明細依方案類型動態顯示欄：<strong>贈送</strong>（買N送M）／<strong>折扣%</strong>／<strong>促銷單價</strong>（固定價）— 無促銷不出現多餘欄<br>
+    • 明細依方案類型動態顯示欄：<strong>折扣%</strong>／<strong>促銷單價</strong>（固定價）／<strong>贈送</strong>（買N送M）— 無促銷不出現多餘欄<br>
     • <strong>單價</strong>欄：有促銷時顯示<strong>結算單價</strong>，經銷價以灰字對照<br>
     <strong>作廢：</strong>誤結算且 AR<strong>尚未收款</strong> → 結算歷史「作廢」還原池子；<strong>已有收款</strong> → 至 AR 調整<br>
+    • 若該筆結算<strong>早於</strong>月結統計／回饋產生時間，須先作廢月結後才能作廢結算；<strong>月結過帳後才新增的結算</strong>仍可單獨作廢<br>
+    • 若該月<strong>月結統計已過帳</strong>，<strong>提交結算</strong>將被系統阻擋；須先到 FINANCE 財務 → 月結統計作廢後重新過帳，方可補單；若已產生<strong>月結回饋</strong>亦須一併作廢<br>
     <strong>規則：</strong><br>
     • 結算量不可超過未售剩餘<br>
     • 金額＝計價量×結算單價加總（贈送件不計價）<br>
@@ -754,7 +764,7 @@ const HelpConfig = {
 
   commercialDealer: `
     <strong>Dealer 經銷方案</strong>（級距設定）<br>
-    • <strong>月結回饋</strong>：依月請款淨額給回饋％（預設 3 萬／10 萬／30 萬級距）→ 產生回饋請至 FINANCE 財務 → <strong>月結統計</strong>（第二步）<br>
+    • <strong>月結回饋</strong>：依月請款淨額給回饋％（預設 3 萬／10 萬／30 萬級距）→ 產生回饋請至 FINANCE 財務 → <strong>月結統計</strong>（第三步）<br>
     • <strong>統計來源</strong>：寄賣／一般銷售／合併（決定月結請款淨額從哪些 AR 加總）<br>
     • <strong>累積金額制</strong>：依<strong>月結累積</strong>門檻給等級折數；寄賣<strong>出貨</strong>、一般<strong>銷售訂單</strong>可帶入經銷價，結算／出貨建 AR 時無促銷則以訂單經銷價計價<br>
     • <strong>客戶綁定</strong>請至 COMMERCIAL → <strong>Dealer 方案客戶</strong>（客戶主檔僅唯讀摘要）<br>
@@ -763,9 +773,10 @@ const HelpConfig = {
 
   commercialDealerCustomer: `
     <strong>方案明細</strong><br>
-    • 綁定<strong>月結回饋方案</strong>、<strong>經銷等級方案</strong>、回饋方式、排除、累積起算日<br>
-    • 月結累積、目前／次月等級、次月折抵為唯讀（一般出貨過帳即累加；寄賣於 FINANCE 財務 → <strong>月結統計</strong> 過帳時累加）<br>
-    • <strong>本月預覽</strong>：展開當月請款摘要；純一般出貨顯示精簡一行；有寄賣顯示完整明細<br>
+    • 綁定<strong>月結回饋方案</strong>、<strong>經銷等級方案</strong>、回饋方式、累積起算日<br>
+    • 不要月結回饋：月結回饋方案改<strong>（未設定）</strong> → 更新<br>
+    • 月結累積、目前／次月等級、次月折抵為唯讀（寄賣與一般請款淨額於 FINANCE 財務 → <strong>月結統計</strong> → <strong>確認經銷等級</strong>時計入累積）<br>
+    • <strong>本月預覽</strong>：展開當月請款摘要；純一般出貨顯示精簡一行；有寄賣顯示完整明細；若已過帳後又有新單，顯示橘色提醒須作廢重過帳<br>
     • <strong>月結統計</strong>：帶入目前客戶與當月，跳至 FINANCE 財務 → 月結統計<br>
     • 取消方案：下拉改（未設定）→ 更新<br>
     • <strong>權限</strong>：Users 勾選 commercial_dealer_customer 即可編輯
@@ -787,28 +798,43 @@ const HelpConfig = {
 
   dealerMonthlyStat: `
     <strong>月結統計</strong><br>
-    • 每月<strong>第一步</strong>：選客戶 + 月份 → <strong>預覽統計</strong> → <strong>過帳統計</strong><br>
-    • 統計本月請款淨額（寄賣結算 + 一般出貨）；<strong>寄賣部分</strong>計入月結累積；一般出貨已於出貨過帳時累加、不重複<br>
+    • 月結分<strong>三步</strong>：<strong>月結統計過帳</strong>（定案請款）→ <strong>確認經銷等級</strong>（有綁等級方案）→ <strong>月結回饋</strong>（有綁回饋方案）；等級與回饋互不強制先後，但<strong>皆須先完成統計過帳</strong><br>
+    • 上方<strong>客戶列表</strong>：可搜尋、點列選客戶；「寄賣結算／一般出貨／請款淨額」為當月金額（未過帳灰字）；過帳後若有新單，金額改灰字顯示<strong>即時請款</strong>；「次月折抵」僅綁月結回饋方案時顯示餘額（未綁 —）；「經銷等級累積」僅綁等級方案時顯示<strong>所選月份月底</strong>已過帳累計（未綁 —）；「本月統計」：<strong>已過帳</strong>／<strong>已過帳・有新單</strong>（橘）／<strong>預覽未過帳</strong>（有請款即可，含未綁方案客戶）／無請款 —；操作欄可<strong>過帳</strong>快捷；篩選列旁<strong>批次過帳</strong><br>
+    • 點列客戶後，下方<strong>本月月結摘要</strong>合併顯示請款淨額、等級累積、回饋預覽（虛線分隔）；摘要下方按鈕：<strong>月結統計過帳</strong>、<strong>確認經銷等級</strong>（有綁才顯示）、<strong>月結回饋</strong>（有綁才顯示）<br>
+    • <strong>沒綁方案</strong>的客戶也可<strong>月結統計過帳</strong>（僅定案請款、鎖月）<br>
+    • 回饋方式依 <strong>Dealer 方案客戶</strong> 預設；要改方式請作廢後至方案客戶修改再重過帳<br>
+    • <strong>作廢本月月結</strong>：一鍵依序作廢回饋 → 等級 → 統計（統計紀錄表按鈕）<br>
     • 等級升級：達標當月寫「次月待生效」，<strong>次月</strong>才套用新經銷價<br>
-    • 有寄賣請款淨額時，須先完成月結統計，才能產生下方「月結回饋」<br>
+    • <strong>已過帳後不可再新增請款</strong>：該客戶該月<strong>寄賣結算</strong>與<strong>一般出貨過帳</strong>將被阻擋；若要補單須先<strong>作廢本月月結</strong>後重過帳<br>
     • <strong>權限</strong>：檢視須 dealer_rebate 或 commercial_dealer；過帳須會計／CEO／GA／ADMIN
   `,
 
+  dealerLevelRecord: `
+    <strong>經銷等級紀錄</strong><br>
+    • 顯示所選<strong>客戶</strong>、<strong>月份</strong>的等級過帳紀錄<br>
+    • 欄位：<strong>月份</strong>、<strong>上月累積</strong>、<strong>本月計入</strong>、<strong>目前等級</strong>、<strong>次月等級</strong>、<strong>狀態</strong>、<strong>操作</strong>（已作廢列操作為 —）<br>
+    • 列表<strong>點任一列</strong>：下方顯示該筆<strong>產生時快照</strong><br>
+    • 本月作業（確認經銷等級）請在摘要區按鈕操作；須先完成<strong>月結統計過帳</strong><br>
+    • 舊版若等級已併入統計單（CDMS 含累積），系統會標示並視為已完成等級<br>
+    • <strong>作廢</strong>：已過帳列可按「作廢」；僅撤回等級累積，<strong>不影響</strong>同月月結回饋；作廢後可於摘要區重新確認等級<br>
+    • <strong>權限</strong>：檢視須 dealer_rebate 或 commercial_dealer；作廢須會計／CEO／GA／ADMIN（整月重來請用統計「作廢本月月結」）
+  `,
+
   dealerRebate: `
-    <strong>月結回饋（可選）</strong><br>
-    • 須客戶綁定<strong>月結回饋方案</strong>；有寄賣請款時須先完成上方<strong>月結統計</strong><br>
-    • 選回饋方式 → <strong>預覽回饋</strong> → <strong>產生回饋</strong>（與 COMMERCIAL 經銷級距搭配）<br>
-    • 下方列表<strong>點任一列</strong>：列表下方顯示該筆<strong>產生時快照</strong>（方案、請款淨額、級距、回饋、月結累積）；不必先作廢也能查看<br>
+    <strong>月結回饋紀錄</strong><br>
+    • 月結回饋請在摘要區按鈕操作；此區僅顯示歷史紀錄<br>
+    • 須客戶綁定<strong>月結回饋方案</strong>；須先完成<strong>月結統計過帳</strong>才能產生回饋<br>
+    • 列表<strong>點任一列</strong>：下方顯示該筆<strong>產生時快照</strong>；不必先作廢也能查看<br>
     • <strong>折讓</strong>：調降應收「應收金額」；AR 列表會顯示「已調降」，點應收單號可開 AR 看調整歷程<br>
     • <strong>次月結算折抵</strong>：累加客戶折抵餘額；僅<strong>回饋月份次月（含）起</strong>的寄賣結算提交時才自動抵扣 AR（同月結算不扣）<br>
-    • <strong>作廢</strong>：列表「已產生」列可作廢；折讓會還原應收、折抵會扣回餘額；作廢後同月可再預覽產生<br>
-    • 計算順序：寄賣結算先 Promo → 月結再加總請款淨額套 Dealer<br>
+    • <strong>作廢</strong>：列表「已產生」列可作廢；折讓會還原應收、折抵會扣回餘額；作廢後同月可再於摘要區重新產生<br>
+    • <strong>補單流程</strong>：作廢月結統計（及回饋）→ 至寄賣結算／出貨補單 → 回到本頁重新過帳<br>
     • <strong>權限</strong>：檢視須 Users 勾選 dealer_rebate 或 commercial_dealer；產生／作廢須<strong>會計／CEO／GA／ADMIN</strong>
   `,
 
   commercialDealerRebate: `
     <strong>月結回饋</strong><br>
-    • 選客戶 + 月份 → <strong>預覽</strong> → <strong>產生回饋</strong><br>
+    • 選客戶 + 月份 → <strong>預覽</strong> → <strong>月結回饋</strong><br>
     • 列表<strong>點列</strong>可查看該筆產生時快照；「預覽」僅用於尚未產生或作廢後重算<br>
     • <strong>折讓</strong>：系統調降該月寄賣應收的「應收金額」（原始金額不變）；AR 列表應收欄會顯示「已調降」；點回饋列表的應收單號可開 AR 看「調整歷程」<br>
     • <strong>次月結算折抵</strong>：累加客戶折抵餘額；僅<strong>回饋月份次月（含）起</strong>的寄賣結算提交時才自動抵扣 AR（同月結算不扣）<br>

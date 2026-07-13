@@ -1,111 +1,343 @@
 <!-- ===== 月結統計（FINANCE） ===== -->
+
 <div class="card" style="margin-bottom:16px;">
+
   <div class="card-header card-header-flex">
+
     <span>
+
       月結統計
-      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('commercial_dealer_monthly_stat')" title="月結統計紀錄">Sheet</button>
-      <span id="drStatStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">每月先統計請款淨額；寄賣部分計入月結累積</span>
+
+      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('commercial_dealer_monthly_stat')" title="月結統計">Sheet</button>
+
+      <span id="drStatStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">每月統計請款淨額並過帳定案；等級與回饋請於下方延伸作業</span>
+
     </span>
+
     <span data-help="dealerMonthlyStat"></span>
+
   </div>
+
   <div class="card-body">
-    <div class="form-grid-4" style="margin-bottom:12px;">
-      <div class="form-group">
-        <label>客戶 *</label>
-        <select id="dr_rebate_customer_id" onchange="drRebateOnCustomerChange_()"></select>
-      </div>
-      <div class="form-group">
-        <label>月份 *</label>
-        <input type="month" id="dr_rebate_period">
-      </div>
-      <div class="form-group" style="grid-column:span 2;">
-        <label>備註</label>
-        <input type="text" id="dr_stat_remark">
-      </div>
+
+    <div class="search-toolbar search-toolbar-master" style="margin-bottom:12px;">
+
+      <input type="text" id="search_dr_stat_customer_keyword" class="search-keyword" placeholder="搜尋客戶名稱" aria-label="搜尋客戶名稱">
+
+      <select id="search_dr_stat_customer_bind">
+
+        <option value="ALL" selected>全部客戶</option>
+
+        <option value="ANY">綁定方案</option>
+
+        <option value="NONE">未綁定</option>
+
+      </select>
+
+      <select id="search_dr_stat_customer_status">
+
+        <option value="ALL">全部狀態</option>
+
+        <option value="ACTIVE" selected>ACTIVE（使用中）</option>
+
+        <option value="INACTIVE">INACTIVE（停用）</option>
+
+      </select>
+
+      <input type="month" id="dr_rebate_period" onchange="drStatCustOnPeriodChange_()" aria-label="月份" title="月份">
+
+      <button type="button" class="btn-secondary" onclick="erpResetCurrentModule_()">重設</button>
+
+      <button type="button" class="btn-primary" id="dr_stat_batch_post_btn" onclick="drStatBatchPost_()">批次過帳</button>
+
     </div>
-    <div class="button-group" style="margin-bottom:12px;">
-      <button type="button" class="btn-secondary" onclick="drStatPreview_()">預覽統計</button>
-      <button type="button" class="btn-primary" id="dr_stat_post_btn" onclick="drStatPost_()">過帳統計</button>
-    </div>
-    <div id="dr_stat_preview" class="dr-rebate-detail-box dr-rebate-box-hidden" aria-label="月結統計預覽"></div>
-    <div class="table-wrap">
-      <table class="data-table">
+
+    <div class="table-wrapper table-wrapper-master" style="margin-bottom:16px;">
+
+      <table class="data-table master-list-table">
+
         <thead>
+
           <tr>
-            <th>統計單號</th>
-            <th>月份</th>
-            <th>請款淨額</th>
-            <th>寄賣累積</th>
-            <th>一般（已出貨累積）</th>
-            <th>狀態</th>
+
+            <th class="col-master-idname" onclick="drStatCustSort_('customer_name')"><span class="master-th-id-desk">名稱</span><span class="master-th-idname-mob">名稱</span></th>
+
+            <th class="col-master-name-desk" onclick="drStatCustSort_('customer_name')">名稱</th>
+
+            <th onclick="drStatCustSort_('month_consignment')">寄賣結算</th>
+
+            <th onclick="drStatCustSort_('month_general')">一般出貨</th>
+
+            <th onclick="drStatCustSort_('month_billing_net')">請款淨額</th>
+
+            <th onclick="drStatCustSort_('dealer_rebate_credit_balance')">次月折抵</th>
+
+            <th onclick="drStatCustSort_('dealer_cumulative_amount')">經銷等級累積</th>
+
+            <th>本月統計</th>
+
             <th>操作</th>
+
           </tr>
+
         </thead>
-        <tbody id="dr_stat_list_tbody">
-          <tr><td colspan="7" class="text-muted">載入中…</td></tr>
+
+        <tbody id="dr_stat_customer_list_tbody">
+
+          <tr><td colspan="9" class="text-muted">載入中…</td></tr>
+
         </tbody>
+
       </table>
+
     </div>
+
+    <input type="hidden" id="dr_rebate_customer_id" value="">
+
+    <div id="dr_billing_summary_panel" class="dr-monthly-close-panel dr-rebate-box-hidden" aria-label="本月月結摘要">
+
+      <div class="dr-monthly-close-title">本月月結摘要</div>
+
+      <div id="dr_billing_summary_body" class="dr-monthly-close-body text-muted">請點上方客戶列表選擇客戶</div>
+
+      <div class="button-group dr-billing-actions">
+
+        <button type="button" class="btn-primary" id="dr_stat_post_btn" onclick="drStatPost_()">月結統計過帳</button>
+
+        <button type="button" class="btn-secondary" id="dr_level_post_btn" style="display:none;" onclick="drLevelPost_()">確認經銷等級</button>
+
+        <button type="button" class="btn-secondary" id="dr_rebate_post_btn" style="display:none;" onclick="drRebatePost_()">月結回饋</button>
+
+      </div>
+
+    </div>
+
+    <div id="dr_stat_record_section" class="dr-subsection dr-rebate-box-hidden">
+
+      <div class="dr-monthly-close-title" style="margin-top:4px;">月結統計紀錄</div>
+
+      <div class="table-wrap" style="margin-top:8px;">
+
+        <table class="data-table">
+
+          <thead>
+
+            <tr>
+
+              <th>月份</th>
+
+              <th>寄賣結算</th>
+
+              <th>一般出貨</th>
+
+              <th>請款淨額</th>
+
+              <th>狀態</th>
+
+              <th>操作</th>
+
+            </tr>
+
+          </thead>
+
+          <tbody id="dr_stat_list_tbody">
+
+            <tr><td colspan="6" class="text-muted">—</td></tr>
+
+          </tbody>
+
+        </table>
+
+      </div>
+
+      <div id="dr_stat_snapshot" class="dr-rebate-detail-box dr-rebate-box-hidden" aria-label="月結統計快照"></div>
+
+    </div>
+
+    <style>
+
+      .dr-rebate-detail-box,
+
+      .dr-monthly-close-panel{
+
+        font-size:13px;color:#334155;line-height:1.7;
+
+        margin:12px 0 16px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
+
+      }
+
+      .dr-rebate-detail-box.dr-rebate-box-hidden,
+
+      .dr-monthly-close-panel.dr-rebate-box-hidden,
+
+      .dr-subsection.dr-rebate-box-hidden{ display:none; }
+
+      .dr-subsection{ margin-top:8px; }
+
+      .dr-monthly-close-title{ font-weight:600;font-size:14px;margin-bottom:10px;color:#0f172a; }
+
+      .dr-monthly-close-title-row{
+
+        display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;
+
+        margin-bottom:10px;
+
+      }
+
+      .dr-monthly-close-body{ margin-bottom:12px; }
+
+      .dr-monthly-close-step-done{ color:#15803d;font-weight:600; }
+
+      .dr-monthly-close-step-warn{ color:#b45309;font-weight:600; }
+
+      .dr-monthly-close-step-muted{ color:#94a3b8; }
+
+      .dr-monthly-close-divider{ border-top:1px dashed #cbd5e1;margin:10px 0; }
+
+      .dr-billing-actions .btn-primary,
+      .dr-billing-actions .btn-secondary{ margin-top:4px; }
+
+    </style>
+
   </div>
+
 </div>
 
-<!-- ===== 月結回饋（可選第二步） ===== -->
-<div class="card">
+
+
+<!-- ===== 經銷等級 ===== -->
+
+<div class="card" id="dr_level_card" style="margin-bottom:16px;">
+
   <div class="card-header card-header-flex">
+
     <span>
-      月結回饋（可選）
-      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('commercial_dealer_rebate')" title="月結回饋紀錄">Sheet</button>
-      <span id="drRebateStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">須客戶綁定月結回饋方案；產生後落地 AR 折讓或次月結算折抵</span>
+
+      經銷等級
+
+      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('commercial_dealer_level_post')" title="經銷等級過帳">Sheet</button>
+
+      <span id="drLevelStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">須月結統計已過帳；確認後寫入累積</span>
+
     </span>
-    <span data-help="dealerRebate"></span>
+
+    <span data-help="dealerLevelRecord"></span>
+
   </div>
+
   <div class="card-body">
-    <div class="form-grid-4" style="margin-bottom:12px;">
-      <div class="form-group">
-        <label>回饋方式</label>
-        <select id="dr_rebate_settle_mode">
-          <option value="">跟隨客戶預設</option>
-          <option value="CREDIT_NOTE">折讓（扣當月應收）</option>
-          <option value="CARRY_FORWARD">次月結算折抵（回饋月份次月起才扣 AR）</option>
-        </select>
-      </div>
-      <div class="form-group" style="grid-column:span 3;">
-        <label>備註</label>
-        <input type="text" id="dr_rebate_remark">
-      </div>
-    </div>
-    <div class="button-group" style="margin-bottom:12px;">
-      <button type="button" class="btn-secondary" onclick="drRebatePreview_()">預覽回饋</button>
-      <button type="button" class="btn-primary" id="dr_rebate_post_btn" onclick="drRebatePost_()">產生回饋</button>
-    </div>
-    <div id="dr_rebate_preview" class="dr-rebate-detail-box dr-rebate-box-hidden" aria-label="月結回饋預覽"></div>
-    <style>
-      .dr-rebate-detail-box{
-        font-size:13px;color:#334155;line-height:1.7;
-        margin:12px 0 16px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
-      }
-      .dr-rebate-detail-box.dr-rebate-box-hidden{ display:none; }
-    </style>
-    <div class="table-wrap">
+
+    <div class="dr-monthly-close-title" style="margin-top:4px;">經銷等級紀錄</div>
+
+    <div class="table-wrap" style="margin-top:8px;">
+
       <table class="data-table">
+
         <thead>
+
           <tr>
-            <th>回饋單號</th>
+
             <th>月份</th>
-            <th>請款淨額</th>
-            <th>回饋％</th>
-            <th>回饋金額</th>
-            <th>方式</th>
+
+            <th>上月累積</th>
+
+            <th>本月計入</th>
+
+            <th>目前等級</th>
+
+            <th>次月等級</th>
+
             <th>狀態</th>
-            <th>應收單號</th>
+
             <th>操作</th>
+
           </tr>
+
         </thead>
-        <tbody id="dr_rebate_list_tbody">
-          <tr><td colspan="9" class="text-muted">載入中…</td></tr>
+
+        <tbody id="dr_level_list_tbody">
+
+          <tr><td colspan="7" class="text-muted">載入中…</td></tr>
+
         </tbody>
+
       </table>
+
     </div>
-    <div id="dr_rebate_snapshot" class="dr-rebate-detail-box dr-rebate-box-hidden" aria-label="月結回饋快照"></div>
+
+    <div id="dr_level_snapshot" class="dr-rebate-detail-box dr-rebate-box-hidden" aria-label="經銷等級快照"></div>
+
   </div>
+
 </div>
+
+
+
+<!-- ===== 月結回饋 ===== -->
+
+<div class="card" id="dr_rebate_card">
+
+  <div class="card-header card-header-flex">
+
+    <span>
+
+      月結回饋
+
+      <button type="button" class="btn-sheet btn-sheet-alt" onclick="openSheetLink('commercial_dealer_rebate')" title="月結回饋紀錄">Sheet</button>
+
+      <span id="drRebateStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">須月結統計已過帳；產生後落地 AR 折讓或次月結算折抵</span>
+
+    </span>
+
+    <span data-help="dealerRebate"></span>
+
+  </div>
+
+  <div class="card-body">
+
+    <div class="dr-monthly-close-title" style="margin-top:4px;">月結回饋紀錄</div>
+
+    <div class="table-wrap" style="margin-top:8px;">
+
+      <table class="data-table">
+
+        <thead>
+
+          <tr>
+
+            <th>月份</th>
+
+            <th>請款淨額</th>
+
+            <th>回饋％</th>
+
+            <th>回饋金額</th>
+
+            <th>方式</th>
+
+            <th>狀態</th>
+
+            <th>應收單號</th>
+
+            <th>操作</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody id="dr_rebate_list_tbody">
+
+          <tr><td colspan="8" class="text-muted">載入中…</td></tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div id="dr_rebate_snapshot" class="dr-rebate-detail-box dr-rebate-box-hidden" aria-label="月結回饋快照"></div>
+
+  </div>
+
+</div>
+

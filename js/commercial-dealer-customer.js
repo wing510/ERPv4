@@ -72,6 +72,18 @@ function cdcNextMonthTierCellHtml_(row) {
   return cdcEsc_(text);
 }
 
+function cdcPendingTierHtml_(cum) {
+  const c = cum || {};
+  const label = String(c.pending_tier_label || "").trim();
+  if (!label) return "";
+  return (
+    '<div style="color:#15803d;"><strong>次月待生效</strong>：' +
+    cdcEsc_(label) +
+    (c.pending_price_rate != null ? "（" + String(c.pending_price_rate) + " 折）" : "") +
+    "</div>"
+  );
+}
+
 function cdcCanOperate_() {
   try {
     return typeof erpCanOperateCommercialDealerCustomer_ === "function" && erpCanOperateCommercialDealerCustomer_();
@@ -95,9 +107,16 @@ function cdcSyncListRowHighlight_() {
 
 function cdcSchemeCellHtml_(schemeId, schemeName) {
   const id = String(schemeId || "").trim().toUpperCase();
-  if (!id) return '<span class="text-muted">—</span>';
-  if (typeof masterListIdNameHtml_ === "function") return masterListIdNameHtml_(id, schemeName);
-  return cdcEsc_(id) + (schemeName ? " " + cdcEsc_(schemeName) : "");
+  let name = String(schemeName || "").trim();
+  if (!name && id && (cdcSchemeRows_ || []).length) {
+    const row = (cdcSchemeRows_ || []).find(function (r) {
+      return String(r.scheme_id || "").trim().toUpperCase() === id;
+    });
+    name = row ? String(row.scheme_name || "").trim() : "";
+  }
+  if (!id && !name) return '<span class="text-muted">—</span>';
+  if (name) return '<div class="master-list-name">' + cdcEsc_(name) + "</div>";
+  return '<span class="text-muted">—</span>';
 }
 
 async function cdcLoadSchemeRows_(force) {
@@ -147,18 +166,12 @@ function cdcSetFormFields_(row) {
   if (cumEl) cumEl.value = String(c.dealer_cumulative_scheme_id || "").trim().toUpperCase();
   const modeEl = document.getElementById("cdc_dealer_rebate_settle_mode");
   if (modeEl) modeEl.value = String(c.dealer_rebate_settle_mode || "CREDIT_NOTE").trim().toUpperCase() || "CREDIT_NOTE";
-  const exclEl = document.getElementById("cdc_dealer_rebate_excluded");
-  if (exclEl) {
-    const ex = c.dealer_rebate_excluded === true || String(c.dealer_rebate_excluded || "").toUpperCase() === "TRUE";
-    exclEl.value = ex ? "true" : "false";
-  }
   const startedEl = document.getElementById("cdc_dealer_cumulative_started_at");
   if (startedEl) startedEl.value = String(c.dealer_cumulative_started_at || "").slice(0, 10);
   cdcSyncDependentFields_();
 }
 
 function cdcCollectDealerFields_() {
-  const exclRaw = String(document.getElementById("cdc_dealer_rebate_excluded")?.value || "false").trim().toLowerCase();
   const rebateSchemeId = String(document.getElementById("cdc_dealer_rebate_scheme_id")?.value || "").trim().toUpperCase();
   const cumulativeSchemeId = String(document.getElementById("cdc_dealer_cumulative_scheme_id")?.value || "").trim().toUpperCase();
   const startedRaw = String(document.getElementById("cdc_dealer_cumulative_started_at")?.value || "").trim();
@@ -167,7 +180,7 @@ function cdcCollectDealerFields_() {
     dealer_scheme_id: rebateSchemeId,
     dealer_cumulative_scheme_id: cumulativeSchemeId,
     dealer_rebate_settle_mode: String(document.getElementById("cdc_dealer_rebate_settle_mode")?.value || "CREDIT_NOTE").trim().toUpperCase(),
-    dealer_rebate_excluded: exclRaw === "true",
+    dealer_rebate_excluded: false,
     dealer_cumulative_started_at: startedRaw || null
   };
 }
@@ -192,8 +205,6 @@ function cdcOnRebateSchemeChange_() {
   if (!rebateScheme) {
     const modeEl = document.getElementById("cdc_dealer_rebate_settle_mode");
     if (modeEl) modeEl.value = "CREDIT_NOTE";
-    const exclEl = document.getElementById("cdc_dealer_rebate_excluded");
-    if (exclEl) exclEl.value = "false";
   }
   cdcSyncDependentFields_();
 }
@@ -211,10 +222,8 @@ function cdcSyncDependentFields_() {
   const hasRebate = !!String(document.getElementById("cdc_dealer_rebate_scheme_id")?.value || "").trim();
   const hasCumulative = !!String(document.getElementById("cdc_dealer_cumulative_scheme_id")?.value || "").trim();
   const modeEl = document.getElementById("cdc_dealer_rebate_settle_mode");
-  const exclEl = document.getElementById("cdc_dealer_rebate_excluded");
   const startedEl = document.getElementById("cdc_dealer_cumulative_started_at");
   if (modeEl) modeEl.disabled = !hasRebate;
-  if (exclEl) exclEl.disabled = !hasRebate;
   if (startedEl) startedEl.disabled = !hasCumulative;
 }
 
@@ -726,6 +735,19 @@ function cdcStatCumulativeSchemeLabel_(cum) {
   return String(cum?.scheme_name || cum?.scheme_id || "—").trim() || "—";
 }
 
+function cdcFmtBillingDriftParts_(pack) {
+  const parts = [];
+  const cons = Number(pack?.billing_net_consignment_diff || 0);
+  const gen = Number(pack?.billing_net_general_diff || 0);
+  if (Math.abs(cons) > 0.009) {
+    parts.push("寄賣 " + (cons > 0 ? "+" : "") + cdcFmtMoney_(cons));
+  }
+  if (Math.abs(gen) > 0.009) {
+    parts.push("一般 " + (gen > 0 ? "+" : "") + cdcFmtMoney_(gen));
+  }
+  return parts;
+}
+
 function cdcStatRenderPreview_(pack) {
   const box = document.getElementById("cdc_stat_preview");
   if (!box) return;
@@ -745,7 +767,11 @@ function cdcStatRenderPreview_(pack) {
   const billingGen = Number(pack.billing_net_general || 0);
   const settleCnt = Number(pack.settlement_count || 0);
   const shipCnt = Number(pack.shipment_count || 0);
-  const cumAdd = Number(pack.cumulative_add_consignment || 0);
+  const cumAddCons = Number(pack.cumulative_add_consignment || 0);
+  const cumAddGen = Number(pack.cumulative_add_general || 0);
+  const cumAddTotal = Number(
+    pack.cumulative_add_total != null ? pack.cumulative_add_total : cumAddCons + cumAddGen
+  );
 
   let html = "";
 
@@ -754,6 +780,13 @@ function cdcStatRenderPreview_(pack) {
       '<div style="color:#15803d;margin-bottom:6px;">本月月結統計已過帳（' +
       cdcEsc_(pack.existing_stat_id || "—") +
       "）</div>";
+    if (pack.has_new_billing) {
+      const parts = cdcFmtBillingDriftParts_(pack);
+      html +=
+        '<div style="color:#b45309;margin-bottom:6px;">過帳後有新請款' +
+        (parts.length ? "（" + cdcEsc_(parts.join("；")) + "）" : "") +
+        "，請至 FINANCE 財務 → <strong>月結統計</strong> 作廢後重新過帳。</div>";
+    }
   }
 
   if (!(billingNet > 0)) {
@@ -771,7 +804,23 @@ function cdcStatRenderPreview_(pack) {
       cdcFmtMoney_(billingNet) +
       "（一般出貨 " +
       String(shipCnt) +
-      " 筆；累積已於出貨過帳，無須月結統計）</div>";
+      " 筆）</div>";
+    if (pack.cumulative_note) {
+      html += '<div style="color:#64748b;margin-top:4px;">' + cdcEsc_(pack.cumulative_note) + "</div>";
+    }
+    if (cumAddTotal > 0.009) {
+      html +=
+        '<div style="margin-top:6px;"><strong>本月累積加總</strong>：' +
+        (pack.already_posted ? "已計入 " : "+") +
+        cdcFmtMoney_(cumAddTotal) +
+        "（一般 +" +
+        cdcFmtMoney_(cumAddGen) +
+        "）</div>";
+    }
+    if (!pack.already_posted && cumAddTotal > 0.009) {
+      html +=
+        '<div style="margin-top:6px;color:#b45309;">須至 FINANCE 財務 → <strong>月結統計</strong> 過帳後才計入累積。</div>';
+    }
   } else {
     html +=
       "<div><strong>請款淨額合計</strong>：" +
@@ -787,42 +836,51 @@ function cdcStatRenderPreview_(pack) {
       html += '<div style="color:#64748b;margin-top:4px;">' + cdcEsc_(pack.cumulative_note) + "</div>";
     }
     html +=
-      '<div style="margin-top:6px;"><strong>本次寄賣累積</strong>：+' +
-      cdcFmtMoney_(cumAdd) +
-      "；<strong>一般</strong>：" +
-      cdcFmtMoney_(billingGen) +
-      "（已於出貨過帳計入，不重複加）</div>";
+      '<div style="margin-top:6px;"><strong>本月累積加總</strong>：' +
+      (pack.already_posted ? "已計入 " : "+") +
+      cdcFmtMoney_(cumAddTotal) +
+      "（寄賣 +" +
+      cdcFmtMoney_(cumAddCons) +
+      "；一般 +" +
+      cdcFmtMoney_(cumAddGen) +
+      "）</div>";
     if (!pack.already_posted && billingCons > 0.009) {
       html +=
         '<div style="margin-top:6px;color:#b45309;">有寄賣請款，須至 FINANCE 財務 → <strong>月結統計</strong> 過帳。</div>';
     }
-    const cum = pack.cumulative_preview || {};
-    if (cum.enabled) {
+  }
+
+  const cum = pack.cumulative_preview || {};
+  if (cum.enabled) {
+    html +=
+      '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1;"><strong>等級方案</strong>：' +
+      cdcEsc_(cdcStatCumulativeSchemeLabel_(cum)) +
+      "</div>" +
+      "<div><strong>目前等級</strong>：" +
+      cdcEsc_(cum.current_tier_label || "—") +
+      (cum.current_price_rate != null ? "（" + String(cum.current_price_rate) + " 折）" : "") +
+      "</div>";
+    if (pack.already_posted || cum.posted_snapshot) {
       html +=
-        '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1;"><strong>方案</strong>：' +
-        cdcEsc_(cdcStatCumulativeSchemeLabel_(cum)) +
-        "</div>" +
-        "<div><strong>目前等級</strong>：" +
-        cdcEsc_(cum.current_tier_label || "—") +
-        (cum.current_price_rate != null ? "（" + String(cum.current_price_rate) + " 折）" : "") +
-        "</div>" +
-        "<div><strong>月結累積</strong>：" +
+        "<div><strong>經銷等級累積</strong>：" +
+        cdcFmtMoney_(cum.cumulative_after) +
+        (cum.cumulative_add > 1e-9
+          ? "（含本月 " + cdcFmtMoney_(cum.cumulative_add) + "）"
+          : "") +
+        "</div>";
+    } else {
+      html +=
+        "<div><strong>經銷等級累積</strong>：" +
         cdcFmtMoney_(cum.cumulative_before) +
         " → " +
         cdcFmtMoney_(cum.cumulative_after) +
-        "（本月寄賣 +" +
-        cdcFmtMoney_(cumAdd) +
+        "（本月 +" +
+        cdcFmtMoney_(cumAddTotal) +
         "）</div>";
-      if (cum.upgrade && cum.pending_tier_label) {
-        html +=
-          '<div style="color:#15803d;"><strong>次月待生效</strong>：' +
-          cdcEsc_(cum.pending_tier_label) +
-          (cum.pending_price_rate != null ? "（" + String(cum.pending_price_rate) + " 折）" : "") +
-          "</div>";
-      }
-    } else if (cum.err) {
-      html += '<div style="margin-top:6px;color:#b45309;">' + cdcEsc_(cum.err) + "</div>";
     }
+    html += cdcPendingTierHtml_(cum);
+  } else if (cum.err) {
+    html += '<div style="margin-top:6px;color:#b45309;">' + cdcEsc_(cum.err) + "</div>";
   }
 
   box.innerHTML = html;

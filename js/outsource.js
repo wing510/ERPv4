@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Outsource / Process Orders（API 版）
  * - 分階段：建立(OPEN) → 送加工(PROCESS_OUT) → 回收(PROCESS_IN) → 完成(POSTED)
  * - 支援分批回收；取消加工單可回沖 movements
@@ -127,7 +127,7 @@ function formatProcSupplierDisplay_(supplierId){
 function setProcStatusHint_(text){
   const el = document.getElementById("procStatusHint");
   if(!el) return;
-  const finalText = text || "加工流程：新單 — 填主檔後按下方「建立」";
+  const finalText = text || "加工流程：新單 — 填主檔後按「1) 建立加工單」";
   el.textContent = finalText;
   // 比照 import：warn 用棕色，其餘用灰色（避免過度搶眼）
   const t = String(finalText || "");
@@ -149,7 +149,7 @@ function setProcInvHint_(text){
 }
 
 function deriveProcStatusHint_(po, inputs, outputs){
-  if(!po) return "加工流程：新單 — 填主檔後按下方「建立」";
+  if(!po) return "加工流程：新單 — 填主檔後按「1) 建立加工單」";
   const status = String(po.status || "").trim().toUpperCase();
   if(status === "CANCELLED") return "加工流程：已取消（僅可檢視）";
 
@@ -973,15 +973,48 @@ function initProcDropdowns(){
   }
 }
 
+function procScrollToForm_(){
+  if(typeof scrollToMasterForm_ === "function"){
+    scrollToMasterForm_("proc_edit_card");
+    return;
+  }
+  try{
+    const el = document.getElementById("proc_edit_card");
+    if(el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }catch(_e){}
+}
+
+function procScrollToList_(){
+  if(typeof scrollToMasterForm_ === "function"){
+    scrollToMasterForm_("proc_list_card");
+    return;
+  }
+  try{
+    const el = document.getElementById("proc_list_card");
+    if(el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }catch(_e){}
+  try{
+    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+  }catch(_e2){}
+}
+
 function resetProcessForm(){
   clearProcBlockNotice_();
+  try{
+    if(typeof erpClearTxnListRowCollapsed_ === "function") erpClearTxnListRowCollapsed_("outsource");
+  }catch(_e){}
+  try{
+    if(typeof erpSyncListRowHighlight_ === "function"){
+      erpSyncListRowHighlight_("procTableBody", "data-row-id", "");
+    }
+  }catch(_eHi){}
   procEditing = false;
   procLoadedStatus_ = "";
   procInputs = [];
   procOutputs = [];
   procSelectedDbInputId = "";
   procSelectedDbOutputId = "";
-  setProcStatusHint_("加工流程：新單 — 填主檔後按下方「建立」");
+  setProcStatusHint_("加工流程：新單 — 填主檔後按「1) 建立加工單」");
   setProcInvHint_("庫存狀態：未載入 — 請先建立或載入加工單");
   renderProcInputs();
   renderProcOutputs();
@@ -1045,6 +1078,15 @@ function resetProcessForm(){
   if(s2) s2.textContent = "";
   if(s3) s3.textContent = "";
   if(s4) s4.textContent = "";
+  setProcButtons_();
+}
+
+/** 送加工／回收完成後：清空明細並捲回列表 */
+function procReturnToListAfterTxn_(){
+  clearProcBlockNotice_();
+  if(typeof erpClearTxnListRowCollapsed_ === "function") erpClearTxnListRowCollapsed_("outsource");
+  resetProcessForm();
+  procScrollToList_();
 }
 
 function onSelectProcInputLot(){
@@ -1746,9 +1788,9 @@ function setProcButtons_(){
     cancelBtn.title =
       inFlight ? "處理中…" :
       (!editing ? "請先載入加工單" :
-      (st === "POSTED" ? "已結案（POSTED），不可取消" :
-      (st === "CANCELLED" ? "已取消（CANCELLED）" :
-      "取消加工單（回沖）")));
+      (st === "POSTED" ? "已結案（POSTED），不可作廢" :
+      (st === "CANCELLED" ? "已作廢（CANCELLED）" :
+      "作廢加工單")));
   }
   if(issueBtn){
     const can = !inFlight && procId && draftInputs.length > 0 && st !== "CANCELLED" && st !== "POSTED";
@@ -1882,12 +1924,9 @@ async function createProcessOrderOnly(triggerEl){
       created_by: getCurrentUser(),
       created_at: nowIsoTaipei()
     }, { method: "POST" });
-    procEditing = true;
-    procLoadedStatus_ = "OPEN";
-    const idEl = document.getElementById("proc_id");
-    if(idEl) idEl.disabled = true;
+    invalidateProcCaches_();
     await renderProcessOrders();
-    await loadProcessOrder(process_order_id);
+    await loadProcessOrder(process_order_id, null, { force: true });
     showToast("加工單已建立（OPEN）");
   } catch(err) {
     const full = (
@@ -1897,7 +1936,9 @@ async function createProcessOrderOnly(triggerEl){
     ).toLowerCase();
     if(/process order already exists/i.test(full)){
       try{
-        await loadProcessOrder(process_order_id);
+        invalidateProcCaches_();
+        await renderProcessOrders();
+        await loadProcessOrder(process_order_id, null, { force: true });
       }catch(_eLoad){}
     }
   } finally {
@@ -2003,13 +2044,9 @@ async function issueProcessOrder(){
     }, { method: "POST" });
 
     invalidateProcCaches_();
-    setProcStatusHint_(existedCount > 0 ? "加工流程：已追加送加工（待回收）" : "加工流程：已送加工（待回收）");
-    procInputs = [];
-    renderProcInputs();
-    updateLossHint();
     await loadProcMasterData();
     await renderProcessOrders();
-    await loadProcessOrder(process_order_id);
+    procReturnToListAfterTxn_();
     showToast(existedCount > 0 ? "送加工完成：已追加本次資料並同步更新" : "送加工完成：資料已同步更新", "success", 6000);
   } catch(err){
     if (procShouldAutoReloadAfterError_(err)) {
@@ -2225,31 +2262,10 @@ async function receiveProcessOutput(){
     }, { method: "POST" });
 
     const createdLots = Array.isArray(res?.created_lots) ? res.created_lots : [];
-    setProcStatusHint_(nextStatus === "POSTED" ? "加工流程：加工已回收（已結案）" : "加工流程：部分回收");
-
-    const outQtyEl = document.getElementById("proc_output_qty");
-    const outSelEl = document.getElementById("proc_output_product");
-    const outUnitEl = document.getElementById("proc_output_unit");
-    const outRmEl = document.getElementById("proc_output_remark");
-    const outWhEl = document.getElementById("proc_output_warehouse");
-    procClear_([
-      "proc_output_qty",
-      "proc_output_qty_hint",
-      "proc_output_product",
-      "proc_output_unit",
-      "proc_output_remark",
-      "proc_output_warehouse",
-      "proc_output_factory_lot",
-      "proc_output_factory_exp"
-    ]);
-    syncErpQtyUnitSuffix_("proc_output_unit", "proc_output_unit_suffix");
-    procOutputs = [];
-    renderProcOutputs();
-    updateLossHint();
     invalidateProcCaches_();
     await loadProcMasterData();
     await renderProcessOrders();
-    await loadProcessOrder(process_order_id);
+    procReturnToListAfterTxn_();
     const lotText = createdLots.join(", ");
     showToast(
       nextStatus === "POSTED"
@@ -2285,7 +2301,7 @@ async function cancelProcessOrder(triggerEl){
   if(!id) return showToast("請先載入加工單","error");
   {
     const ok = window.erpConfirmActionKey_("confirm.proc.cancel_order", {
-      fallback: "確定取消此加工單？系統會建立回沖庫存異動。"
+      fallback: "確定作廢此加工單？系統會建立回沖庫存異動。"
     });
     if(!ok) return;
   }
@@ -2300,28 +2316,32 @@ async function cancelProcessOrder(triggerEl){
       updated_at: nowIsoTaipei()
     }, { method: "POST" });
 
-    setProcStatusHint_("加工流程：已取消");
+    setProcStatusHint_("加工流程：已作廢");
     invalidateProcCaches_();
     await loadProcMasterData();
     await renderProcessOrders();
     await loadProcessOrder(id);
-    showToast("取消完成：這張加工單已取消，畫面資料已同步更新", "success", 6000);
+    showToast("作廢完成：這張加工單已作廢，畫面資料已同步更新", "success", 6000);
   } catch(err){
     if (procShouldAutoReloadAfterError_(err)) {
       await procAutoReloadAfterConflict_(id);
       return;
     }
     if(!(err && err.erpApiToastShown)){
-      showToast("取消失敗：請稍後重試；若仍失敗請重新載入後再試", "error");
+      showToast("作廢失敗：請稍後重試；若仍失敗請重新載入後再試", "error");
     }
   } finally { hideSaveHint(); }
 }
 
-async function loadProcessOrder(processOrderId, triggerEl){
+async function loadProcessOrder(processOrderId, triggerEl, options){
   const id = String(processOrderId || "").trim().toUpperCase();
   if(!id) return;
   const curProc = String(document.getElementById("proc_id")?.value || "").trim().toUpperCase();
-  if(procEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curProc, id)){
+  const shouldToggle =
+    typeof erpTxnLoadShouldToggleClose_ === "function"
+      ? erpTxnLoadShouldToggleClose_(procEditing, curProc, id, options)
+      : procEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curProc, id);
+  if(shouldToggle){
     if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("outsource", curProc, id, "procTableBody")) return;
   }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
     erpClearTxnListRowCollapsed_("outsource");
@@ -2355,7 +2375,7 @@ async function loadProcessOrder(processOrderId, triggerEl){
     if(s3) s3.textContent = "";
     if(s4) s4.textContent = "";
   }catch(_e2){}
-  if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+  if(typeof procScrollToForm_ === "function") procScrollToForm_();
   try{
     await loadProcMasterData();
 
@@ -2520,7 +2540,7 @@ async function loadProcessOrder(processOrderId, triggerEl){
   }
 
     showToast("已載入加工單：" + id);
-    if(typeof scrollToEditorTop === "function") scrollToEditorTop();
+    if(typeof procScrollToForm_ === "function") procScrollToForm_();
     updateLossHint();
   }finally{
     try{
@@ -2572,8 +2592,9 @@ async function updateProcessOrderHeader(triggerEl){
     updated_at: nowIsoTaipei()
   }, { method: "POST" });
 
+  invalidateProcCaches_();
   await renderProcessOrders();
-  await loadProcessOrder(id);
+  await loadProcessOrder(id, null, { force: true });
   showToast("加工單主檔已更新");
   } finally { hideSaveHint(); }
 }
@@ -2616,7 +2637,7 @@ async function renderProcessOrders(){
 
   tbody.innerHTML = "";
   if(!sorted.length){
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px;">${kw || qSt ? "沒有符合條件的加工單。" : "尚無加工單。請於上方建立或載入。"}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px;">${kw || qSt ? "沒有符合條件的加工單。" : "尚無加工單。請於下方加工單明細建立，或點列載入。"}</td></tr>`;
     return;
   }
   sorted.forEach(p => {

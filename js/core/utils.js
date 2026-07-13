@@ -268,6 +268,25 @@ function erpRoleLabelZh_(role){
   return map[r] || r;
 }
 
+/** 人員下拉：CEO 固定第一，其餘依姓名、user_id */
+function erpSortUsersForDropdown_(users){
+  function rank_(u){
+    const role = String(u && u.role || "").trim().toUpperCase();
+    const uid = String(u && u.user_id || "").trim().toLowerCase();
+    if(role === "CEO" || uid === "ceo") return 0;
+    return 1;
+  }
+  return (users || []).slice().sort(function(a, b){
+    const ra = rank_(a);
+    const rb = rank_(b);
+    if(ra !== rb) return ra - rb;
+    const an = String(a.user_name || "").trim();
+    const bn = String(b.user_name || "").trim();
+    if(an && bn && an !== bn) return an.localeCompare(bn, undefined, { sensitivity: "base" });
+    return String(a.user_id || "").localeCompare(String(b.user_id || ""), undefined, { sensitivity: "base" });
+  });
+}
+
 /** 頂欄登入者：畫面中文名；title 保留原始 user_id */
 function erpTopbarUserText_(userId, role){
   const uid = String(userId || "").trim();
@@ -279,11 +298,11 @@ function erpTopbarUserText_(userId, role){
   return { label, title };
 }
 
-/** v4.2 應收/收款：CEO、財務角色，或 Users 勾選 ar */
+/** v4.2 應收/收款：CEO、財務、總務、管理者，或 Users 勾選 ar */
 function erpCanManageAr_(){
   try{
     var r = (typeof getCurrentUserRole === "function") ? String(getCurrentUserRole() || "").trim().toUpperCase() : "";
-    if(r === "CEO" || r === "FN" || r === "FINANCE") return true;
+    if(r === "CEO" || r === "FN" || r === "FINANCE" || r === "GA" || r === "ADMIN") return true;
     return erpHasModule_("ar");
   }catch(_e){
     return false;
@@ -388,6 +407,7 @@ function erpCanViewFinanceModule_(){
 try{
   window.erpDisplayOperatorName_ = erpDisplayOperatorName_;
   window.erpRoleLabelZh_ = erpRoleLabelZh_;
+  window.erpSortUsersForDropdown_ = erpSortUsersForDropdown_;
   window.erpTopbarUserText_ = erpTopbarUserText_;
   window.erpCanManageAr_ = erpCanManageAr_;
   window.erpCanViewFinanceModule_ = erpCanViewFinanceModule_;
@@ -441,8 +461,8 @@ var TERM_LABELS = {
   FAILED: "FAILED（未通過）",
   INTERNAL_USE: "INTERNAL_USE（內部領用）",
   SAMPLE: "SAMPLE（樣品）",
-  NORMAL: "NORMAL（正常訂單）",
-  CONSIGNMENT: "CONSIGNMENT（寄賣）",
+  NORMAL: "NORMAL（一般買斷）",
+  CONSIGNMENT: "CONSIGNMENT（寄賣補貨）",
   GIFT: "GIFT（贈品）",
   PR: "PR（公關）",
   RESHIP: "RESHIP（補寄）",
@@ -1080,6 +1100,17 @@ function erpListRowToggleClose_(selectedId, clickedId){
   return !!(a && b && a === b);
 }
 
+/** 程式觸發重載（建立／儲存後）時略過「再點同一列收合」 */
+function erpTxnLoadForce_(options) {
+  return !!(options && (options.force === true || options.forceReload === true));
+}
+
+function erpTxnLoadShouldToggleClose_(editing, curId, nextId, options) {
+  if (erpTxnLoadForce_(options)) return false;
+  if (!editing) return false;
+  return erpListRowToggleClose_(curId, nextId);
+}
+
 /** 主檔版型 A：下方明細卡片是否已展開 */
 function erpMasterEditCardIsOpen_(formCardId){
   const el = document.getElementById(String(formCardId || ""));
@@ -1137,6 +1168,8 @@ function erpTryToggleCloseTxnListRow_(moduleKey, selectedId, clickedId, tbodyId)
 }
 
 window.erpListRowToggleClose_ = erpListRowToggleClose_;
+window.erpTxnLoadForce_ = erpTxnLoadForce_;
+window.erpTxnLoadShouldToggleClose_ = erpTxnLoadShouldToggleClose_;
 window.erpMasterEditCardIsOpen_ = erpMasterEditCardIsOpen_;
 window.erpTryToggleCloseMasterListRow_ = erpTryToggleCloseMasterListRow_;
 window.erpClearTxnListRowCollapsed_ = erpClearTxnListRowCollapsed_;

@@ -8,6 +8,7 @@ const {
   applyDealerCreditAtSettlement_,
   restoreDealerCreditOnSettlementVoid_,
   assertNoLockedDealerRebateForSettlementVoid_,
+  assertNoPostedMonthlyStatForNewBilling_,
   resolveCumulativeDealerPriceForSettlement_,
   applyCumulativeDealerPriceToLines_,
   recalculateCustomerCumulativeFromPostedRebates_
@@ -157,18 +158,31 @@ async function batchAggSettledAndReceivedByCase_(sb, caseIds) {
   const settledByCase = {};
   const receivedByCase = {};
   const openArByCase = {};
+  const monthSettleCountByCase = {};
+  const periodYm = String(nowIso()).slice(0, 7);
   (caseIds || []).forEach((cid) => {
     settledByCase[cid] = emptySettledPack_();
     receivedByCase[cid] = 0;
     openArByCase[cid] = emptyOpenArPack_();
+    monthSettleCountByCase[cid] = 0;
   });
-  if (!caseIds || !caseIds.length) return { settledByCase, receivedByCase, openArByCase };
+  if (!caseIds || !caseIds.length) return { settledByCase, receivedByCase, openArByCase, monthSettleCountByCase };
 
   const { data: stls, error: stlErr } = await sb
     .from("consignment_case_settlement")
-    .select("settlement_id, case_id, ar_id, status")
+    .select("settlement_id, case_id, ar_id, status, settlement_date")
     .in("case_id", caseIds);
-  if (stlErr) return { settledByCase, receivedByCase, openArByCase };
+  if (stlErr) return { settledByCase, receivedByCase, openArByCase, monthSettleCountByCase };
+
+  (stls || []).forEach((s) => {
+    if (normId_(s.status) !== "POSTED") return;
+    const cid = normId_(s.case_id);
+    if (!(cid in monthSettleCountByCase)) return;
+    const sd = String(s.settlement_date || "").trim();
+    if (sd.length >= 7 && sd.slice(0, 7) === periodYm) {
+      monthSettleCountByCase[cid] = (monthSettleCountByCase[cid] || 0) + 1;
+    }
+  });
 
   const posted = (stls || []).filter((s) => normId_(s.status) === "POSTED");
   const postedIds = posted.map((s) => normId_(s.settlement_id)).filter(Boolean);
@@ -255,10 +269,10 @@ async function batchAggSettledAndReceivedByCase_(sb, caseIds) {
     });
   }
 
-  return { settledByCase, receivedByCase, openArByCase };
+  return { settledByCase, receivedByCase, openArByCase, monthSettleCountByCase };
 }
 
-function buildEnrichedCaseRow_(caseRow, customerNameById, poolStats, settledPack, totalReceivedAmount, openArPack) {
+function buildEnrichedCaseRow_(caseRow, customerNameById, poolStats, settledPack, totalReceivedAmount, openArPack, monthSettlementCount) {
   const c = caseRow;
   const arPack = openArPack || emptyOpenArPack_();
   const totalSettledListAmount = settledPack.listAmount;
@@ -287,7 +301,8 @@ function buildEnrichedCaseRow_(caseRow, customerNameById, poolStats, settledPack
     total_received_amount: totalReceivedAmount,
     settle_progress_pct: settleProgressPct,
     open_ar_count: Number(arPack.open_ar_count || 0),
-    ar_outstanding_amount: Number(arPack.ar_outstanding_amount || 0)
+    ar_outstanding_amount: Number(arPack.ar_outstanding_amount || 0),
+    month_settlement_count: Number(monthSettlementCount || 0)
   });
 }
 
@@ -898,6 +913,131 @@ async function createConsignmentCaseBundle(p) {
   return ok({ message: "CREATED", case_id: caseId, allocation_policy: policy });
 }
 
+async function updateConsignmentCaseRemarkBundle(p) {
+  if (!canOperateConsignmentAr_(p._session)) return fail("Permission denied: consignment case");
+
+  const caseId = normId_(p.case_id);
+  if (!caseId) return fail("case_id required");
+
+  const actor = String(p.updated_by || p.created_by || "").trim();
+  if (!actor) return fail("updated_by required");
+
+  const remark = String(p.remark != null ? p.remark : "").trim();
+  const sb = getSupabase();
+  const { data: row, error: loadErr } = await sb
+    .from("consignment_case")
+    .select("case_id, remark")
+    .eq("case_id", caseId)
+    .maybeSingle();
+  if (loadErr) return fail(loadErr.message || String(loadErr));
+  if (!row) return fail("Consignment case not found: " + caseId);
+
+  const before = String(row.remark || "").trim();
+  if (before === remark) return ok({ case_id: caseId, remark: remark, unchanged: true });
+
+  const ts = nowIso();
+  const { error: updErr } = await sb
+    .from("consignment_case")
+    .update({ remark: remark, updated_by: actor, updated_at: ts })
+    .eq("case_id", caseId);
+  if (updErr) return fail(updErr.message || String(updErr));
+
+  await writeAuditLog_(
+    "consignment_case",
+    caseId,
+    "BUNDLE_UPDATE_CONSIGNMENT_CASE_REMARK",
+    actor,
+    JSON.stringify({ remark_before: before, remark_after: remark })
+  );
+
+  return ok({ case_id: caseId, remark: remark });
+}
+
+async function assertConsignmentCaseEmptyForDelete_(sb, caseId) {
+  const cid = normId_(caseId);
+  if (!cid) return fail("case_id required");
+
+  const { count: poolCount, error: poolErr } = await sb
+    .from("consignment_case_pool_item")
+    .select("*", { count: "exact", head: true })
+    .eq("case_id", cid);
+  if (poolErr) return fail(poolErr.message || String(poolErr));
+  if ((poolCount || 0) > 0) {
+    return fail("ERR_CONSIGNMENT_CASE_DELETE_HAS_POOL: Case has consignment pool items");
+  }
+
+  const { count: stlCount, error: stlErr } = await sb
+    .from("consignment_case_settlement")
+    .select("*", { count: "exact", head: true })
+    .eq("case_id", cid);
+  if (stlErr) return fail(stlErr.message || String(stlErr));
+  if ((stlCount || 0) > 0) {
+    return fail("ERR_CONSIGNMENT_CASE_DELETE_HAS_SETTLEMENT: Case has settlement records");
+  }
+
+  const { count: retCount, error: retErr } = await sb
+    .from("consignment_case_return")
+    .select("*", { count: "exact", head: true })
+    .eq("case_id", cid);
+  if (retErr) return fail(retErr.message || String(retErr));
+  if ((retCount || 0) > 0) {
+    return fail("ERR_CONSIGNMENT_CASE_DELETE_HAS_RETURN: Case has return records");
+  }
+
+  const { count: shipCount, error: shipErr } = await sb
+    .from("shipment")
+    .select("*", { count: "exact", head: true })
+    .eq("consignment_case_id", cid)
+    .eq("status", "POSTED");
+  if (shipErr) return fail(shipErr.message || String(shipErr));
+  if ((shipCount || 0) > 0) {
+    return fail("ERR_CONSIGNMENT_CASE_DELETE_HAS_SHIPMENT: Case has posted consignment shipments");
+  }
+
+  return null;
+}
+
+async function deleteEmptyConsignmentCaseBundle(p) {
+  if (!canOperateConsignmentAr_(p._session)) return fail("Permission denied: consignment case");
+
+  const caseId = normId_(p.case_id);
+  if (!caseId) return fail("case_id required");
+
+  const actor = String(p.updated_by || p.created_by || "").trim();
+  if (!actor) return fail("updated_by required");
+
+  const sb = getSupabase();
+  const { data: row, error: loadErr } = await sb
+    .from("consignment_case")
+    .select("case_id, customer_id, status, open_date, remark")
+    .eq("case_id", caseId)
+    .maybeSingle();
+  if (loadErr) return fail(loadErr.message || String(loadErr));
+  if (!row) return fail("Consignment case not found: " + caseId);
+
+  const emptyGate = await assertConsignmentCaseEmptyForDelete_(sb, caseId);
+  if (emptyGate && emptyGate.success === false) return emptyGate;
+
+  const { error: delErr } = await sb.from("consignment_case").delete().eq("case_id", caseId);
+  if (delErr) return fail(delErr.message || String(delErr));
+
+  await writeAuditLog_(
+    "consignment_case",
+    caseId,
+    "BUNDLE_DELETE_EMPTY_CONSIGNMENT_CASE",
+    actor,
+    JSON.stringify({
+      case_id: caseId,
+      customer_id: normId_(row.customer_id),
+      status: normId_(row.status),
+      open_date: String(row.open_date || ""),
+      remark: String(row.remark || "")
+    })
+  );
+
+  return ok({ message: "DELETED", case_id: caseId });
+}
+
 async function listConsignmentCaseEnriched_(p) {
   const gate = requireConsignmentListSession_(p);
   if (gate) return gate;
@@ -949,7 +1089,7 @@ async function listConsignmentCaseEnriched_(p) {
     poolByCase[cid].push(it);
   });
 
-  const { settledByCase, receivedByCase, openArByCase } = aggPack;
+  const { settledByCase, receivedByCase, openArByCase, monthSettleCountByCase } = aggPack;
 
   const out = caseList.map((c) => {
     const cid = normId_(c.case_id);
@@ -957,7 +1097,15 @@ async function listConsignmentCaseEnriched_(p) {
     const settledPack = settledByCase[cid] || emptySettledPack_();
     const totalReceivedAmount = receivedByCase[cid] || 0;
     const openArPack = openArByCase[cid] || emptyOpenArPack_();
-    return buildEnrichedCaseRow_(c, customerNameById, poolStats, settledPack, totalReceivedAmount, openArPack);
+    return buildEnrichedCaseRow_(
+      c,
+      customerNameById,
+      poolStats,
+      settledPack,
+      totalReceivedAmount,
+      openArPack,
+      monthSettleCountByCase[cid] || 0
+    );
   });
   return ok({ data: out, source: "supabase" });
 }
@@ -1369,6 +1517,12 @@ async function postConsignmentCaseSettlementBundleCore_(p) {
   }
 
   const customerId = normId_(ccase.customer_id);
+  const monthlyBlock = await assertNoPostedMonthlyStatForNewBilling_(sb, {
+    customerId,
+    settlementDate
+  });
+  if (monthlyBlock?.err) return fail(monthlyBlock.err);
+
   const txId = String(p.transaction_id || "").trim() || buildId_("TX");
 
   const { data: poolItems } = await sb.from("consignment_case_pool_item").select("*").eq("case_id", caseId);
@@ -1895,7 +2049,7 @@ async function cancelConsignmentCaseSettlementBundle(p) {
 
   const { data: stlPre, error: stlPreErr } = await sb
     .from("consignment_case_settlement")
-    .select("settlement_id, status, customer_id, settlement_date, case_id")
+    .select("settlement_id, status, customer_id, settlement_date, case_id, created_at")
     .eq("settlement_id", settlementId)
     .maybeSingle();
   if (stlPreErr) return fail(stlPreErr.message || String(stlPreErr));
@@ -1914,7 +2068,9 @@ async function cancelConsignmentCaseSettlementBundle(p) {
     const rebateBlock = await assertNoLockedDealerRebateForSettlementVoid_(sb, {
       customerId: stlPre.customer_id,
       settlementDate: stlPre.settlement_date,
-      caseId: stlPre.case_id
+      caseId: stlPre.case_id,
+      settlementId: settlementId,
+      settlementCreatedAt: stlPre.created_at
     });
     if (rebateBlock && rebateBlock.err) return fail(rebateBlock.err);
   } catch (e) {
@@ -2418,6 +2574,8 @@ async function removeConsignmentCasePoolFromShipmentCancel_(sb, shipmentId, acto
 
 module.exports = {
   createConsignmentCaseBundle,
+  updateConsignmentCaseRemarkBundle,
+  deleteEmptyConsignmentCaseBundle,
   listConsignmentCaseEnriched_,
   listConsignmentCaseLite_,
   listConsignmentCasePoolByCase_,

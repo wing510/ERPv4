@@ -15,7 +15,7 @@
       <input type="text" id="trace_lot_id" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
       <button class="btn-primary" id="trace_run_btn" onclick="runTrace()">查詢</button>
       <span id="traceRunHint" style="font-size:12px;color:#64748b;font-weight:600;display:none;white-space:nowrap;">查詢中…</span>
-      <button class="btn-secondary" onclick="resetTrace()">重設</button>
+      <button class="btn-secondary" onclick="erpResetCurrentModule_()">重設</button>
       <button class="btn-secondary" onclick="openLogs('lot', document.getElementById('trace_lot_id')?.value || '', 'inventory')">Log</button>
     </div>
     <div id="traceLotTxLinks" style="display:none;margin:-6px 0 14px 0;"></div>

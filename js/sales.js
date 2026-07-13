@@ -35,8 +35,8 @@ const SO_CURRENCIES_ = ["USD", "TWD", "CNY", "EUR"];
 
 function soTypeLabelZh_(soType){
   const t = String(soType || "NORMAL").trim().toUpperCase();
-  if(t === "NORMAL") return "一般";
-  if(t === "CONSIGNMENT") return "寄賣";
+  if(t === "NORMAL") return "一般買斷";
+  if(t === "CONSIGNMENT") return "寄賣補貨";
   return (typeof termLabelZhOnly === "function" ? termLabelZhOnly(t) : t) || t || "—";
 }
 
@@ -127,7 +127,7 @@ function soSetItemsReadOnly_(readOnly){
   }
   const addBtn = document.getElementById("so_add_item_btn");
   if(addBtn) addBtn.disabled = ro;
-  soSyncConsignmentDiscountFieldLock_();
+  soSyncConsignmentPricingFieldLocks_();
 }
 
 /** 主按鈕：有選取已存檔列時為「套用至本列」，否則「新增明細」 */
@@ -202,11 +202,28 @@ function soRestoreHeaderSnapshot_(snap){
   try{ soOnSOTypeChange_(); }catch(_e2){}
 }
 
-function toggleSOHeaderEditSave_(triggerEl){
-  if(!soAllowFullHeaderOps_()){
-    return showToast("已有出貨或單據已結束，無法編輯主檔欄位。備註請用「儲存備註」。", "error");
+async function soRefreshShipmentCache_(){
+  const id = String(document.getElementById("so_id")?.value || "").trim().toUpperCase();
+  if(!id){
+    soHasShipmentsCached_ = false;
+    return false;
   }
+  try{
+    soHasShipmentsCached_ = await hasSOShipments_(id);
+  }catch(_e){
+    soHasShipmentsCached_ = false;
+  }
+  return soHasShipmentsCached_;
+}
+
+async function toggleSOHeaderEditSave_(triggerEl){
   if(!soEditing) return showToast("請先載入銷售單", "error");
+  await soRefreshShipmentCache_();
+  setSOButtons_();
+  updateSOStatusHint_();
+  if(!soAllowFullHeaderOps_()){
+    return showToast("已有有效出貨或單據已結束，無法編輯主檔欄位。備註請用「儲存備註」。", "error");
+  }
   if(!soHeaderEditMode_){
     soHeaderSnapshot_ = soCaptureHeaderSnapshot_();
     soHeaderEditMode_ = true;
@@ -232,10 +249,17 @@ function cancelSOHeaderEdit_(){
 }
 
 function toggleSOItemsEditSave_(triggerEl){
-  if(!soAllowFullLineOps_()){
-    return showToast("已有出貨或單據已結束，無法編輯／儲存整張明細。明細備註可點列後按「儲存備註」。", "error");
-  }
+  return toggleSOItemsEditSaveAsync_(triggerEl);
+}
+
+async function toggleSOItemsEditSaveAsync_(triggerEl){
   if(!soEditing) return showToast("請先載入銷售單", "error");
+  await soRefreshShipmentCache_();
+  setSOButtons_();
+  updateSOStatusHint_();
+  if(!soAllowFullLineOps_()){
+    return showToast("已有有效出貨或單據已結束，無法編輯／儲存整張明細。出貨已作廢者請再按一次「編輯明細」；明細備註可點列後按「儲存備註」。", "error");
+  }
   if(!soItemsEditMode_){
     soItemsSnapshot_ = JSON.parse(JSON.stringify(Array.isArray(soItemsDraft) ? soItemsDraft : []));
     soItemsEditMode_ = true;
@@ -352,8 +376,14 @@ async function saveSOItemsOnly_(triggerEl){
   try{
     // 若已有出貨紀錄，禁止重建明細（保持追溯一致）
     const hasShip = await hasSOShipments_(so_id);
+    soHasShipmentsCached_ = hasShip;
     if(hasShip){
-      showToast("此銷售單已有出貨紀錄，明細不可修改。", "error");
+      showToast("此銷售單已有出貨紀錄，明細不可修改。僅可改備註。", "error");
+      soItemsEditMode_ = false;
+      soItemsSnapshot_ = null;
+      soSetItemsReadOnly_(true);
+      setSOButtons_();
+      updateSOStatusHint_();
       return;
     }
     await callAPI({
@@ -682,10 +712,14 @@ function updateSOStatusHint_(){
         : ("銷售：已載入 · " + (label || st) + " · " + editHint);
     return;
   }
+  const newHint = soIsConsignmentSO_()
+    ? "內部補貨依據；應收於結算產生 → 填妥後按「建立」"
+    : "填妥後按「建立」";
+  const newModule = soIsConsignmentSO_() ? "寄賣補貨" : "銷售";
   el.textContent =
     (typeof window.erpFlowHintText_ === "function")
-      ? window.erpFlowHintText_("銷售", "新單", "填妥後按「建立」")
-      : "銷售：新單 · 填妥後按「建立」";
+      ? window.erpFlowHintText_(newModule, "新單", newHint)
+      : (newModule + "：新單 · " + newHint);
   if(shipEl){
     shipEl.textContent = "出貨：未載入 · 請先 Load 銷售單";
     shipEl.style.color = "#92400e";
@@ -780,15 +814,69 @@ function soIsConsignmentSO_(){
 }
 
 function soGetUnitPriceLabel_(){
+  if(soIsConsignmentSO_()) return "參考價（入池、結算對照）";
   return soShouldApplyDealerPricing_() ? "經銷價" : "單價";
 }
 
 function soSyncConsignmentPriceLabels_(){
-  const label = soGetUnitPriceLabel_();
+  const isCs = soIsConsignmentSO_();
+  const banner = document.getElementById("so_consignment_banner");
+  if(banner) banner.style.display = isCs ? "" : "none";
+
+  const unitLabel = soGetUnitPriceLabel_();
+  const unitThLabel = isCs ? "參考價" : unitLabel;
+  const amountLabel = isCs ? "參考金額" : "金額";
+  const promoLabel = isCs ? "結算促銷" : "促銷預覽";
+
   const formLbl = document.getElementById("so_item_unit_price_label");
   const th = document.getElementById("so_item_unit_price_th");
-  if(formLbl) formLbl.textContent = label;
-  if(th) th.textContent = label;
+  if(formLbl) formLbl.textContent = unitLabel;
+  if(th){
+    th.textContent = unitThLabel;
+    th.title = isCs ? "參考價（入池、結算對照）" : "";
+  }
+
+  const amtLbl = document.getElementById("so_item_amount_label");
+  const amtTh = document.getElementById("so_item_amount_th");
+  if(amtLbl) amtLbl.textContent = amountLabel;
+  if(amtTh) amtTh.textContent = amountLabel;
+
+  const promoLbl = document.getElementById("so_item_promo_preview_label");
+  if(promoLbl) promoLbl.textContent = promoLabel;
+
+  const amtEl = document.getElementById("so_item_amount");
+  if(amtEl){
+    amtEl.title = isCs ? "非應收金額；結算時依促銷方案重算" : "";
+  }
+  const promoEl = document.getElementById("so_item_promo_preview");
+  if(promoEl){
+    promoEl.title = isCs
+      ? "寄賣促銷於結算頁套用"
+      : "一般買斷：選客戶與產品後預覽促銷；填數量後顯示計價／贈送";
+  }
+  const priceEl = document.getElementById("so_item_unit_price");
+  if(priceEl){
+    priceEl.title = isCs ? "牌價×經銷等級自動帶入；入池與結算對照用；有固定促銷時結算不看此價" : "";
+  }
+  soSyncConsignmentUnitPriceLock_();
+}
+
+function soSyncConsignmentUnitPriceLock_(){
+  const priceEl = document.getElementById("so_item_unit_price");
+  if(!priceEl) return;
+  const lockCs = soIsConsignmentSO_();
+  const lineBlocked = !!priceEl.disabled;
+  const lock = lockCs && !lineBlocked;
+  if(typeof erpSyncInputReadonlyStyle_ === "function"){
+    erpSyncInputReadonlyStyle_(priceEl, lock);
+  }else{
+    priceEl.readOnly = lock;
+  }
+}
+
+function soSyncConsignmentPricingFieldLocks_(){
+  soSyncConsignmentDiscountFieldLock_();
+  soSyncConsignmentUnitPriceLock_();
 }
 
 function soFindCustomer_(customerId){
@@ -855,7 +943,7 @@ function soSyncConsignmentDiscountFieldLock_(){
 
 async function soFillDealerDiscountDisplay_(opts){
   const recalcUnitPrice = !(opts && opts.recalcUnitPrice === false);
-  soSyncConsignmentDiscountFieldLock_();
+  soSyncConsignmentPricingFieldLocks_();
   const discEl = document.getElementById("so_item_discount_pct");
   if(!discEl) return;
 
@@ -883,7 +971,7 @@ async function soFillDealerDiscountDisplay_(opts){
       if(typeof erpSyncInputReadonlyStyle_ === "function") erpSyncInputReadonlyStyle_(discEl, true);
       else discEl.readOnly = true;
       discEl.value = String(pct);
-      discEl.title = "一般銷售：依客戶目前經銷等級（不可手改）";
+      discEl.title = "一般買斷：依客戶目前經銷等級（不可手改）";
       if(recalcUnitPrice) soApplyDiscountToUnitPrice_();
       return;
     }
@@ -920,6 +1008,8 @@ function soOnSOTypeChange_(){
   soSyncConsignmentPriceLabels_();
   soFillDealerDiscountDisplay_({ recalcUnitPrice: true });
   soRefreshProductAvailableDisplay_();
+  updateSOStatusHint_();
+  void soRefreshPromoPreview_();
 }
 
 async function soEnsureInventoryAvail_(opts){
@@ -1005,15 +1095,13 @@ function soComputeProductShipAvail_(productId){
 async function soRefreshProductAvailableDisplay_(){
   const el = document.getElementById("so_item_available_qty");
   if(!el) return;
-  if(soIsConsignmentSO_()){
-    el.value = "—";
-    el.title = "寄賣單不顯示倉庫可用量（依寄賣案品項池）";
-    return;
-  }
   const productId = String(document.getElementById("so_item_product_id")?.value || "").trim();
+  const availTitle = soIsConsignmentSO_()
+    ? "寄賣：全倉可出貨合計（出貨時從倉庫扣庫入寄賣案池）"
+    : "全倉可出貨合計（ACTIVE＋QA已放行＋未過期＋可用量>0）";
   if(!productId){
     el.value = "";
-    el.title = "全倉可出貨合計（ACTIVE＋QA已放行＋未過期）";
+    el.title = availTitle;
     return;
   }
   el.value = "載入中…";
@@ -1034,7 +1122,7 @@ async function soRefreshProductAvailableDisplay_(){
   const u = pack.unit || String(p?.unit || "").trim();
   const q = Number(pack.qty || 0);
   el.value = u ? q + " " + u : String(q);
-  el.title = "全倉可出貨合計（ACTIVE＋QA已放行＋未過期＋可用量>0）";
+  el.title = availTitle;
 }
 
 function money2(n){
@@ -1131,6 +1219,11 @@ function soSyncSOItemPricingFromProduct_(productId, unitPriceHint){
     soApplyDiscountToUnitPrice_();
     return;
   }
+  // 無經銷折數／促銷改價時：單價預設牌價（與後端無經銷等級時回退牌價一致；仍可手改）
+  if(listPrice != null && listPrice > 0 && priceEl && !(Number(priceEl.value || 0) > 0)){
+    priceEl.value = String(listPrice);
+    soSyncDiscountPctFromUnitPrice_();
+  }
   calcSOAmount();
 }
 
@@ -1218,13 +1311,9 @@ async function initSalesDropdowns(){
       if(r === "GA" || r === "GENERAL_AFFAIRS") return "總務";
       return r || "—";
     };
-    const salesUsers = (soUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE");
-    salesUsers.sort((a,b)=>{
-      const an = String(a.user_name || "").trim();
-      const bn = String(b.user_name || "").trim();
-      if(an && bn && an !== bn) return an.localeCompare(bn);
-      return String(a.user_id || "").localeCompare(String(b.user_id || ""));
-    });
+    const salesUsers = (typeof erpSortUsersForDropdown_ === "function")
+      ? erpSortUsersForDropdown_((soUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE"))
+      : (soUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE");
     spSel.innerHTML =
       `<option value="">請選擇</option>` +
       salesUsers.map(u => {
@@ -1267,9 +1356,11 @@ function resetSOForm(){
   const tp = document.getElementById("so_type");
   if(tp) tp.value = "NORMAL";
   try{ soSyncReshipRefUI_(); }catch(_eSync){}
+  try{ soSyncConsignmentPriceLabels_(); }catch(_eCs){}
 
   clearSOItemEntry();
   setSOButtons_();
+  updateSOStatusHint_();
 }
 
 function clearSOItemEntry(){
@@ -1289,12 +1380,12 @@ function clearSOItemEntry(){
   soSetV_("so_item_amount", soFormatAmountWithCurrency_(0));
   soItemPromoPreview_ = null;
   const previewEl = document.getElementById("so_item_promo_preview");
-  if(previewEl) previewEl.textContent = "";
+  if(previewEl) previewEl.value = "";
   soSyncSOItemAddButton_();
   if(soShouldApplyDealerPricing_()){
     void soFillDealerDiscountDisplay_({ recalcUnitPrice: false });
   }else{
-    soSyncConsignmentDiscountFieldLock_();
+    soSyncConsignmentPricingFieldLocks_();
   }
 }
 
@@ -1443,13 +1534,30 @@ function soOnSOItemOrderQtyInput_(){
   void soRefreshPromoPreview_();
 }
 
+function soUnpackPromoPreviewPack_(resp){
+  if(!resp || typeof resp !== "object") return null;
+  if(String(resp.product_id || "").trim()) return resp;
+  if(resp.data && typeof resp.data === "object" && String(resp.data.product_id || "").trim()) return resp.data;
+  return resp;
+}
+
+function soSetPromoPreviewHint_(previewEl, text){
+  if(previewEl) previewEl.value = String(text || "");
+}
+
 async function soRefreshPromoPreview_(){
   const previewEl = document.getElementById("so_item_promo_preview");
-  if(previewEl) previewEl.value = "";
+  soSetPromoPreviewHint_(previewEl, "");
   soItemPromoPreview_ = null;
 
   const soType = String(document.getElementById("so_type")?.value || "NORMAL").trim().toUpperCase();
-  if(soType !== "NORMAL" || soIsConsignmentSO_()) {
+  if(soIsConsignmentSO_()){
+    soSetPromoPreviewHint_(previewEl, "寄賣促銷於結算頁套用");
+    calcSOAmount();
+    return;
+  }
+  if(soType !== "NORMAL") {
+    soSetPromoPreviewHint_(previewEl, "（此用途不計促銷預覽）");
     calcSOAmount();
     return;
   }
@@ -1460,54 +1568,65 @@ async function soRefreshPromoPreview_(){
   const orderDate = orderDateInput || (typeof nowIso16 === "function" ? String(nowIso16()).slice(0, 10) : "");
   const productId = String(document.getElementById("so_item_product_id")?.value || "").trim();
   const orderQty = Number(document.getElementById("so_item_order_qty")?.value || 0);
-  if(!customerId || !productId || !(orderQty > 0) || !orderDate){
+  if(!customerId || !productId || !orderDate){
+    if(previewEl){
+      const missing = [];
+      if(!customerId) missing.push("客戶");
+      if(!productId) missing.push("產品");
+      soSetPromoPreviewHint_(previewEl, missing.length ? `（請先填：${missing.join("、")}）` : "");
+    }
     calcSOAmount();
     return;
   }
 
+  // 有客戶＋產品即可預覽促銷方案；未填數量時用 1 試算條件，計價／贈送待填數量後更新
+  const previewQty = orderQty > 0 ? orderQty : 1;
+
   const token = ++soPromoPreviewToken_;
   try{
     const unitPrice = Number(document.getElementById("so_item_unit_price")?.value || 0);
-    const pack = await callAPI({
+    const resp = await callAPI({
       action: "preview_sales_order_promo_line_bundle",
       customer_id: customerId,
       order_date: orderDate,
       product_id: productId,
-      order_qty: String(orderQty),
+      order_qty: String(previewQty),
       unit_price: String(unitPrice)
     }, { method: "POST", silent: true });
     if(token !== soPromoPreviewToken_) return;
-    soItemPromoPreview_ = pack || null;
+    const pack = soUnpackPromoPreviewPack_(resp);
+    // 僅在已填訂購數量時，才把預覽結果用於金額／新增明細快照
+    soItemPromoPreview_ = (orderQty > 0 && pack) ? pack : null;
     if(previewEl && pack && String(pack.promo_scheme_name || "").trim()){
       const name = String(pack.promo_scheme_name || "").trim();
       const type = String(pack.promo_type || "").trim().toUpperCase();
-      let cond = "";
+      let secondPart = "";
       if(type === "BUY_N_GET_M"){
-        const buy = Number(pack.promo_buy_qty || 0);
-        const free = Number(pack.promo_scheme_free_qty || 0);
-        cond = (buy > 0 && free > 0) ? (`買${buy}送${free}`) : "買送";
+        if(orderQty > 0){
+          const billable = Number(pack.billable_qty || 0);
+          const freeQty = Number(pack.free_qty || 0);
+          if(billable > 0 || freeQty > 0) secondPart = `計價 ${billable}、贈 ${freeQty}`;
+        }else{
+          const buy = Number(pack.promo_buy_qty || 0);
+          const free = Number(pack.promo_scheme_free_qty || 0);
+          secondPart = (buy > 0 && free > 0) ? (`買${buy}送${free}`) : "買送";
+        }
       }else if(type === "DISCOUNT_PCT"){
         const pct = Number(pack.promo_discount_pct || 0);
-        cond = pct > 0 ? (`${pct}%`) : "折扣";
+        secondPart = pct > 0 ? (`${pct}%`) : "折扣";
       }else if(type === "FIXED_PRICE"){
-        cond = "固定價";
+        secondPart = "固定價";
       }
 
-      const billable = Number(pack.billable_qty || 0);
-      const freeQty = Number(pack.free_qty || 0);
-      const qtyPart =
-        (type === "BUY_N_GET_M" && (billable > 0 || freeQty > 0))
-          ? (`計價 ${billable}、贈 ${freeQty}`)
-          : "";
-
-      const parts = [name, cond, qtyPart].map(s => String(s || "").trim()).filter(Boolean);
-      previewEl.value = parts.join(" | ");
+      const parts = [name, secondPart].map(s => String(s || "").trim()).filter(Boolean);
+      soSetPromoPreviewHint_(previewEl, parts.join(" | "));
     }else if(previewEl){
-      previewEl.value = "（無符合促銷）";
+      soSetPromoPreviewHint_(previewEl, "（無符合促銷）");
     }
   }catch(_e){
     if(token !== soPromoPreviewToken_) return;
     soItemPromoPreview_ = null;
+    soSetPromoPreviewHint_(previewEl, "（預覽失敗，請重試）");
   }
   calcSOAmount();
 }
@@ -1553,7 +1672,7 @@ function addSOItemDraft(){
   // 一般：必須有單價（避免後續對帳/業績無法計算）
   const soType = String(document.getElementById("so_type")?.value || "NORMAL").trim().toUpperCase();
   if(soType === "NORMAL" && !(unit_price > 0)){
-    return showToast("一般：單價必填且需大於 0", "error");
+    return showToast("一般買斷：單價必填且需大於 0", "error");
   }
 
   const sid = String(soSelectedDbItemId_ || "").trim();
@@ -1713,7 +1832,7 @@ async function createSalesOrder(triggerEl){
   if(reshipErr) return showToast(reshipErr, "error");
   if(so_type === "NORMAL"){
     const bad = (soItemsDraft || []).some(x => !(Number(x?.unit_price || 0) > 0));
-    if(bad) return showToast("一般：所有品項都必須有單價（>0）", "error");
+    if(bad) return showToast("一般買斷：所有品項都必須有單價（>0）", "error");
   }
 
   showSaveHint(triggerEl || document.getElementById("soItemsCommitGroup"));
@@ -1758,7 +1877,7 @@ async function createSalesOrder(triggerEl){
   }, { method: "POST" });
 
   await renderSalesOrders();
-  resetSOForm();
+  await loadSalesOrder(so_id, null, { force: true });
   showToast("銷售單已建立");
   } finally {
     hideSaveHint();
@@ -1766,11 +1885,15 @@ async function createSalesOrder(triggerEl){
   }
 }
 
-async function loadSalesOrder(soId, triggerEl){
+async function loadSalesOrder(soId, triggerEl, options){
   const id = String(soId || "").trim().toUpperCase();
   if(!id) return;
   const curSo = String(document.getElementById("so_id")?.value || "").trim().toUpperCase();
-  if(soEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curSo, id)){
+  const shouldToggle =
+    typeof erpTxnLoadShouldToggleClose_ === "function"
+      ? erpTxnLoadShouldToggleClose_(soEditing, curSo, id, options)
+      : soEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curSo, id);
+  if(shouldToggle){
     if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("sales", curSo, id, "soTableBody")) return;
   }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
     erpClearTxnListRowCollapsed_("sales");
@@ -1928,7 +2051,7 @@ async function cancelSalesOrder(triggerEl){
     soLoadedStatus_ = "CANCELLED";
     if(typeof invalidateCache === "function") invalidateCache("sales_order");
     await renderSalesOrders();
-    await loadSalesOrder(so_id);
+    await loadSalesOrder(so_id, null, { force: true });
     showToast("銷售單已作廢（CANCELLED）");
   } catch(err){
     const msg = String(err && err.message != null ? err.message : err || "");
@@ -1944,7 +2067,7 @@ async function cancelSalesOrder(triggerEl){
       try{
         if(typeof invalidateCache === "function") invalidateCache("sales_order");
         await renderSalesOrders();
-        await loadSalesOrder(so_id);
+        await loadSalesOrder(so_id, null, { force: true });
         showToast("已重新載入最新資料，請確認後再操作", "warn", 6000);
         return;
       }catch(_eReload){

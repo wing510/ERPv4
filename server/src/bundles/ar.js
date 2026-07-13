@@ -31,10 +31,10 @@ function sessionHasFinanceModule_(session, modKey) {
   return list.includes(key);
 }
 
-/** 財務寫入／AR 主功能：CEO、財務角色，或 Users 勾選 ar */
+/** 財務寫入／AR 主功能：CEO、財務、總務、管理者，或 Users 勾選 ar */
 function canManageAr_(session) {
   const r = String(session?.role || "").trim().toUpperCase();
-  if (r === "CEO" || r === "FN" || r === "FINANCE") return true;
+  if (r === "CEO" || r === "FN" || r === "FINANCE" || r === "GA" || r === "ADMIN") return true;
   return sessionHasFinanceModule_(session, "ar");
 }
 

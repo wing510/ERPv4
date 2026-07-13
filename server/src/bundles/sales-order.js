@@ -116,7 +116,7 @@ async function resetSalesOrderItemsCmd(p) {
   const actor = String(p.updated_by || p.created_by || "").trim();
   if (!actor) return fail("updated_by required");
 
-  if (await hasShipmentBySoId_(soId)) {
+  if (await hasActiveShipmentBySoId_(soId)) {
     return fail("Sales order already has shipment records. Reset items is not allowed.");
   }
 

@@ -398,7 +398,7 @@ async function ccPromoSave_(isUpdate) {
     });
     showToast(isUpdate ? "方案已更新" : "方案已建立", "success");
     await ccPromoRenderList_(true);
-    if (!isUpdate) ccPromoClearForm_();
+    if (!isUpdate) await ccPromoLoadScheme_(schemeId);
     else ccPromoEditing_ = true;
     ccPromoSetButtons_();
   } catch (err) {

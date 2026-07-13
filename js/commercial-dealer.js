@@ -451,7 +451,7 @@ async function cdDealerSave_(isUpdate) {
     });
     showToast(isUpdate ? "方案已更新" : "方案已建立", "success");
     await cdDealerRenderList_(true);
-    if (!isUpdate) cdDealerClearForm_();
+    if (!isUpdate) await cdDealerLoadScheme_(schemeId);
     else cdDealerEditing_ = true;
     cdDealerSetButtons_();
   } catch (err) {

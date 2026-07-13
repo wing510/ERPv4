@@ -56,11 +56,37 @@
     rule_(/unknown\s+or\s+missing\s+action/i, "系統無法判斷要執行的操作。\n\n建議：Ctrl+F5 強刷；確認 API 已啟動且網址正確。"),
     rule_(/forbidden\s*\(transactional\s+table\)/i, "此資料不可直接改刪，請使用對應的「過帳／作廢」流程。"),
 
-    rule_(/err_consignment_case_returned|err_consignment_returned/i, "此出貨所掛寄賣案已有收回紀錄，無法作廢出貨。\n\n建議：到 Case 案件管理查看收回；誤操作請先作廢收回。"),
+    rule_(/err_consignment_case_returned|err_consignment_returned/i, "此出貨所掛寄賣案已有收回紀錄，無法作廢出貨。\n\n建議：到 Case 寄賣客戶查看收回；誤操作請先作廢收回。"),
     rule_(/err_consignment_case_settled|err_consignment_settled/i, "此出貨所掛寄賣案已有結算，無法作廢出貨。\n\n建議：到 Case 歷史作廢結算（AR 須未收款）。"),
     rule_(/err_consignment_case_stl_has_payment|ar has payments.*consignment settlement/i, "此結算對應 AR 已有收款，無法作廢結算。\n\n建議：在 AR 以折讓或調整處理。"),
+    rule_(/err_consignment_case_delete_has_pool/i, "此寄賣案已有出貨品項池，無法刪除。\n\n建議：若為誤開案且尚未出貨，請確認品項池為空；已有出貨請勿刪案。"),
+    rule_(/err_consignment_case_delete_has_settlement/i, "此寄賣案已有結算紀錄，無法刪除。\n\n建議：請至結算頁作廢結算；空案才可刪除。"),
+    rule_(/err_consignment_case_delete_has_return/i, "此寄賣案已有收回紀錄，無法刪除。\n\n建議：請至收回頁作廢收回；空案才可刪除。"),
+    rule_(/err_consignment_case_delete_has_shipment/i, "此寄賣案仍有有效寄賣出貨，無法刪除。\n\n建議：請先至出貨管理作廢出貨。"),
     rule_(/無法確認客戶或結算月份.*月結回饋護欄/i, "無法確認此結算對應的客戶或月份，系統為安全起見不允許作廢。\n\n建議：請聯絡管理員檢查結算資料。"),
-    rule_(/已產生月結回饋.*請先到.*Rebate 月結回饋.*作廢/i, "此客戶該月份已產生月結回饋，無法直接作廢結算。\n\n建議：先到「Rebate 月結回饋」作廢該筆回饋，再回來作廢結算；必要時重新預覽並產生回饋。"),
+    rule_(/已產生月結回饋.*請先到.*月結統計/i, "此筆結算已計入月結回饋，無法直接作廢。\n\n建議：先到「月結回饋」作廢該筆，再回來作廢結算。"),
+    rule_(/已產生月結統計.*請先到.*月結統計/i, "此筆結算已計入月結統計，無法直接作廢。\n\n建議：先到「月結統計」作廢該筆，再回來作廢結算。"),
+    rule_(/月結統計已過帳.*不建議直接新增請款/i, function (m) {
+      const ym = String(m || "").match(/\d{4}-\d{2}/);
+      const period = ym ? ym[0] : "該月";
+      return (
+        "此客戶 " +
+        period +
+        " 月結統計已過帳，不建議直接新增請款。\n\n請先至 FINANCE 財務 → 月結統計作廢後方可補單。"
+      );
+    }),
+    rule_(/月結統計已過帳.*不可再新增請款/i, function (m) {
+      const ym = String(m || "").match(/\d{4}-\d{2}/);
+      const period = ym ? ym[0] : "該月";
+      return (
+        "此客戶 " +
+        period +
+        " 月結統計已過帳，不建議直接新增請款。\n\n請先至 FINANCE 財務 → 月結統計作廢後方可補單。"
+      );
+    }),
+    rule_(/月結統計已過帳.*過帳後又有新請款/i, "本月月結統計已過帳，但過帳後又有新結算或出貨。\n\n建議：先到「月結統計」作廢後重新過帳；若已產生「月結回饋」亦須一併作廢。"),
+    rule_(/可重試「作廢本月月結」續作/i, "本月月結作廢未完成。\n\n建議：直接再按一次「作廢本月月結」，系統會從未完成步驟續作（已完成的步驟會自動跳過）。"),
+    rule_(/無法確認月結狀態/i, "無法確認月結狀態（可能後端暫時無法連線）。\n\n建議：稍後重試；請勿在月結已過帳月份強行補單。"),
     rule_(/err_consignment_pool_conflict|pool item changed/i, "品項池已被更新（可能與他人同時操作）。\n\n建議：重新整理頁面後再試。"),
     rule_(/remark\s+required\s+when\s+return\s+warehouse/i, "退回倉庫與原出貨倉不同，請填寫改倉說明。"),
     rule_(/remark\s+required\s+when\s+return\s+reason\s+is\s+OTHER/i, "選擇「其他原因」時，請填寫其他原因說明。"),
@@ -114,6 +140,9 @@
     rule_(/shipment already cancelled|already canceled/i, "出貨單已作廢。"),
     rule_(/shipment not found/i, "找不到出貨單。"),
     rule_(/sales order.*cancelled|sales order.*canceled/i, "銷售單已作廢。"),
+    rule_(/sales order already has shipment records.*reset items is not allowed/i, "此銷售單已有出貨紀錄，明細不可修改。僅可改備註。"),
+    rule_(/already has shipment records.*reset items is not allowed/i, "此單已有出貨紀錄，明細不可修改。僅可改備註。"),
+    rule_(/already has receipt records.*reset items is not allowed/i, "此單已有收貨紀錄，明細不可修改。僅可改備註。"),
 
     rule_(/negative inventory is not allowed/i, "庫存不可為負數。"),
     rule_(/only approved lot can be used/i, "僅 QA 放行（APPROVED）的批號可出庫。"),

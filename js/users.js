@@ -426,7 +426,7 @@ async function createUser(triggerEl){
 
   showToast("使用者建立成功");
   await renderUsers();
-  resetUserForm();
+  await loadUser(user_id);
   } finally { hideSaveHint(); }
   setUserButtons_();
 }

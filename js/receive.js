@@ -462,6 +462,19 @@ function rcvPaintPostedReceipts_(){
  * 從其他列表跳轉到「收貨入庫」時使用（預先選好來源與單號）
  * sourceType: "PO" | "IMPORT"
  */
+function rcvNormSourceStatus_(raw){
+  const s0 = String(raw || "").trim().toUpperCase();
+  const m = s0.match(/^([A-Z0-9_]+)/);
+  return (m && m[1]) ? m[1] : s0;
+}
+
+function rcvSourceReceiveBlockedReason_(status){
+  const st = rcvNormSourceStatus_(status);
+  if(st === "CANCELLED") return "已作廢，不可收貨";
+  if(st === "CLOSED") return "已收完，不可再收貨";
+  return "";
+}
+
 function gotoReceive(sourceType, sourceId){
   try{
     window.__ERP_RCV_PREFILL__ = {
@@ -683,6 +696,23 @@ async function receiveInit() {
   if(prefill && prefill.sourceId){
     const srcType = document.getElementById("rcv_source_type");
     const nextType = (prefill.sourceType === "IMPORT" ? "IMPORT" : "PO");
+    const prefillId = String(prefill.sourceId || "").trim().toUpperCase();
+    let blockedReason = "";
+    try{
+      if(nextType === "PO"){
+        const po = await getOne("purchase_order","po_id",prefillId).catch(()=>null);
+        blockedReason = rcvSourceReceiveBlockedReason_(po && po.status);
+      }else{
+        const doc = await getOne("import_document","import_doc_id",prefillId).catch(()=>null);
+        blockedReason = rcvSourceReceiveBlockedReason_(doc && doc.status);
+      }
+    }catch(_eBlock){}
+    if(blockedReason){
+      try{ delete window.__ERP_RCV_PREFILL__; }catch(_e){}
+      showToast(blockedReason, "error");
+      await onRcvSourceTypeChange();
+      resetRcvForm();
+    }else{
     if(srcType) srcType.value = nextType;
 
     // 預填跳轉：避免先載入整份 PO/報單清單（有時會因全表過大而卡住/超時）
@@ -717,6 +747,7 @@ async function receiveInit() {
     await onRcvSourceSelect();
 
     try{ delete window.__ERP_RCV_PREFILL__; }catch(_e){}
+    }
   }else{
     await onRcvSourceTypeChange();
     resetRcvForm();

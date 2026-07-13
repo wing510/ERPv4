@@ -1213,12 +1213,16 @@ function shipResolveCurSoId_(){
 function initShipDropdowns(){
   const soSel = document.getElementById("ship_so_id");
   if(soSel){
+    const prevSo = String(soSel.value || "").trim();
     const open = shipSalesOrders.filter(so => ["OPEN", "PARTIAL"].includes(String(so.status || "").trim().toUpperCase()));
     const customerMap = {};
     (shipCustomers || []).forEach(c => { if(c && c.customer_id) customerMap[c.customer_id] = c; });
     soSel.innerHTML =
       `<option value="">請選擇</option>` +
       open.map(so => `<option value="${so.so_id}">${escapeHtml_(shipSoOptLabel_(so, customerMap))}</option>`).join("");
+    if(prevSo && open.some(so => String(so.so_id || "").trim() === prevSo)){
+      soSel.value = prevSo;
+    }
   }
 
   // 客戶欄位已改為 hidden（由選擇 SO 自動帶出）；保留此處不再渲染下拉
@@ -1230,6 +1234,7 @@ function initShipDropdowns(){
 
   const shipperSel = document.getElementById("ship_shipper_id");
   if(shipperSel){
+    const prevShipper = String(shipperSel.value || "").trim();
     const roleZh = function(role){
       const r = String(role || "").trim().toUpperCase();
       if(r === "ADMIN") return "管理員";
@@ -1242,13 +1247,9 @@ function initShipDropdowns(){
       if(r === "GA" || r === "GENERAL_AFFAIRS") return "總務";
       return r || "—";
     };
-    const act = (shipUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE");
-    act.sort((a,b)=>{
-      const an = String(a.user_name || "").trim();
-      const bn = String(b.user_name || "").trim();
-      if(an && bn && an !== bn) return an.localeCompare(bn);
-      return String(a.user_id || "").localeCompare(String(b.user_id || ""));
-    });
+    const act = (typeof erpSortUsersForDropdown_ === "function")
+      ? erpSortUsersForDropdown_((shipUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE"))
+      : (shipUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE");
     shipperSel.innerHTML =
       `<option value="">請選擇</option>` +
       act.map(u => {
@@ -1258,6 +1259,9 @@ function initShipDropdowns(){
         const label = name ? `${rz}-${name}(${id})` : `${rz}(${id})`;
         return `<option value="${u.user_id}">${escapeHtml_(label)}</option>`;
       }).join("");
+    if(prevShipper && act.some(u => String(u.user_id || "").trim() === prevShipper)){
+      shipperSel.value = prevShipper;
+    }
   }
 }
 
@@ -1729,6 +1733,82 @@ function shipUpdatePromoShipHint_(){
   hintEl.textContent = lines.join("\n");
 }
 
+function shipSumDraftQtyBySoItem_(soItemId, excludeDraftId){
+  const sid = String(soItemId || "").trim().toUpperCase();
+  if(!sid) return 0;
+  return (shipDraft || []).reduce((sum, row) => {
+    if(excludeDraftId && String(row.draft_id || "") === String(excludeDraftId)) return sum;
+    if(String(row.so_item_id || "").trim().toUpperCase() !== sid) return sum;
+    return sum + Number(row.ship_qty || 0);
+  }, 0);
+}
+
+function shipGetSoItemRow_(soItemId){
+  const sid = String(soItemId || "").trim().toUpperCase();
+  if(!sid) return null;
+  const findIn = (arr) => (arr || []).find(x => String(x?.so_item_id || "").trim().toUpperCase() === sid) || null;
+  let row = findIn(shipSalesItems);
+  if(row) return row;
+  const cache = shipSalesItemsBySoId_ || {};
+  for(const key of Object.keys(cache)){
+    row = findIn(cache[key]);
+    if(row) return row;
+  }
+  return null;
+}
+
+function shipRemainForSoItem_(soItemId, excludeDraftId){
+  const soi = shipGetSoItemRow_(soItemId);
+  if(!soi) return 0;
+  const order = Number(soi.order_qty || 0);
+  const shipped = Number(soi.shipped_qty || 0);
+  const draftSum = shipSumDraftQtyBySoItem_(soItemId, excludeDraftId);
+  return Math.max(0, order - shipped - draftSum);
+}
+
+function shipValidateDraftSoRemain_(lines){
+  const rows = Array.isArray(lines) ? lines : (shipDraft || []);
+  const bySoItem = {};
+  rows.forEach((row) => {
+    const sid = String(row.so_item_id || "").trim().toUpperCase();
+    if(!sid) return;
+    bySoItem[sid] = (bySoItem[sid] || 0) + Number(row.ship_qty || 0);
+  });
+  for(const sid of Object.keys(bySoItem)){
+    const soi = shipGetSoItemRow_(sid);
+    if(!soi) return { ok: false, msg: "找不到銷售品項：" + sid + "（請確認銷售單已選擇且明細仍有效）" };
+    const order = Number(soi.order_qty || 0);
+    const shipped = Number(soi.shipped_qty || 0);
+    const planned = Number(bySoItem[sid] || 0);
+    if(shipped + planned > order + 1e-9){
+      const prod = formatShipProductDisplay_(soi.product_id) || soi.product_id || sid;
+      return {
+        ok: false,
+        msg: `出貨總量不可超過訂購量（${prod}：訂購 ${order}，已出 ${shipped}，本次合計 ${planned}）`
+      };
+    }
+  }
+  return { ok: true };
+}
+
+async function shipEnsureSalesItemsForLines_(lines){
+  const rows = Array.isArray(lines) ? lines : [];
+  const soIds = new Set();
+  rows.forEach((row) => {
+    const id = String(row.so_id || "").trim().toUpperCase();
+    if(id) soIds.add(id);
+  });
+  const cur = shipResolveCurSoId_();
+  if(cur) soIds.add(cur);
+  for(const id of soIds){
+    const loaded = await shipLoadSalesItemsBySo_(id);
+    const curSo = String(document.getElementById("ship_so_id")?.value || cur || "").trim().toUpperCase();
+    if(id === curSo){
+      shipSalesItems = Array.isArray(loaded) ? loaded : [];
+    }
+  }
+}
+
 async function addShipItemDraft(){
   if(shipReadOnlyDraft) return showToast("已載入出貨單，明細僅供檢視","error");
   const so_id = document.getElementById("ship_so_id")?.value || "";
@@ -1754,8 +1834,8 @@ async function addShipItemDraft(){
   if(auto){
     const pid = String(soi.product_id || "").trim();
     if(!pid) return showToast("銷售品項缺少 product_id", "error");
-    const remain = Math.max(0, Number(soi.order_qty||0) - Number(soi.shipped_qty||0));
-    if(qty > remain) return showToast("出貨不可超過銷售單剩餘未出貨量","error");
+    const remain = shipRemainForSoItem_(so_item_id);
+    if(qty > remain) return showToast("出貨不可超過銷售單剩餘未出貨量（含本單其他明細）","error");
 
     const alloc = shipAutoAllocateLots_(pid, qty);
     if(alloc.shortage > 1e-9){
@@ -1795,8 +1875,8 @@ async function addShipItemDraft(){
   }
   if(qty > av) return showToast("出貨不可超過可用量","error");
   if(so_id && so_item_id && soi){
-    const remain = Math.max(0, Number(soi.order_qty||0) - Number(soi.shipped_qty||0));
-    if(qty > remain) return showToast("出貨不可超過銷售單剩餘未出貨量","error");
+    const remain = shipRemainForSoItem_(so_item_id);
+    if(qty > remain) return showToast("出貨不可超過銷售單剩餘未出貨量（含本單其他明細）","error");
     if(lot.product_id !== soi.product_id) return showToast("Lot 產品與銷售品項不一致","error");
   }
   shipDraft.push({
@@ -1864,26 +1944,33 @@ function renderShipDraft(){
     }else{
       actionBtn = `<button type="button" class="btn-secondary" onclick="removeShipDraft('${safeId}')">刪除</button>`;
     }
-    const u = String(it.unit || "").trim();
-    const shipQtyCell = u ? `${it.ship_qty} ${u.replace(/</g, "")}` : String(it.ship_qty);
     const pid = String(it.product_id || "").trim().toUpperCase();
     const soItem = soAggBySoItem[String(it.so_item_id || "").trim().toUpperCase()] || null;
-    let agg = soAggByProduct[pid] || null;
-    if(!agg && soItem){
-      agg = {
-        order: Number(soItem.order_qty || 0),
-        shipped: Number(soItem.shipped_qty || 0),
-        unit: String(soItem.unit || u || "").trim()
-      };
+    const u = String(it.unit || "").trim();
+    let orderQty = 0;
+    let shippedQty = 0;
+    let remainQty = 0;
+    let soUnit = u;
+    if(soItem){
+      orderQty = Number(soItem.order_qty || 0);
+      shippedQty = Number(soItem.shipped_qty || 0);
+      soUnit = String(soItem.unit || u || "").trim();
+      const draftSumSame = shipReadOnlyDraft ? 0 : shipSumDraftQtyBySoItem_(it.so_item_id);
+      remainQty = Math.max(0, orderQty - shippedQty - draftSumSame);
+    }else{
+      const agg = soAggByProduct[pid] || null;
+      if(agg){
+        orderQty = Number(agg.order || 0);
+        shippedQty = Number(agg.shipped || 0);
+        soUnit = String(agg.unit || u || "").trim();
+        remainQty = Math.max(0, orderQty - shippedQty);
+      }
     }
+    const orderDisp = soItem || soAggByProduct[pid] ? (soUnit ? `${orderQty} ${soUnit}` : String(orderQty)) : "—";
+    const shippedDisp = soItem || soAggByProduct[pid] ? (soUnit ? `${shippedQty} ${soUnit}` : String(shippedQty)) : "—";
+    const remainDisp = soItem || soAggByProduct[pid] ? (soUnit ? `${remainQty} ${soUnit}` : String(remainQty)) : "—";
+    const shipQtyCell = u ? `${it.ship_qty} ${u.replace(/</g, "")}` : String(it.ship_qty);
     const whId = String(it.warehouse_id || lot?.warehouse_id || "").trim().toUpperCase();
-    const soUnit = String((agg && agg.unit) || u || "").trim();
-    const orderQty = agg ? Number(agg.order || 0) : 0;
-    const shippedQty = agg ? Number(agg.shipped || 0) : 0;
-    const remainQty = agg ? Math.max(0, orderQty - shippedQty) : 0;
-    const orderDisp = agg ? (soUnit ? `${orderQty} ${soUnit}` : String(orderQty)) : "—";
-    const shippedDisp = agg ? (soUnit ? `${shippedQty} ${soUnit}` : String(shippedQty)) : "—";
-    const remainDisp = agg ? (soUnit ? `${remainQty} ${soUnit}` : String(remainQty)) : "—";
     const lineStatus = formatShipLineStatus_(it);
     const voidRow = shipIsVoidLoaded_();
     const rowClass = voidRow ? " ship-item-row-void" : "";
@@ -1921,8 +2008,8 @@ function shipStatusZh_(status){
 
 function shipSoTypeLabelZh_(soType){
   const t = String(soType || "NORMAL").trim().toUpperCase();
-  if(t === "CONSIGNMENT") return "寄賣";
-  if(t === "NORMAL") return "一般";
+  if(t === "CONSIGNMENT") return "寄賣補貨";
+  if(t === "NORMAL") return "一般買斷";
   return (typeof termLabelZhOnly === "function" ? termLabelZhOnly(t) : t) || t || "—";
 }
 
@@ -2041,11 +2128,15 @@ async function renderShipments(){
   });
 }
 
-async function loadShipment(shipmentId, triggerEl){
+async function loadShipment(shipmentId, triggerEl, options){
   const id = String(shipmentId || "").trim().toUpperCase();
   if(!id) return;
   const curShip = String(document.getElementById("ship_id")?.value || "").trim().toUpperCase();
-  if(shipEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curShip, id)){
+  const shouldToggle =
+    typeof erpTxnLoadShouldToggleClose_ === "function"
+      ? erpTxnLoadShouldToggleClose_(shipEditing, curShip, id, options)
+      : shipEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curShip, id);
+  if(shouldToggle){
     if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("shipping", curShip, id, "shipTableBody")) return;
   }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
     erpClearTxnListRowCollapsed_("shipping");
@@ -2247,7 +2338,7 @@ async function cancelShipment(triggerEl){
     showToast("作廢完成：這筆出貨已取消，畫面資料已同步更新", "success", 6000);
     await loadShipMasterData();
     await renderShipments();
-    await loadShipment(shipment_id);
+    await loadShipment(shipment_id, null, { force: true });
   } catch(err){
     if (shipShouldAutoReloadAfterError_(err)) {
       await shipAutoReloadAfterConflict_(shipment_id);
@@ -2306,6 +2397,7 @@ async function postShipment(triggerEl){
   document.getElementById("ship_id").value = shipment_id;
 
   const so_id = document.getElementById("ship_so_id")?.value || "";
+  const resolvedSoId = String(so_id || shipResolveCurSoId_() || "").trim().toUpperCase();
   const customer_id = document.getElementById("ship_customer_id")?.value || "";
   const ship_date = document.getElementById("ship_date")?.value || "";
   const shipper_id = document.getElementById("ship_shipper_id")?.value || "";
@@ -2318,7 +2410,7 @@ async function postShipment(triggerEl){
 
   const missing = [];
   if(!shipment_id) missing.push("出貨單ID");
-  if(!String(so_id || "").trim()) missing.push("銷售單");
+  if(!resolvedSoId) missing.push("銷售單");
   if(!customer_id) missing.push("客戶");
   if(!recipient_id) missing.push("收件人");
   if(!ship_date) missing.push("出貨日期");
@@ -2336,9 +2428,26 @@ async function postShipment(triggerEl){
   try {
   // refresh（避免用舊 lot/可用量 做前置檢查）
   await loadShipMasterData();
+  try{
+    const soSel = document.getElementById("ship_so_id");
+    if(soSel && resolvedSoId) soSel.value = resolvedSoId;
+    const shipperSel = document.getElementById("ship_shipper_id");
+    if(shipperSel && String(shipper_id || "").trim()) shipperSel.value = shipper_id;
+    if(resolvedSoId){
+      const so = (shipSalesOrders || []).find(x => String(x?.so_id || "").trim().toUpperCase() === resolvedSoId);
+      if(so){
+        const cSel = document.getElementById("ship_customer_id");
+        if(cSel) cSel.value = so.customer_id || customer_id || "";
+        shipSyncOrdererDisplay_(so.customer_id || "");
+        shipRefreshRecipientDropdown_(so.customer_id || "").catch(()=>{});
+      }
+    }
+  }catch(_eRestore){}
+  await shipEnsureSalesItemsForLines_(shipDraft);
+  try{ await shipRefreshSoItemDropdown_(resolvedSoId); }catch(_eSoi){}
 
   const payloadItems = (shipDraft || []).map((it) => ({
-    so_id: it.so_id || so_id || "",
+    so_id: it.so_id || resolvedSoId || "",
     so_item_id: it.so_item_id || "",
     lot_id: it.lot_id,
     product_id: it.product_id,
@@ -2347,10 +2456,22 @@ async function postShipment(triggerEl){
     remark: it.remark || ""
   }));
 
+  const remainCheck = shipValidateDraftSoRemain_(payloadItems);
+  if(!remainCheck.ok) return showToast(remainCheck.msg, "error");
+
+  if (
+    !shipIsConsignmentSoSelected_() &&
+    customer_id &&
+    typeof ccAssertNoPostedMonthlyStatForBilling_ === "function"
+  ) {
+    const okBill = await ccAssertNoPostedMonthlyStatForBilling_(customer_id, ship_date);
+    if (!okBill) return;
+  }
+
   await callAPI({
     action: "post_shipment_bundle",
     shipment_id,
-    so_id,
+    so_id: resolvedSoId,
     customer_id,
     ship_date,
     shipper_id,
@@ -2362,7 +2483,7 @@ async function postShipment(triggerEl){
     recipient_phone,
     consignment_case_id: String(document.getElementById("ship_consignment_case_id")?.value || "").trim().toUpperCase(),
     expected_existed_shipment_item_count: "0",
-    idempotency_key: shipBuildIdempotencyKey_("SHIP_POST", [shipment_id, so_id, ship_date, shipper_id, payloadItems]),
+    idempotency_key: shipBuildIdempotencyKey_("SHIP_POST", [shipment_id, resolvedSoId, ship_date, shipper_id, payloadItems]),
     created_by: getCurrentUser(),
     created_at: nowIsoTaipei(),
     items_json: JSON.stringify(payloadItems)
@@ -2372,9 +2493,9 @@ async function postShipment(triggerEl){
   invalidateShipCaches_();
 
   showToast("出貨完成：已建立出貨紀錄，畫面資料已同步更新", "success", 6000);
-  resetShipForm();
   await loadShipMasterData();
   await renderShipments();
+  await loadShipment(shipment_id, null, { force: true });
   } catch(err){
     if (shipShouldAutoReloadAfterError_(err)) {
       await shipAutoReloadAfterConflict_(shipment_id);

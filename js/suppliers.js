@@ -1,4 +1,4 @@
-﻿let supplierEditing = false;
+let supplierEditing = false;
 let supplierLoadInFlight_ = false;
 let supplierPendingLoadId_ = "";
 
@@ -242,7 +242,7 @@ async function createSupplier(triggerEl){
   await createRecord("supplier", supplier);
 
   await renderSuppliers();
-  clearSupplierForm();
+  await loadSupplier(supplier_id);
 
   showToast("供應商建立成功");
   } finally { hideSaveHint(); }

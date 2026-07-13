@@ -780,7 +780,7 @@ async function ccReturnPost_(triggerEl) {
   const err = ccValidateReturnForm_(header, items);
   if (err) return showToast(err, "error");
 
-  if (triggerEl) triggerEl.disabled = true;
+  if (typeof showSaveHint === "function") showSaveHint(triggerEl);
   try {
     const previewPayload = {
       case_id: header.case_id,
@@ -842,6 +842,7 @@ async function ccReturnPost_(triggerEl) {
       } catch (_reloadErr) {}
     }
   } finally {
+    if (typeof hideSaveHint === "function") hideSaveHint();
     ccApplyReturnPermissions_();
   }
 }

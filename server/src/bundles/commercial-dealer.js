@@ -53,6 +53,26 @@ async function assertNoLockedDealerRebateForSettlementVoid_(sb, opts) {
   const caseId = normId_(o.caseId);
   const settlementDate = o.settlementDate;
   const periodYm = periodYmFromDate_(settlementDate);
+  const settlementId = normId_(o.settlementId);
+  let stlCreatedAt = o.settlementCreatedAt;
+
+  if (!stlCreatedAt && settlementId) {
+    const { data: stl, error: stlErr } = await sb
+      .from("consignment_case_settlement")
+      .select("created_at")
+      .eq("settlement_id", settlementId)
+      .maybeSingle();
+    if (stlErr) throw new Error(stlErr.message || String(stlErr));
+    stlCreatedAt = stl?.created_at;
+  }
+
+  const stlTs = stlCreatedAt ? new Date(stlCreatedAt).getTime() : NaN;
+
+  function isLockedByDoc_(docCreatedAt) {
+    if (!docCreatedAt) return true;
+    if (!stlTs || Number.isNaN(stlTs)) return true;
+    return stlTs < new Date(docCreatedAt).getTime();
+  }
 
   if (!cust && caseId) {
     const { data: ccase, error: caseErr } = await sb
@@ -73,14 +93,15 @@ async function assertNoLockedDealerRebateForSettlementVoid_(sb, opts) {
 
   const { data, error } = await sb
     .from("commercial_dealer_rebate")
-    .select("rebate_id, period_ym, status")
+    .select("rebate_id, period_ym, status, created_at")
     .eq("customer_id", cust)
     .eq("period_ym", periodYm)
     .neq("status", "VOID")
+    .order("created_at", { ascending: false })
     .limit(1);
   if (error) throw new Error(error.message || String(error));
   const hit = Array.isArray(data) && data.length ? data[0] : null;
-  if (hit) {
+  if (hit && isLockedByDoc_(hit.created_at)) {
     const rid = String(hit.rebate_id || "").trim();
     return {
       err:
@@ -94,24 +115,53 @@ async function assertNoLockedDealerRebateForSettlementVoid_(sb, opts) {
 
   const { data: statHit, error: statErr } = await sb
     .from("commercial_dealer_monthly_stat")
-    .select("stat_id, period_ym, status")
+    .select("stat_id, period_ym, status, created_at")
     .eq("customer_id", cust)
     .eq("period_ym", periodYm)
     .neq("status", "VOID")
+    .order("created_at", { ascending: false })
     .limit(1);
   if (statErr) throw new Error(statErr.message || String(statErr));
   const st = Array.isArray(statHit) && statHit.length ? statHit[0] : null;
-  if (!st) return null;
+  if (st && isLockedByDoc_(st.created_at)) {
+    const sid = String(st.stat_id || "").trim();
+    return {
+      err:
+        "此客戶 " +
+        periodYm +
+        " 已產生月結統計（" +
+        sid +
+        "）。請先到「月結統計」作廢該筆後，再作廢。"
+    };
+  }
 
-  const sid = String(st.stat_id || "").trim();
-  return {
-    err:
-      "此客戶 " +
-      periodYm +
-      " 已產生月結統計（" +
-      sid +
-      "）。請先到「月結統計」作廢該筆後，再作廢。"
-  };
+  return null;
+}
+
+/** 月結統計已過帳：該客戶該月不可再新增請款（寄賣結算／一般出貨過帳） */
+async function assertNoPostedMonthlyStatForNewBilling_(sb, opts) {
+  const o = opts && typeof opts === "object" ? opts : {};
+  const cust = normId_(o.customerId);
+  const periodYm = periodYmFromDate_(o.billingDate || o.settlementDate || o.shipDate);
+  if (!cust || !periodYm) return null;
+
+  const { data: statHit, error: statErr } = await sb
+    .from("commercial_dealer_monthly_stat")
+    .select("stat_id, status, period_ym")
+    .eq("customer_id", cust)
+    .eq("period_ym", periodYm)
+    .neq("status", "VOID")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (statErr) throw new Error(statErr.message || String(statErr));
+  const stat = Array.isArray(statHit) && statHit.length ? statHit[0] : null;
+  if (!stat || normId_(stat.status) !== "POSTED") return null;
+
+  const msg =
+    "此客戶 " +
+    periodYm +
+    " 月結統計已過帳，不建議直接新增請款。\n請先至 FINANCE 財務 → 月結統計作廢後方可補單。";
+  return { err: msg };
 }
 
 /** 作廢一般出貨前：該客戶該月已有月結回饋（未作廢）則阻擋 */
@@ -126,7 +176,8 @@ async function assertNoLockedDealerRebateForShipmentVoid_(sb, opts) {
   }
   return assertNoLockedDealerRebateForSettlementVoid_(sb, {
     customerId: cust,
-    settlementDate: o.shipDate
+    settlementDate: o.shipDate,
+    settlementCreatedAt: o.shipmentCreatedAt
   });
 }
 
@@ -783,6 +834,18 @@ async function buildCumulativeClosePreview_(sb, customer, billingNet) {
   const tiers = await loadCumulativeSchemeTiers_(sb, schemeId);
   if (!tiers.length) return { enabled: false, err: "累積金額制方案無級距" };
 
+  const actualCurrentLabel = String(customer.dealer_cumulative_tier_label || "").trim();
+  const actualCurrentRate =
+    customer.dealer_cumulative_price_rate != null && customer.dealer_cumulative_price_rate !== ""
+      ? Number(customer.dealer_cumulative_price_rate)
+      : null;
+  const existingPendingLabel = String(customer.dealer_cumulative_pending_tier_label || "").trim();
+  const existingPendingRate =
+    customer.dealer_cumulative_pending_price_rate != null &&
+    customer.dealer_cumulative_pending_price_rate !== ""
+      ? Number(customer.dealer_cumulative_pending_price_rate)
+      : null;
+
   let sim = Object.assign({}, customer);
   if (String(sim.dealer_cumulative_pending_tier_label || "").trim()) {
     sim.dealer_cumulative_tier_label = sim.dealer_cumulative_pending_tier_label;
@@ -804,6 +867,15 @@ async function buildCumulativeClosePreview_(sb, customer, billingNet) {
   const currentTier = matchCustomerToCumulativeTier_(sim, tiers);
   const tierAfterAdd = pickCumulativeTier_(after, tiers);
   const upgrade = isCumulativeTierUpgrade_(tierAfterAdd, currentTier);
+  let pendingLabel = "";
+  let pendingRate = null;
+  if (upgrade) {
+    pendingLabel = String(tierAfterAdd?.tier_label || "").trim();
+    pendingRate = tierAfterAdd?.price_rate != null ? Number(tierAfterAdd.price_rate) : null;
+  } else if (existingPendingLabel) {
+    pendingLabel = existingPendingLabel;
+    pendingRate = existingPendingRate;
+  }
 
   return {
     enabled: true,
@@ -812,15 +884,69 @@ async function buildCumulativeClosePreview_(sb, customer, billingNet) {
     cumulative_before: before,
     cumulative_add: add,
     cumulative_after: after,
-    current_tier_label: String(sim.dealer_cumulative_tier_label || "").trim(),
+    current_tier_label:
+      actualCurrentLabel || String(sim.dealer_cumulative_tier_label || "").trim(),
     current_price_rate:
-      sim.dealer_cumulative_price_rate != null && sim.dealer_cumulative_price_rate !== ""
-        ? Number(sim.dealer_cumulative_price_rate)
-        : null,
+      actualCurrentRate != null
+        ? actualCurrentRate
+        : sim.dealer_cumulative_price_rate != null && sim.dealer_cumulative_price_rate !== ""
+          ? Number(sim.dealer_cumulative_price_rate)
+          : null,
     upgrade,
-    pending_tier_label: upgrade ? String(tierAfterAdd?.tier_label || "").trim() : "",
-    pending_price_rate:
-      upgrade && tierAfterAdd?.price_rate != null ? Number(tierAfterAdd.price_rate) : null
+    pending_tier_label: pendingLabel,
+    pending_price_rate: pendingRate,
+    pending_from_this_stat: upgrade
+  };
+}
+
+/** 已過帳月結統計：用當時快照，勿再以主檔累積 + 本月寄賣重算（避免重複加） */
+async function buildCumulativePreviewFromPostedStat_(sb, customer, statRow) {
+  const schemeId = normId_(statRow?.cumulative_scheme_id || customer?.dealer_cumulative_scheme_id);
+  if (!schemeId) return { enabled: false };
+
+  const { data: scheme, error: schErr } = await sb
+    .from("commercial_dealer_scheme")
+    .select("scheme_id, scheme_name, scheme_type, status")
+    .eq("scheme_id", schemeId)
+    .maybeSingle();
+  if (schErr) throw new Error(schErr.message || String(schErr));
+  if (!scheme || normId_(scheme.scheme_type) !== "CUMULATIVE_AMOUNT") return { enabled: false };
+
+  const beforeRaw = statRow?.cumulative_before;
+  const afterRaw = statRow?.cumulative_after;
+  if (beforeRaw == null && afterRaw == null) return { enabled: false };
+
+  const before = roundMoney_(beforeRaw != null ? beforeRaw : 0);
+  const after = roundMoney_(afterRaw != null ? afterRaw : before);
+  const addCons = roundMoney_(statRow?.cumulative_add_consignment || 0);
+  const addGen = roundMoney_(statRow?.cumulative_add_general || 0);
+  const addFromCols = roundMoney_(addCons + addGen);
+  const add = addFromCols > 1e-9 ? addFromCols : roundMoney_(Math.max(0, after - before));
+  const pendingLabel = String(statRow?.cumulative_pending_tier_label || "").trim();
+  const pendingRate =
+    statRow?.cumulative_pending_price_rate != null && statRow?.cumulative_pending_price_rate !== ""
+      ? Number(statRow.cumulative_pending_price_rate)
+      : null;
+  const actualCurrentLabel = String(customer?.dealer_cumulative_tier_label || "").trim();
+  const actualCurrentRate =
+    customer?.dealer_cumulative_price_rate != null && customer?.dealer_cumulative_price_rate !== ""
+      ? Number(customer.dealer_cumulative_price_rate)
+      : null;
+
+  return {
+    enabled: true,
+    posted_snapshot: true,
+    scheme_id: schemeId,
+    scheme_name: String(scheme.scheme_name || "").trim(),
+    cumulative_before: before,
+    cumulative_add: add,
+    cumulative_after: after,
+    current_tier_label: actualCurrentLabel,
+    current_price_rate: actualCurrentRate,
+    upgrade: !!pendingLabel,
+    pending_tier_label: pendingLabel,
+    pending_price_rate: pendingRate,
+    pending_from_this_stat: !!pendingLabel
   };
 }
 
@@ -934,171 +1060,13 @@ async function processCumulativeOnMonthlyClose_(sb, opts) {
   return res;
 }
 
-/** 一般出貨過帳：累積制方案 stat_source 含 GENERAL 時即時寫入累積採購 */
+/** 一般出貨過帳：累積改由月結統計過帳寫入（v4.2.11）；出貨僅產生請款 */
 async function processCumulativeOnGeneralShipment_(sb, opts) {
-  const customerId = normId_(opts?.customerId);
-  const shipDate = String(opts?.shipDate || "").trim();
-  const billingNet = roundMoney_(opts?.billingNet);
-  const arId = String(opts?.arId || "").trim().toUpperCase();
-  const shipmentId = normId_(opts?.shipmentId);
-  const actor = String(opts?.actor || "").trim();
-  const ts = opts?.ts || nowIso();
-  if (!customerId || billingNet <= 1e-9) return { skipped: true, reason: "no_billing" };
-
-  let customer = await reloadCustomer_(sb, customerId);
-  if (!customer) return { skipped: true, reason: "no_customer" };
-
-  const schemeId = normId_(customer.dealer_cumulative_scheme_id);
-  if (!schemeId) return { skipped: true, reason: "no_cumulative_scheme" };
-
-  const startedAt = String(customer.dealer_cumulative_started_at || "").trim();
-  if (startedAt && shipDate && shipDate < startedAt) return { skipped: true, reason: "before_start" };
-
-  const { data: scheme, error: schErr } = await sb
-    .from("commercial_dealer_scheme")
-    .select("scheme_id, scheme_type, status, stat_source, date_from, date_to")
-    .eq("scheme_id", schemeId)
-    .maybeSingle();
-  if (schErr) throw new Error(schErr.message || String(schErr));
-  if (!scheme || normId_(scheme.scheme_type) !== "CUMULATIVE_AMOUNT") {
-    return { skipped: true, reason: "not_cumulative_scheme" };
-  }
-  if (normId_(scheme.status) !== "ACTIVE") return { skipped: true, reason: "scheme_inactive" };
-  if (!schemeStatSourceAllows_(scheme.stat_source, "GENERAL")) {
-    return { skipped: true, reason: "stat_source_not_general" };
-  }
-  if (shipDate && !schemeOverlapsMonth_(scheme, shipDate, shipDate)) {
-    return { skipped: true, reason: "scheme_period" };
-  }
-
-  const res = await applyCustomerCumulativeAmountAdd_(sb, {
-    customerId,
-    billingNet,
-    actor,
-    ts,
-    upgradeFromYm: shipDate && shipDate.length >= 7 ? shipDate.slice(0, 7) : ""
-  });
-  if (res.skipped || res.err) return res;
-
-  if (arId && roundMoney_(res.cumulative_added) > 1e-9) {
-    const { error: arMarkErr } = await sb
-      .from("ar_receivable")
-      .update({
-        dealer_cumulative_added: res.cumulative_added,
-        updated_by: actor,
-        updated_at: ts
-      })
-      .eq("ar_id", arId);
-    if (arMarkErr && !/dealer_cumulative_added|column.*does not exist|could not find/i.test(arMarkErr.message || "")) {
-      throw new Error(arMarkErr.message || String(arMarkErr));
-    }
-  }
-
-  await writeAuditLog_(
-    "customer",
-    customerId,
-    "BUNDLE_UPDATE_DEALER_CUMULATIVE_ON_GENERAL_SHIPMENT",
-    actor,
-    JSON.stringify({
-      ar_id: arId,
-      shipment_id: shipmentId,
-      ship_date: shipDate,
-      cumulative_before: res.cumulative_before,
-      cumulative_after: res.cumulative_after,
-      cumulative_added: res.cumulative_added,
-      upgrade: res.upgrade,
-      pending_tier_label: res.pending_tier_label,
-      pending_price_rate: res.pending_price_rate
-    })
-  );
-
-  return res;
+  return { skipped: true, reason: "deferred_to_monthly_stat" };
 }
 
 async function reverseCumulativeOnGeneralShipmentVoid_(sb, opts) {
-  const customerId = normId_(opts?.customerId);
-  const arId = String(opts?.arId || "").trim().toUpperCase();
-  const shipmentId = normId_(opts?.shipmentId);
-  const actor = String(opts?.actor || "").trim();
-  const ts = opts?.ts || nowIso();
-  if (!customerId) return { skipped: true, reason: "no_customer" };
-
-  let removed = roundMoney_(opts?.cumulativeAdded);
-  if (removed <= 1e-9 && arId) {
-    const { data: ar, error: arErr } = await sb
-      .from("ar_receivable")
-      .select("dealer_cumulative_added, amount_system")
-      .eq("ar_id", arId)
-      .maybeSingle();
-    if (arErr) throw new Error(arErr.message || String(arErr));
-    removed = roundMoney_(ar?.dealer_cumulative_added);
-    if (removed <= 1e-9) removed = roundMoney_(ar?.amount_system);
-  }
-  if (removed <= 1e-9) return { skipped: true, reason: "no_cumulative_added" };
-
-  const customer = await reloadCustomer_(sb, customerId);
-  if (!customer) return { skipped: true, reason: "no_customer" };
-
-  const before = roundMoney_(customer.dealer_cumulative_amount);
-  const after = roundMoney_(Math.max(0, before - removed));
-
-  const patch = {
-    dealer_cumulative_amount: after,
-    updated_by: actor,
-    updated_at: ts
-  };
-
-  const schemeId = normId_(customer.dealer_cumulative_scheme_id);
-  if (schemeId) {
-    const tiers = await loadCumulativeSchemeTiers_(sb, schemeId);
-    if (tiers.length) {
-      const tier = pickCumulativeTier_(after, tiers);
-      if (tier) {
-        patch.dealer_cumulative_tier_label = String(tier.tier_label || "").trim();
-        patch.dealer_cumulative_price_rate = tier.price_rate != null ? Number(tier.price_rate) : null;
-      } else {
-        patch.dealer_cumulative_tier_label = "";
-        patch.dealer_cumulative_price_rate = null;
-      }
-      if (after < before - 1e-9) {
-        patch.dealer_cumulative_pending_tier_label = "";
-        patch.dealer_cumulative_pending_price_rate = null;
-      }
-    }
-  }
-
-  const { error: updErr } = await sb.from("customer").update(patch).eq("customer_id", customerId);
-  if (updErr) throw new Error(updErr.message || String(updErr));
-
-  if (arId) {
-    const { error: arClrErr } = await sb
-      .from("ar_receivable")
-      .update({
-        dealer_cumulative_added: 0,
-        updated_by: actor,
-        updated_at: ts
-      })
-      .eq("ar_id", arId);
-    if (arClrErr && !/dealer_cumulative_added|column.*does not exist|could not find/i.test(arClrErr.message || "")) {
-      throw new Error(arClrErr.message || String(arClrErr));
-    }
-  }
-
-  await writeAuditLog_(
-    "customer",
-    customerId,
-    "BUNDLE_REVERSE_DEALER_CUMULATIVE_ON_GENERAL_SHIPMENT_VOID",
-    actor,
-    JSON.stringify({
-      ar_id: arId,
-      shipment_id: shipmentId,
-      cumulative_before: before,
-      cumulative_after: after,
-      cumulative_removed: removed
-    })
-  );
-
-  return { cumulative_before: before, cumulative_after: after, cumulative_removed: removed };
+  return { skipped: true, reason: "deferred_to_monthly_stat" };
 }
 
 async function reverseCumulativeOnRebateVoid_(sb, rebate, actor, ts) {
@@ -1106,7 +1074,6 @@ async function reverseCumulativeOnRebateVoid_(sb, rebate, actor, ts) {
   if (!customerId) return { skipped: true };
 
   let removed = roundMoney_(rebate?.cumulative_added);
-  if (removed <= 1e-9) removed = roundMoney_(rebate?.billing_net);
   if (removed <= 1e-9) return { skipped: true, reason: "no_cumulative_added" };
 
   const customer = await reloadCustomer_(sb, customerId);
@@ -1149,20 +1116,22 @@ async function reverseCumulativeOnRebateVoid_(sb, rebate, actor, ts) {
 }
 
 /** 依仍有效（POSTED）月結回饋重算累積採購；作廢後若扣回漏掉可自動校正 */
-async function sumPostedRebateCumulative_(sb, customerId) {
+async function sumPostedRebateCumulative_(sb, customerId, asOfYm) {
   const custId = normId_(customerId);
   if (!custId) return 0;
-  const { data: rebates, error: rebErr } = await sb
+  let query = sb
     .from("commercial_dealer_rebate")
-    .select("cumulative_added, billing_net")
+    .select("cumulative_added, billing_net, period_ym")
     .eq("customer_id", custId)
     .eq("status", "POSTED");
+  const ymCut = String(asOfYm || "").trim();
+  if (ymCut) query = query.lte("period_ym", ymCut);
+  const { data: rebates, error: rebErr } = await query;
   if (rebErr) throw new Error(rebErr.message || String(rebErr));
   let total = 0;
   (rebates || []).forEach((r) => {
-    let add = roundMoney_(r.cumulative_added);
-    if (add <= 1e-9) add = roundMoney_(r.billing_net);
-    total += add;
+    const add = roundMoney_(r.cumulative_added);
+    if (add > 1e-9) total += add;
   });
   return roundMoney_(total);
 }
@@ -1176,218 +1145,62 @@ function isArActiveForCumulative_(ar) {
   return true;
 }
 
-/** 依仍有效（POSTED）月結回饋＋一般出貨 AR 重算累積採購 */
+/** v4.2.11：一般累積改由月結統計過帳；出貨 AR 不再計入 as_of */
 async function sumPostedGeneralShipmentCumulative_(sb, customerId, opts) {
-  const custId = normId_(customerId);
-  if (!custId) return 0;
-
-  const customer = opts?.customer || (await reloadCustomer_(sb, custId));
-  if (!customer) return 0;
-
-  const schemeId = normId_(customer.dealer_cumulative_scheme_id);
-  if (!schemeId) return 0;
-
-  const { data: scheme, error: schErr } = await sb
-    .from("commercial_dealer_scheme")
-    .select("scheme_id, scheme_type, status, stat_source, date_from, date_to")
-    .eq("scheme_id", schemeId)
-    .maybeSingle();
-  if (schErr) throw new Error(schErr.message || String(schErr));
-  if (!scheme || normId_(scheme.scheme_type) !== "CUMULATIVE_AMOUNT") return 0;
-  if (!schemeStatSourceAllows_(scheme.stat_source, "GENERAL")) return 0;
-
-  const startedAt = String(customer.dealer_cumulative_started_at || "").trim();
-
-  let ars = null;
-  let arErr = null;
-  ({ data: ars, error: arErr } = await sb
-    .from("ar_receivable")
-    .select("dealer_cumulative_added, amount_system, ar_date, status, close_mode")
-    .eq("customer_id", custId)
-    .eq("source_type", "SHIPMENT")
-    .neq("status", "VOID"));
-  if (arErr && /dealer_cumulative_added|column.*does not exist|could not find/i.test(arErr.message || "")) {
-    ({ data: ars, error: arErr } = await sb
-      .from("ar_receivable")
-      .select("amount_system, ar_date, status, close_mode")
-      .eq("customer_id", custId)
-      .eq("source_type", "SHIPMENT")
-      .neq("status", "VOID"));
-  }
-  if (arErr) throw new Error(arErr.message || String(arErr));
-
-  const { data: rebates, error: rebErr } = await sb
-    .from("commercial_dealer_rebate")
-    .select("period_ym, billing_net_general, cumulative_added")
-    .eq("customer_id", custId)
-    .eq("status", "POSTED");
-  if (rebErr) throw new Error(rebErr.message || String(rebErr));
-
-  const rebateByYm = {};
-  (rebates || []).forEach((r) => {
-    const ym = String(r.period_ym || "").trim();
-    if (ym) rebateByYm[ym] = r;
-  });
-
-  let total = 0;
-  (ars || []).forEach((ar) => {
-    if (!isArActiveForCumulative_(ar)) return;
-    let add = roundMoney_(ar.dealer_cumulative_added);
-    const shipDate = String(ar.ar_date || "").trim();
-    if (startedAt && shipDate && shipDate < startedAt) return;
-    if (shipDate && !schemeOverlapsMonth_(scheme, shipDate, shipDate)) return;
-
-    if (add <= 1e-9) {
-      add = roundMoney_(ar.amount_system);
-      if (add <= 1e-9) return;
-      const ym = shipDate.length >= 7 ? shipDate.slice(0, 7) : "";
-      const reb = ym ? rebateByYm[ym] : null;
-      if (
-        reb &&
-        roundMoney_(reb.billing_net_general) > 1e-9 &&
-        roundMoney_(reb.cumulative_added) > 1e-9
-      ) {
-        return;
-      }
-    }
-    total += add;
-  });
-  return roundMoney_(total);
+  return 0;
 }
 
-async function sumPostedMonthlyStatCumulative_(sb, customerId) {
+async function sumPostedMonthlyStatCumulative_(sb, customerId, asOfYm) {
   const custId = normId_(customerId);
   if (!custId) return 0;
-  const { data: rows, error } = await sb
-    .from("commercial_dealer_monthly_stat")
-    .select("cumulative_add_consignment")
+  const ymCut = String(asOfYm || "").trim();
+
+  let lpQuery = sb
+    .from("commercial_dealer_level_post")
+    .select("cumulative_add_consignment, cumulative_add_general, period_ym")
     .eq("customer_id", custId)
     .eq("status", "POSTED");
-  if (error) throw new Error(error.message || String(error));
+  if (ymCut) lpQuery = lpQuery.lte("period_ym", ymCut);
+  const { data: levelRows, error: lpErr } = await lpQuery;
+  if (lpErr) throw new Error(lpErr.message || String(lpErr));
+
+  const levelPeriods = new Set();
   let total = 0;
-  (rows || []).forEach((r) => {
+  (levelRows || []).forEach((r) => {
+    levelPeriods.add(String(r.period_ym || "").trim());
     total += roundMoney_(r.cumulative_add_consignment);
+    total += roundMoney_(r.cumulative_add_general);
+  });
+
+  let statQuery = sb
+    .from("commercial_dealer_monthly_stat")
+    .select("cumulative_add_consignment, cumulative_add_general, period_ym")
+    .eq("customer_id", custId)
+    .eq("status", "POSTED");
+  if (ymCut) statQuery = statQuery.lte("period_ym", ymCut);
+  const { data: statRows, error: statErr } = await statQuery;
+  if (statErr) throw new Error(statErr.message || String(statErr));
+
+  (statRows || []).forEach((r) => {
+    const ym = String(r.period_ym || "").trim();
+    if (levelPeriods.has(ym)) return;
+    total += roundMoney_(r.cumulative_add_consignment);
+    total += roundMoney_(r.cumulative_add_general);
   });
   return roundMoney_(total);
 }
 
 async function sumCustomerCumulativeFromSources_(sb, customerId, opts) {
   const customer = opts?.customer || (await reloadCustomer_(sb, normId_(customerId)));
-  const rebateTotal = await sumPostedRebateCumulative_(sb, customerId);
-  const statTotal = await sumPostedMonthlyStatCumulative_(sb, customerId);
-  const shipTotal = await sumPostedGeneralShipmentCumulative_(sb, customerId, { customer });
-  return roundMoney_(rebateTotal + statTotal + shipTotal);
+  const asOfYm = String(opts?.asOfYm || "").trim();
+  const rebateTotal = await sumPostedRebateCumulative_(sb, customerId, asOfYm);
+  const statTotal = await sumPostedMonthlyStatCumulative_(sb, customerId, asOfYm);
+  return roundMoney_(rebateTotal + statTotal);
 }
 
-/** 舊資料：出貨已過帳但尚未寫入累積時，同步時補登（不重複計入已月結月份） */
+/** v4.2.11：一般累積已改月結過帳，不再 backfill 出貨 AR */
 async function backfillGeneralShipmentCumulativeIfNeeded_(sb, customerId, actor, ts) {
-  const custId = normId_(customerId);
-  if (!custId) return { skipped: true, reason: "no_customer" };
-
-  const customer = await reloadCustomer_(sb, custId);
-  if (!customer) return { skipped: true, reason: "no_customer" };
-
-  const schemeId = normId_(customer.dealer_cumulative_scheme_id);
-  if (!schemeId) return { skipped: true, reason: "no_scheme" };
-
-  const { data: scheme, error: schErr } = await sb
-    .from("commercial_dealer_scheme")
-    .select("scheme_id, scheme_type, status, stat_source, date_from, date_to")
-    .eq("scheme_id", schemeId)
-    .maybeSingle();
-  if (schErr) throw new Error(schErr.message || String(schErr));
-  if (!scheme || normId_(scheme.scheme_type) !== "CUMULATIVE_AMOUNT") {
-    return { skipped: true, reason: "not_cumulative_scheme" };
-  }
-  if (!schemeStatSourceAllows_(scheme.stat_source, "GENERAL")) {
-    return { skipped: true, reason: "stat_source_not_general" };
-  }
-
-  const startedAt = String(customer.dealer_cumulative_started_at || "").trim();
-  const { data: ars, error: arErr } = await sb
-    .from("ar_receivable")
-    .select("ar_id, amount_system, ar_date, dealer_cumulative_added, shipment_id, status, close_mode")
-    .eq("customer_id", custId)
-    .eq("source_type", "SHIPMENT")
-    .neq("status", "VOID");
-  if (arErr) throw new Error(arErr.message || String(arErr));
-
-  let filled = 0;
-  for (let i = 0; i < (ars || []).length; i++) {
-    const ar = ars[i] || {};
-    if (!isArActiveForCumulative_(ar)) continue;
-    if (roundMoney_(ar.dealer_cumulative_added) > 1e-9) continue;
-    const amount = roundMoney_(ar.amount_system);
-    if (amount <= 1e-9) continue;
-    const shipDate = String(ar.ar_date || "").trim();
-    if (startedAt && shipDate && shipDate < startedAt) continue;
-    const ym = shipDate.length >= 7 ? shipDate.slice(0, 7) : "";
-    const arId = String(ar.ar_id || "").trim().toUpperCase();
-    const shipmentId = normId_(ar.shipment_id);
-
-    if (ym) {
-      const { data: mstat, error: mstatErr } = await sb
-        .from("commercial_dealer_monthly_stat")
-        .select("stat_id, cumulative_add_consignment")
-        .eq("customer_id", custId)
-        .eq("period_ym", ym)
-        .eq("status", "POSTED")
-        .maybeSingle();
-      if (mstatErr) throw new Error(mstatErr.message || String(mstatErr));
-      if (mstat && roundMoney_(mstat.cumulative_add_consignment) > 1e-9) {
-        const { error: markErr } = await sb
-          .from("ar_receivable")
-          .update({
-            dealer_cumulative_added: amount,
-            updated_by: actor,
-            updated_at: ts
-          })
-          .eq("ar_id", arId);
-        if (markErr) throw new Error(markErr.message || String(markErr));
-        filled++;
-        continue;
-      }
-
-      const { data: reb, error: rebErr } = await sb
-        .from("commercial_dealer_rebate")
-        .select("rebate_id, billing_net_general, cumulative_added")
-        .eq("customer_id", custId)
-        .eq("period_ym", ym)
-        .eq("status", "POSTED")
-        .maybeSingle();
-      if (rebErr) throw new Error(rebErr.message || String(rebErr));
-      if (
-        reb &&
-        roundMoney_(reb.billing_net_general) > 1e-9 &&
-        roundMoney_(reb.cumulative_added) > 1e-9
-      ) {
-        const { error: markErr } = await sb
-          .from("ar_receivable")
-          .update({
-            dealer_cumulative_added: amount,
-            updated_by: actor,
-            updated_at: ts
-          })
-          .eq("ar_id", arId);
-        if (markErr) throw new Error(markErr.message || String(markErr));
-        filled++;
-        continue;
-      }
-    }
-
-    const res = await processCumulativeOnGeneralShipment_(sb, {
-      customerId: custId,
-      shipDate,
-      billingNet: amount,
-      arId,
-      shipmentId,
-      actor,
-      ts
-    });
-    if (!res.skipped && !res.err) filled++;
-  }
-
-  return filled > 0 ? { backfilled: filled } : { skipped: true, reason: "nothing_to_backfill" };
+  return { skipped: true, reason: "deferred_to_monthly_stat" };
 }
 
 async function syncCustomerCumulativeFromSources_(sb, customerId, actor, ts) {
@@ -1811,10 +1624,6 @@ async function resolveCustomerDealerContext_(sb, customerId, periodYm) {
   if (custErr) throw new Error(custErr.message || String(custErr));
   if (!customer) return { err: "Customer not found: " + cust };
 
-  if (customer.dealer_rebate_excluded === true || String(customer.dealer_rebate_excluded || "").toUpperCase() === "TRUE") {
-    return { err: "此客戶已設定排除回饋" };
-  }
-
   const schemeId =
     normId_(customer.dealer_rebate_scheme_id) || normId_(customer.dealer_scheme_id);
   if (!schemeId) return { err: "客戶未設定月結回饋方案" };
@@ -1981,6 +1790,104 @@ async function reverseRebateCreditNote_(sb, customerId, periodYm, rebateRow, act
     return { err: (adjRes.errors && adjRes.errors[0]) || "還原應收失敗: " + primaryAr };
   }
   return { ok: true, credit_restored: restore, ar_id: primaryAr };
+}
+
+async function voidRebateRowSystemRollback_(sb, opts) {
+  const rebateId = String(opts?.rebateId || "").trim();
+  const actor = String(opts?.actor || "").trim();
+  const ts = opts?.ts || nowIso();
+  const reason = String(opts?.reason || "SYSTEM_ROLLBACK");
+  if (!rebateId || !actor) return;
+
+  const { data: row } = await sb
+    .from("commercial_dealer_rebate")
+    .select("system_remark, status")
+    .eq("rebate_id", rebateId)
+    .maybeSingle();
+  if (!row || normId_(row.status) === "VOID") return;
+
+  const sysRemark = appendSystemRemark_(row.system_remark, "[" + ts + "] " + actor + " " + reason);
+  await sb
+    .from("commercial_dealer_rebate")
+    .update({
+      status: "VOID",
+      void_reason: reason,
+      system_remark: sysRemark,
+      updated_by: actor,
+      updated_at: ts
+    })
+    .eq("rebate_id", rebateId);
+}
+
+/** 回饋過帳：結算失敗時還原 AR／折抵並作廢剛建立的回饋單 */
+async function rollbackPostedRebateSettleFailure_(sb, opts) {
+  const rebateId = String(opts?.rebateId || "").trim();
+  const customerId = normId_(opts?.customerId);
+  const periodYm = String(opts?.periodYm || "").trim();
+  const settleMode = normId_(opts?.settleMode);
+  const arId = String(opts?.arId || "").trim();
+  const creditApplied = roundMoney_(opts?.creditApplied || 0);
+  const rebateAmount = roundMoney_(opts?.rebateAmount || 0);
+  const balanceUpdated = !!opts?.balanceUpdated;
+  const actor = String(opts?.actor || "").trim();
+  const session = opts?.session;
+  const ts = opts?.ts || nowIso();
+
+  if (rebateAmount > 1e-9) {
+    if (settleMode === "CREDIT_NOTE" && arId && creditApplied > 1e-9) {
+      try {
+        const revRes = await reverseRebateCreditNote_(
+          sb,
+          customerId,
+          periodYm,
+          { ar_id: arId, credit_applied: creditApplied, period_ym: periodYm },
+          actor,
+          session
+        );
+        if (revRes && revRes.err) {
+          await writeAuditLog_(
+            "commercial_dealer_rebate",
+            rebateId,
+            "BUNDLE_REBATE_SETTLE_ROLLBACK_WARN",
+            actor,
+            JSON.stringify({ rebate_id: rebateId, err: revRes.err })
+          );
+        }
+      } catch (e) {
+        await writeAuditLog_(
+          "commercial_dealer_rebate",
+          rebateId,
+          "BUNDLE_REBATE_SETTLE_ROLLBACK_WARN",
+          actor,
+          JSON.stringify({ rebate_id: rebateId, err: e?.message || String(e) })
+        );
+      }
+    } else if (settleMode === "CARRY_FORWARD" && balanceUpdated) {
+      const { data: customer } = await sb
+        .from("customer")
+        .select("dealer_rebate_credit_balance")
+        .eq("customer_id", customerId)
+        .maybeSingle();
+      if (customer) {
+        const newBal = roundMoney_(Math.max(0, Number(customer.dealer_rebate_credit_balance || 0) - rebateAmount));
+        await sb
+          .from("customer")
+          .update({
+            dealer_rebate_credit_balance: newBal,
+            updated_by: actor,
+            updated_at: ts
+          })
+          .eq("customer_id", customerId);
+      }
+    }
+  }
+
+  await voidRebateRowSystemRollback_(sb, {
+    rebateId,
+    actor,
+    ts,
+    reason: "SYSTEM_ROLLBACK_SETTLE_FAIL"
+  });
 }
 
 async function listCommercialDealerSchemeEnriched_(p) {
@@ -2299,7 +2206,7 @@ async function resolveMonthlyStatContext_(sb, customerId, periodYm) {
   if (!customer) return { err: "Customer not found: " + cust };
 
   const cumSchemeId = normId_(customer.dealer_cumulative_scheme_id);
-  let statSource = "ALL";
+  let cumStatSource = "ALL";
   if (cumSchemeId) {
     const { data: scheme, error: schErr } = await sb
       .from("commercial_dealer_scheme")
@@ -2308,22 +2215,396 @@ async function resolveMonthlyStatContext_(sb, customerId, periodYm) {
       .maybeSingle();
     if (schErr) throw new Error(schErr.message || String(schErr));
     if (scheme && normId_(scheme.scheme_type) === "CUMULATIVE_AMOUNT") {
-      statSource = normId_(scheme.stat_source) || "ALL";
+      cumStatSource = normId_(scheme.stat_source) || "ALL";
     }
   }
 
-  const billing = await computeBillingNetForStatSource_(sb, cust, periodYm, statSource);
+  /** 請款淨額口徑：固定寄賣＋一般；等級累積再加總時才依方案 stat_source 篩選 */
+  const billing = await computeBillingNetForStatSource_(sb, cust, periodYm, "ALL");
   if (billing.err) return { err: billing.err };
 
   const billingTotal = roundMoney_(billing.billing_net);
-  if (billingTotal <= 1e-9) return { err: "本月無請款淨額" };
 
   return {
     customer,
     billing,
+    billing_total: billingTotal,
     cumulative_scheme_id: cumSchemeId,
-    stat_source: statSource
+    stat_source: cumStatSource
   };
+}
+
+function parseMonthlyStatCustomerIds_(p) {
+  const raw = p.customer_ids;
+  if (Array.isArray(raw)) return raw.map((x) => normId_(x)).filter(Boolean);
+  const s = String(raw || "").trim();
+  if (!s) return [];
+  return s
+    .split(/[,;\s]+/)
+    .map((x) => normId_(x))
+    .filter(Boolean);
+}
+
+/** 已過帳月結 vs 即時請款淨額（過帳後新結算／出貨） */
+function hasMonthlyStatPostedBaseline_(posted) {
+  if (!posted) return false;
+  if (normId_(posted.status) === "POSTED") return true;
+  if (String(posted.stat_id || "").trim()) return true;
+  const postedCons = roundMoney_(posted.billing_net_consignment || 0);
+  const postedGen = roundMoney_(posted.billing_net_general || 0);
+  const postedNet = roundMoney_(
+    posted.billing_net_total != null ? posted.billing_net_total : postedCons + postedGen
+  );
+  return Math.abs(postedNet) > 1e-9;
+}
+
+function buildMonthlyStatBillingDrift_(posted, live) {
+  const postedCons = roundMoney_(posted?.billing_net_consignment || 0);
+  const postedGen = roundMoney_(posted?.billing_net_general || 0);
+  const postedNet = roundMoney_(
+    posted?.billing_net_total != null ? posted.billing_net_total : postedCons + postedGen
+  );
+  const liveCons = roundMoney_(live?.billing_net_consignment || 0);
+  const liveGen = roundMoney_(live?.billing_net_general || 0);
+  const liveNet = roundMoney_(live?.billing_net != null ? live.billing_net : liveCons + liveGen);
+  const consDiff = roundMoney_(liveCons - postedCons);
+  const genDiff = roundMoney_(liveGen - postedGen);
+  const netDiff = roundMoney_(liveNet - postedNet);
+  const hasPostedBaseline = hasMonthlyStatPostedBaseline_(posted);
+  const hasNewBilling =
+    hasPostedBaseline &&
+    (Math.abs(consDiff) > 1e-9 || Math.abs(genDiff) > 1e-9 || Math.abs(netDiff) > 1e-9);
+  return {
+    has_new_billing: hasNewBilling,
+    posted_billing_net_consignment: postedCons,
+    posted_billing_net_general: postedGen,
+    posted_billing_net: postedNet,
+    live_billing_net_consignment: liveCons,
+    live_billing_net_general: liveGen,
+    live_billing_net: liveNet,
+    billing_net_consignment_diff: consDiff,
+    billing_net_general_diff: genDiff,
+    billing_net_diff: netDiff
+  };
+}
+
+function attachMonthlyStatBillingDriftFields_(target, drift) {
+  const d = drift || {};
+  target.has_new_billing = !!d.has_new_billing;
+  target.posted_billing_net_consignment = d.posted_billing_net_consignment;
+  target.posted_billing_net_general = d.posted_billing_net_general;
+  target.posted_billing_net = d.posted_billing_net;
+  target.live_billing_net_consignment = d.live_billing_net_consignment;
+  target.live_billing_net_general = d.live_billing_net_general;
+  target.live_billing_net = d.live_billing_net;
+  target.billing_net_consignment_diff = d.billing_net_consignment_diff;
+  target.billing_net_general_diff = d.billing_net_general_diff;
+  target.billing_net_diff = d.billing_net_diff;
+  return target;
+}
+
+/** 月結統計預覽說明（v4.2.12：統計與等級分離） */
+const MONTHLY_STAT_CUMULATIVE_NOTE_ =
+  "請款淨額於月結統計過帳時定案；經銷等級累積請於確認經銷等級時寫入。";
+
+const MONTHLY_STAT_BATCH_LIMIT_ = 20;
+
+async function loadActiveMonthlyStatRow_(sb, customerId, periodYm) {
+  const { data, error } = await sb
+    .from("commercial_dealer_monthly_stat")
+    .select("*")
+    .eq("customer_id", normId_(customerId))
+    .eq("period_ym", String(periodYm || "").trim())
+    .neq("status", "VOID")
+    .maybeSingle();
+  if (error) throw new Error(error.message || String(error));
+  return data || null;
+}
+
+async function loadActiveLevelPostRow_(sb, customerId, periodYm) {
+  const { data, error } = await sb
+    .from("commercial_dealer_level_post")
+    .select("*")
+    .eq("customer_id", normId_(customerId))
+    .eq("period_ym", String(periodYm || "").trim())
+    .neq("status", "VOID")
+    .maybeSingle();
+  if (error) throw new Error(error.message || String(error));
+  return data || null;
+}
+
+function isLegacyLevelBundledInStatRow_(statRow) {
+  if (!statRow || normId_(statRow.status) !== "POSTED") return false;
+  const add = roundMoney_(
+    (statRow.cumulative_add_consignment || 0) + (statRow.cumulative_add_general || 0)
+  );
+  return add > 1e-9 || statRow.cumulative_before != null || statRow.cumulative_after != null;
+}
+
+function isLevelPostedForPeriod_(statRow, levelRow) {
+  if (levelRow && normId_(levelRow.status) === "POSTED") return true;
+  return isLegacyLevelBundledInStatRow_(statRow);
+}
+
+function billingPackFromStatRowForSource_(statRow, statSource) {
+  const cons = roundMoney_(statRow?.billing_net_consignment || 0);
+  const gen = roundMoney_(statRow?.billing_net_general || 0);
+  const src = normId_(statSource) || "CONSIGNMENT";
+  let billing_net = 0;
+  if (src === "ALL") billing_net = roundMoney_(cons + gen);
+  else if (src === "GENERAL") billing_net = gen;
+  else billing_net = cons;
+  return {
+    billing_net,
+    billing_net_consignment: src === "GENERAL" ? 0 : cons,
+    billing_net_general: src === "CONSIGNMENT" ? 0 : gen,
+    gross_settlement: roundMoney_(statRow?.gross_settlement || 0),
+    gross_shipment: roundMoney_(statRow?.gross_shipment || 0)
+  };
+}
+
+async function assertMonthlyStatPostedForRebate_(sb, customerId, periodYm) {
+  const statRow = await loadActiveMonthlyStatRow_(sb, customerId, periodYm);
+  if (!statRow || normId_(statRow.status) !== "POSTED") {
+    return { err: "請先完成月結統計過帳" };
+  }
+  /** 與月結統計同一口徑（寄賣＋一般）比對，勿用回饋 stat_source 誤判一般差額 */
+  const liveAll = await computeBillingNetForStatSource_(sb, customerId, periodYm, "ALL");
+  if (liveAll.err) return { err: liveAll.err };
+  const drift = buildMonthlyStatBillingDrift_(statRow, liveAll);
+  if (drift.has_new_billing) {
+    return {
+      err: "本月月結統計已過帳，但過帳後又有新請款；請先作廢本月月結再重新過帳"
+    };
+  }
+  return { statRow };
+}
+
+async function resolveMonthlyStatCumulativeAdds_(sb, cumSchemeId, billing) {
+  const empty = {
+    cumulative_add_consignment: 0,
+    cumulative_add_general: 0,
+    cumulative_add_total: 0
+  };
+  const schemeId = normId_(cumSchemeId);
+  if (!schemeId) return empty;
+
+  const { data: scheme, error: schErr } = await sb
+    .from("commercial_dealer_scheme")
+    .select("stat_source")
+    .eq("scheme_id", schemeId)
+    .maybeSingle();
+  if (schErr) throw new Error(schErr.message || String(schErr));
+  if (!scheme) return empty;
+
+  let cons = 0;
+  let gen = 0;
+  if (
+    schemeStatSourceAllows_(scheme.stat_source, "CONSIGNMENT") &&
+    roundMoney_(billing?.billing_net_consignment) > 1e-9
+  ) {
+    cons = roundMoney_(billing.billing_net_consignment);
+  }
+  if (
+    schemeStatSourceAllows_(scheme.stat_source, "GENERAL") &&
+    roundMoney_(billing?.billing_net_general) > 1e-9
+  ) {
+    gen = roundMoney_(billing.billing_net_general);
+  }
+  return {
+    cumulative_add_consignment: cons,
+    cumulative_add_general: gen,
+    cumulative_add_total: roundMoney_(cons + gen)
+  };
+}
+
+async function resolveMonthlyStatBillingForCustomer_(sb, customerRow, periodYm) {
+  const cust = normId_(customerRow?.customer_id);
+  const range = monthRange_(periodYm);
+  if (!cust || !range) return { err: "customer_id or period_ym invalid" };
+
+  const cumSchemeId = normId_(customerRow.dealer_cumulative_scheme_id);
+  const billing = await computeBillingNetForStatSource_(sb, cust, periodYm, "ALL");
+  if (billing.err) return { err: billing.err };
+
+  const adds = await resolveMonthlyStatCumulativeAdds_(sb, cumSchemeId, billing);
+
+  return {
+    customer_id: cust,
+    billing_net_consignment: roundMoney_(billing.billing_net_consignment),
+    billing_net_general: roundMoney_(billing.billing_net_general),
+    cumulative_add_consignment: adds.cumulative_add_consignment,
+    cumulative_add_general: adds.cumulative_add_general,
+    cumulative_add_total: adds.cumulative_add_total,
+    billing_net: roundMoney_(billing.billing_net)
+  };
+}
+
+async function listCommercialDealerMonthlyStatPeriodSummary_(p) {
+  const gate = requireCommercialDealerSession_(p);
+  if (gate) return gate;
+
+  const periodYm = String(p.period_ym || "").trim();
+  if (!parsePeriodYm_(periodYm)) return fail("period_ym must be YYYY-MM");
+
+  const customerIds = parseMonthlyStatCustomerIds_(p);
+  if (!customerIds.length) return ok({ data: [], source: "supabase" });
+
+  const uniqueIds = [...new Set(customerIds)].slice(0, 500);
+  const sb = getSupabase();
+
+  const { data: customers, error: custErr } = await sb
+    .from("customer")
+    .select(
+      "customer_id, dealer_cumulative_scheme_id, dealer_rebate_scheme_id, dealer_scheme_id"
+    )
+    .in("customer_id", uniqueIds);
+  if (custErr) return fail(custErr.message || String(custErr));
+
+  const customerMap = {};
+  (customers || []).forEach((c) => {
+    customerMap[normId_(c.customer_id)] = c;
+  });
+
+  const { data: postedRows, error: statErr } = await sb
+    .from("commercial_dealer_monthly_stat")
+    .select(
+      "stat_id, customer_id, status, billing_net_consignment, billing_net_general, billing_net_total, cumulative_add_consignment, cumulative_add_general"
+    )
+    .eq("period_ym", periodYm)
+    .in("customer_id", uniqueIds);
+  if (statErr) return fail(statErr.message || String(statErr));
+
+  const postedMap = {};
+  (postedRows || []).forEach((row) => {
+    const cid = normId_(row.customer_id);
+    if (!cid) return;
+    const st = normId_(row.status);
+    const prev = postedMap[cid];
+    if (!prev || st === "POSTED" || (prev.status !== "POSTED" && st !== "VOID")) {
+      postedMap[cid] = row;
+    }
+  });
+
+  const out = [];
+  for (const cid of uniqueIds) {
+    const posted = postedMap[cid];
+    const postedStatus = normId_(posted?.status);
+    const customerRow = customerMap[cid];
+    let cumulativeAsOf = 0;
+    try {
+      cumulativeAsOf = await resolveCustomerCumulativeAsOfPeriodYm_(sb, cid, periodYm, customerRow);
+    } catch (_eCum) {
+      cumulativeAsOf = 0;
+    }
+
+    if (posted && postedStatus === "POSTED") {
+      let drift = {
+        has_new_billing: false,
+        posted_billing_net_consignment: roundMoney_(posted.billing_net_consignment),
+        posted_billing_net_general: roundMoney_(posted.billing_net_general),
+        posted_billing_net: roundMoney_(posted.billing_net_total),
+        live_billing_net_consignment: roundMoney_(posted.billing_net_consignment),
+        live_billing_net_general: roundMoney_(posted.billing_net_general),
+        live_billing_net: roundMoney_(posted.billing_net_total),
+        billing_net_consignment_diff: 0,
+        billing_net_general_diff: 0,
+        billing_net_diff: 0
+      };
+      if (customerRow) {
+        try {
+          const preview = await resolveMonthlyStatBillingForCustomer_(sb, customerRow, periodYm);
+          if (!preview.err) {
+            drift = buildMonthlyStatBillingDrift_(posted, preview);
+          }
+        } catch (_eDrift) {}
+      }
+      const row = attachMonthlyStatBillingDriftFields_(
+        {
+          customer_id: cid,
+          status: "POSTED",
+          amount_source: drift.has_new_billing ? "posted_stale" : "posted",
+          stat_id: String(posted.stat_id || "").trim(),
+          billing_net_consignment: drift.has_new_billing
+            ? drift.live_billing_net_consignment
+            : drift.posted_billing_net_consignment,
+          billing_net_general: drift.has_new_billing
+            ? drift.live_billing_net_general
+            : drift.posted_billing_net_general,
+          billing_net: drift.has_new_billing ? drift.live_billing_net : drift.posted_billing_net,
+          cumulative_add_consignment: roundMoney_(posted.cumulative_add_consignment),
+          cumulative_add_general: roundMoney_(posted.cumulative_add_general),
+          dealer_cumulative_amount_as_of: cumulativeAsOf
+        },
+        drift
+      );
+      out.push(row);
+      continue;
+    }
+
+    const monthWorkStatus = postedStatus === "POSTED" ? "POSTED" : "PREVIEW";
+
+    if (!customerRow) {
+      out.push({
+        customer_id: cid,
+        status: monthWorkStatus,
+        amount_source: "preview",
+        cumulative_add_consignment: 0,
+        cumulative_add_general: 0,
+        dealer_cumulative_amount_as_of: 0,
+        err: "Customer not found"
+      });
+      continue;
+    }
+
+    try {
+      const preview = await resolveMonthlyStatBillingForCustomer_(sb, customerRow, periodYm);
+      if (preview.err) {
+        out.push({
+          customer_id: cid,
+          status: monthWorkStatus,
+          amount_source: "preview",
+          cumulative_add_consignment: 0,
+          cumulative_add_general: 0,
+          dealer_cumulative_amount_as_of: cumulativeAsOf,
+          err: preview.err
+        });
+        continue;
+      }
+      out.push({
+        customer_id: cid,
+        status: monthWorkStatus,
+        amount_source: "preview",
+        billing_net_consignment: preview.billing_net_consignment,
+        billing_net_general: preview.billing_net_general,
+        cumulative_add_consignment: preview.cumulative_add_consignment,
+        cumulative_add_general: preview.cumulative_add_general,
+        billing_net: preview.billing_net,
+        dealer_cumulative_amount_as_of: cumulativeAsOf
+      });
+    } catch (e) {
+      out.push({
+        customer_id: cid,
+        status: monthWorkStatus,
+        amount_source: "preview",
+        cumulative_add_consignment: 0,
+        cumulative_add_general: 0,
+        dealer_cumulative_amount_as_of: cumulativeAsOf,
+        err: e?.message || String(e)
+      });
+    }
+  }
+
+  return ok({ data: out, period_ym: periodYm, source: "supabase" });
+}
+
+async function resolveCustomerCumulativeAsOfPeriodYm_(sb, customerId, periodYm, customerRow) {
+  const custId = normId_(customerId);
+  const ym = String(periodYm || "").trim();
+  if (!custId || !ym) return 0;
+  const row = customerRow || (await reloadCustomer_(sb, custId));
+  if (!row || !normId_(row.dealer_cumulative_scheme_id)) return 0;
+  return await sumCustomerCumulativeFromSources_(sb, custId, { customer: row, asOfYm: ym });
 }
 
 async function listCommercialDealerMonthlyStatEnriched_(p) {
@@ -2361,54 +2642,40 @@ async function previewCommercialDealerMonthlyStatBundle(p) {
 
     const { data: existed } = await sb
       .from("commercial_dealer_monthly_stat")
-      .select("stat_id, status")
+      .select(
+        "stat_id, status, billing_net_consignment, billing_net_general, billing_net_total, cumulative_before, cumulative_after, cumulative_add_consignment, cumulative_add_general, cumulative_pending_tier_label, cumulative_pending_price_rate, cumulative_scheme_id"
+      )
       .eq("customer_id", customerId)
       .eq("period_ym", periodYm)
       .neq("status", "VOID")
       .maybeSingle();
 
-    let cumulativeAddConsignment = 0;
-    const cumSchemeId = normId_(ctx.cumulative_scheme_id);
-    if (cumSchemeId && roundMoney_(ctx.billing.billing_net_consignment) > 1e-9) {
-      const { data: scheme } = await sb
-        .from("commercial_dealer_scheme")
-        .select("stat_source")
-        .eq("scheme_id", cumSchemeId)
-        .maybeSingle();
-      if (scheme && schemeStatSourceAllows_(scheme.stat_source, "CONSIGNMENT")) {
-        cumulativeAddConsignment = roundMoney_(ctx.billing.billing_net_consignment);
-      }
-    }
+    const alreadyPosted = !!(existed && normId_(existed.status) === "POSTED");
 
-    let cumulativePreview = { enabled: false };
-    if (cumulativeAddConsignment > 1e-9) {
-      try {
-        cumulativePreview = await buildCumulativeClosePreview_(sb, ctx.customer, cumulativeAddConsignment);
-      } catch (e) {
-        cumulativePreview = { enabled: false, err: e?.message || String(e) };
-      }
-    }
+    const drift =
+      alreadyPosted && existed
+        ? buildMonthlyStatBillingDrift_(existed, ctx.billing)
+        : buildMonthlyStatBillingDrift_({}, ctx.billing);
 
-    return ok({
-      customer_id: customerId,
-      period_ym: periodYm,
-      cumulative_scheme_id: cumSchemeId,
-      stat_source: ctx.stat_source,
-      billing_net: ctx.billing.billing_net,
-      billing_net_consignment: ctx.billing.billing_net_consignment,
-      billing_net_general: ctx.billing.billing_net_general,
-      gross_settlement: ctx.billing.gross_settlement,
-      gross_shipment: ctx.billing.gross_shipment,
-      settlement_count: ctx.billing.settlement_count,
-      shipment_count: ctx.billing.shipment_count,
-      cumulative_add_consignment: cumulativeAddConsignment,
-      cumulative_add_general: roundMoney_(ctx.billing.billing_net_general),
-      cumulative_note:
-        "一般出貨請款淨額已於出貨過帳時計入累積；本次月結統計僅追加寄賣部分。",
-      already_posted: !!existed,
-      existing_stat_id: existed ? String(existed.stat_id || "") : "",
-      cumulative_preview: cumulativePreview
-    });
+    return ok(
+      attachMonthlyStatBillingDriftFields_(
+        {
+          customer_id: customerId,
+          period_ym: periodYm,
+          billing_net: ctx.billing.billing_net,
+          billing_net_consignment: ctx.billing.billing_net_consignment,
+          billing_net_general: ctx.billing.billing_net_general,
+          gross_settlement: ctx.billing.gross_settlement,
+          gross_shipment: ctx.billing.gross_shipment,
+          settlement_count: ctx.billing.settlement_count,
+          shipment_count: ctx.billing.shipment_count,
+          cumulative_note: MONTHLY_STAT_CUMULATIVE_NOTE_,
+          already_posted: alreadyPosted,
+          existing_stat_id: existed ? String(existed.stat_id || "") : ""
+        },
+        drift
+      )
+    );
   } catch (e) {
     return fail(e?.message || String(e));
   }
@@ -2443,56 +2710,46 @@ async function postCommercialDealerMonthlyStatBundle(p) {
     return fail(e?.message || String(e));
   }
   if (ctx.err) return fail(ctx.err);
+  if (roundMoney_(ctx.billing.billing_net) <= 1e-9) return fail("本月無請款淨額");
 
-  let cumulativeAddConsignment = 0;
-  const cumSchemeId = normId_(ctx.cumulative_scheme_id);
-  if (cumSchemeId && roundMoney_(ctx.billing.billing_net_consignment) > 1e-9) {
-    const { data: scheme } = await sb
-      .from("commercial_dealer_scheme")
-      .select("stat_source")
-      .eq("scheme_id", cumSchemeId)
-      .maybeSingle();
-    if (scheme && schemeStatSourceAllows_(scheme.stat_source, "CONSIGNMENT")) {
-      cumulativeAddConsignment = roundMoney_(ctx.billing.billing_net_consignment);
-    }
+  let ctxFinal;
+  try {
+    ctxFinal = await resolveMonthlyStatContext_(sb, customerId, periodYm);
+  } catch (e) {
+    return fail(e?.message || String(e));
   }
+  if (ctxFinal.err) return fail(ctxFinal.err);
+  if (roundMoney_(ctxFinal.billing.billing_net) <= 1e-9) return fail("本月無請款淨額");
+  if (
+    roundMoney_(ctxFinal.billing.billing_net) !== roundMoney_(ctx.billing.billing_net) ||
+    roundMoney_(ctxFinal.billing.billing_net_consignment) !==
+      roundMoney_(ctx.billing.billing_net_consignment) ||
+    roundMoney_(ctxFinal.billing.billing_net_general) !== roundMoney_(ctx.billing.billing_net_general)
+  ) {
+    return fail("請款淨額已變動，請重新預覽後再過帳");
+  }
+  ctx = ctxFinal;
 
   const ts = nowIso();
   const statId = buildId_("CDMS");
-  let cumulativeRes = { skipped: true };
-
-  if (cumulativeAddConsignment > 1e-9) {
-    try {
-      cumulativeRes = await applyCustomerCumulativeAmountAdd_(sb, {
-        customerId,
-        billingNet: cumulativeAddConsignment,
-        actor,
-        ts,
-        upgradeFromYm: periodYm
-      });
-    } catch (e) {
-      return fail("累積更新失敗：" + (e?.message || String(e)));
-    }
-    if (cumulativeRes.err) return fail(cumulativeRes.err);
-  }
 
   const row = {
     stat_id: statId,
     customer_id: customerId,
     period_ym: periodYm,
-    cumulative_scheme_id: cumSchemeId,
+    cumulative_scheme_id: "",
     billing_net_consignment: roundMoney_(ctx.billing.billing_net_consignment),
     billing_net_general: roundMoney_(ctx.billing.billing_net_general),
     billing_net_total: roundMoney_(ctx.billing.billing_net),
     gross_settlement: roundMoney_(ctx.billing.gross_settlement),
     gross_shipment: roundMoney_(ctx.billing.gross_shipment),
-    cumulative_add_consignment: cumulativeAddConsignment,
-    cumulative_add_general: roundMoney_(ctx.billing.billing_net_general),
-    cumulative_before: cumulativeRes.cumulative_before != null ? cumulativeRes.cumulative_before : null,
-    cumulative_after: cumulativeRes.cumulative_after != null ? cumulativeRes.cumulative_after : null,
-    cumulative_pending_tier_label: cumulativeRes.pending_tier_label || "",
-    cumulative_pending_price_rate: cumulativeRes.pending_price_rate,
-    cumulative_pending_from_ym: cumulativeRes.pending_tier_label ? periodYm : "",
+    cumulative_add_consignment: 0,
+    cumulative_add_general: 0,
+    cumulative_before: null,
+    cumulative_after: null,
+    cumulative_pending_tier_label: "",
+    cumulative_pending_price_rate: null,
+    cumulative_pending_from_ym: "",
     status: "POSTED",
     remark: String(p.remark || ""),
     created_by: actor,
@@ -2514,15 +2771,13 @@ async function postCommercialDealerMonthlyStatBundle(p) {
       stat_id: statId,
       customer_id: customerId,
       period_ym: periodYm,
-      cumulative_add_consignment: cumulativeAddConsignment
+      billing_net_total: row.billing_net_total
     })
   );
 
   return ok({
     stat_id: statId,
-    billing_net: row.billing_net_total,
-    cumulative_add_consignment: cumulativeAddConsignment,
-    cumulative: cumulativeRes.skipped ? null : cumulativeRes
+    billing_net: row.billing_net_total
   });
 }
 
@@ -2552,33 +2807,28 @@ async function voidCommercialDealerMonthlyStatBundle(p) {
   if (st !== "POSTED") return fail("僅可作廢已產生的月結統計（POSTED）");
 
   const customerId = normId_(stat.customer_id);
-  const ts = nowIso();
-  const removed = roundMoney_(stat.cumulative_add_consignment);
+  const periodYm = String(stat.period_ym || "").trim();
 
-  if (removed > 1e-9) {
-    const customer = await reloadCustomer_(sb, customerId);
-    if (!customer) return fail("Customer not found: " + customerId);
-
-    const before = roundMoney_(customer.dealer_cumulative_amount);
-    const after = roundMoney_(Math.max(0, before - removed));
-    const patch = {
-      dealer_cumulative_amount: after,
-      updated_by: actor,
-      updated_at: ts
-    };
-
-    const snapPending = String(stat.cumulative_pending_tier_label || "").trim();
-    const custPending = String(customer.dealer_cumulative_pending_tier_label || "").trim();
-    if (snapPending && snapPending === custPending) {
-      patch.dealer_cumulative_pending_tier_label = "";
-      patch.dealer_cumulative_pending_price_rate = null;
-      patch.dealer_cumulative_pending_from_ym = "";
-    }
-
-    const { error: updErr } = await sb.from("customer").update(patch).eq("customer_id", customerId);
-    if (updErr) return fail(updErr.message || String(updErr));
+  const levelRow = await loadActiveLevelPostRow_(sb, customerId, periodYm);
+  if (levelRow && normId_(levelRow.status) === "POSTED") {
+    return fail("此月已有經銷等級過帳，請使用「作廢本月月結」一併作廢");
+  }
+  if (isLegacyLevelBundledInStatRow_(stat)) {
+    return fail("此筆為舊版合併過帳（含等級累積），請使用「作廢本月月結」");
   }
 
+  const { data: rebateHit } = await sb
+    .from("commercial_dealer_rebate")
+    .select("rebate_id")
+    .eq("customer_id", customerId)
+    .eq("period_ym", periodYm)
+    .eq("status", "POSTED")
+    .maybeSingle();
+  if (rebateHit) {
+    return fail("此月已有月結回饋，請使用「作廢本月月結」一併作廢");
+  }
+
+  const ts = nowIso();
   const sysRemark = appendSystemRemark_(
     stat.system_remark,
     "[" + ts + "] " + actor + " 作廢月結統計：" + voidReason
@@ -2601,10 +2851,726 @@ async function voidCommercialDealerMonthlyStatBundle(p) {
     statId,
     "BUNDLE_VOID_COMMERCIAL_DEALER_MONTHLY_STAT",
     actor,
-    JSON.stringify({ stat_id: statId, void_reason: voidReason, cumulative_removed: removed })
+    JSON.stringify({ stat_id: statId, void_reason: voidReason })
   );
 
-  return ok({ stat_id: statId, message: "VOIDED", cumulative_removed: removed });
+  return ok({ stat_id: statId, message: "VOIDED" });
+}
+
+async function listCommercialDealerLevelPostEnriched_(p) {
+  const gate = requireCommercialDealerSession_(p);
+  if (gate) return gate;
+  const sb = getSupabase();
+  const cust = normId_(p.customer_id);
+  const period = String(p.period_ym || "").trim();
+  let query = sb
+    .from("commercial_dealer_level_post")
+    .select("*")
+    .order("period_ym", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (cust) query = query.eq("customer_id", cust);
+  if (period) query = query.eq("period_ym", period);
+  const { data, error } = await query;
+  if (error) return fail(error.message || String(error));
+
+  const rows = data || [];
+  const tierCache = {};
+  const enriched = [];
+  for (const row of rows) {
+    const schemeId = normId_(row.cumulative_scheme_id);
+    let currentTierLabel = "";
+    let currentTierPriceRate = null;
+    if (schemeId && row.cumulative_before != null) {
+      if (!tierCache[schemeId]) {
+        tierCache[schemeId] = await loadCumulativeSchemeTiers_(sb, schemeId);
+      }
+      const tiers = tierCache[schemeId] || [];
+      if (tiers.length) {
+        const tier = pickCumulativeTier_(Number(row.cumulative_before), tiers);
+        if (tier) {
+          currentTierLabel = String(tier.tier_label || "").trim();
+          currentTierPriceRate = tier.price_rate != null ? Number(tier.price_rate) : null;
+        }
+      }
+    }
+    enriched.push(
+      Object.assign({}, row, {
+        display_current_tier_label: currentTierLabel,
+        display_current_tier_price_rate: currentTierPriceRate
+      })
+    );
+  }
+  return ok({ data: enriched, source: "supabase" });
+}
+
+async function previewCommercialDealerLevelBundle(p) {
+  const gate = requireCommercialDealerSession_(p);
+  if (gate) return gate;
+
+  const customerId = normId_(p.customer_id);
+  const periodYm = String(p.period_ym || "").trim();
+  if (!customerId) return fail("customer_id required");
+  if (!parsePeriodYm_(periodYm)) return fail("period_ym must be YYYY-MM");
+
+  const sb = getSupabase();
+  try {
+    const ctx = await resolveMonthlyStatContext_(sb, customerId, periodYm);
+    if (ctx.err) return fail(ctx.err);
+
+    const cumSchemeId = normId_(ctx.cumulative_scheme_id);
+    if (!cumSchemeId) return fail("客戶未綁定經銷等級方案");
+
+    const statRow = await loadActiveMonthlyStatRow_(sb, customerId, periodYm);
+    const statPosted = !!(statRow && normId_(statRow.status) === "POSTED");
+    if (!statPosted) {
+      const billingForAdds = {
+        billing_net_consignment: ctx.billing.billing_net_consignment,
+        billing_net_general: ctx.billing.billing_net_general,
+        billing_net: ctx.billing.billing_net
+      };
+      const adds = await resolveMonthlyStatCumulativeAdds_(sb, cumSchemeId, billingForAdds);
+      let cumulativePreview = { enabled: false };
+      if (adds.cumulative_add_total > 1e-9) {
+        cumulativePreview = await buildCumulativeClosePreview_(sb, ctx.customer, adds.cumulative_add_total);
+      }
+      return ok({
+        customer_id: customerId,
+        period_ym: periodYm,
+        cumulative_scheme_id: cumSchemeId,
+        stat_source: ctx.stat_source,
+        monthly_stat_posted: false,
+        already_posted: false,
+        needs_stat_first: true,
+        billing_net: ctx.billing.billing_net,
+        billing_net_consignment: ctx.billing.billing_net_consignment,
+        billing_net_general: ctx.billing.billing_net_general,
+        cumulative_add_consignment: adds.cumulative_add_consignment,
+        cumulative_add_general: adds.cumulative_add_general,
+        cumulative_add_total: adds.cumulative_add_total,
+        cumulative_preview: cumulativePreview
+      });
+    }
+
+    const levelRow = await loadActiveLevelPostRow_(sb, customerId, periodYm);
+    const legacyLevel = isLegacyLevelBundledInStatRow_(statRow);
+    const alreadyPosted = !!(levelRow && normId_(levelRow.status) === "POSTED") || legacyLevel;
+
+    const billingForAdds = {
+      billing_net_consignment: statRow.billing_net_consignment,
+      billing_net_general: statRow.billing_net_general,
+      billing_net: statRow.billing_net_total
+    };
+    const adds = await resolveMonthlyStatCumulativeAdds_(sb, cumSchemeId, billingForAdds);
+    let cumulativePreview = { enabled: false };
+
+    if (alreadyPosted && levelRow) {
+      cumulativePreview = await buildCumulativePreviewFromPostedStat_(sb, ctx.customer, {
+        cumulative_scheme_id: levelRow.cumulative_scheme_id,
+        cumulative_before: levelRow.cumulative_before,
+        cumulative_after: levelRow.cumulative_after,
+        cumulative_add_consignment: levelRow.cumulative_add_consignment,
+        cumulative_add_general: levelRow.cumulative_add_general,
+        cumulative_pending_tier_label: levelRow.cumulative_pending_tier_label,
+        cumulative_pending_price_rate: levelRow.cumulative_pending_price_rate
+      });
+    } else if (alreadyPosted && legacyLevel) {
+      cumulativePreview = await buildCumulativePreviewFromPostedStat_(sb, ctx.customer, statRow);
+    } else if (adds.cumulative_add_total > 1e-9) {
+      cumulativePreview = await buildCumulativeClosePreview_(sb, ctx.customer, adds.cumulative_add_total);
+    }
+
+    const drift = buildMonthlyStatBillingDrift_(statRow, ctx.billing);
+
+    return ok(
+      attachMonthlyStatBillingDriftFields_(
+        {
+          customer_id: customerId,
+          period_ym: periodYm,
+          cumulative_scheme_id: cumSchemeId,
+          stat_source: ctx.stat_source,
+          stat_id: String(statRow.stat_id || ""),
+          monthly_stat_posted: true,
+          already_posted: alreadyPosted,
+          existing_level_post_id: levelRow ? String(levelRow.level_post_id || "") : "",
+          legacy_bundled_in_stat: legacyLevel && !levelRow,
+          cumulative_add_consignment: alreadyPosted && levelRow
+            ? roundMoney_(levelRow.cumulative_add_consignment)
+            : alreadyPosted && legacyLevel
+              ? roundMoney_(statRow.cumulative_add_consignment)
+              : adds.cumulative_add_consignment,
+          cumulative_add_general: alreadyPosted && levelRow
+            ? roundMoney_(levelRow.cumulative_add_general)
+            : alreadyPosted && legacyLevel
+              ? roundMoney_(statRow.cumulative_add_general)
+              : adds.cumulative_add_general,
+          cumulative_add_total: alreadyPosted && levelRow
+            ? roundMoney_(
+                (levelRow.cumulative_add_consignment || 0) + (levelRow.cumulative_add_general || 0)
+              )
+            : alreadyPosted && legacyLevel
+              ? roundMoney_(
+                  (statRow.cumulative_add_consignment || 0) + (statRow.cumulative_add_general || 0)
+                )
+              : adds.cumulative_add_total,
+          cumulative_preview: cumulativePreview
+        },
+        drift
+      )
+    );
+  } catch (e) {
+    return fail(e?.message || String(e));
+  }
+}
+
+async function postCommercialDealerLevelBundle(p) {
+  if (!canOperateDealerRebate_(p._session)) return fail("Permission denied: commercial dealer level");
+
+  const customerId = normId_(p.customer_id);
+  const periodYm = String(p.period_ym || "").trim();
+  if (!customerId) return fail("customer_id required");
+  if (!parsePeriodYm_(periodYm)) return fail("period_ym must be YYYY-MM");
+
+  const actor = String(p.updated_by || p.created_by || "").trim();
+  if (!actor) return fail("created_by required");
+
+  const sb = getSupabase();
+
+  const { data: dup } = await sb
+    .from("commercial_dealer_level_post")
+    .select("level_post_id")
+    .eq("customer_id", customerId)
+    .eq("period_ym", periodYm)
+    .neq("status", "VOID")
+    .maybeSingle();
+  if (dup) return fail("此客戶該月份已有經銷等級過帳: " + dup.level_post_id);
+
+  let ctx;
+  try {
+    ctx = await resolveMonthlyStatContext_(sb, customerId, periodYm);
+  } catch (e) {
+    return fail(e?.message || String(e));
+  }
+  if (ctx.err) return fail(ctx.err);
+
+  const cumSchemeId = normId_(ctx.cumulative_scheme_id);
+  if (!cumSchemeId) return fail("客戶未綁定經銷等級方案");
+
+  const statRow = await loadActiveMonthlyStatRow_(sb, customerId, periodYm);
+  if (!statRow || normId_(statRow.status) !== "POSTED") {
+    return fail("請先完成月結統計過帳");
+  }
+  if (isLegacyLevelBundledInStatRow_(statRow)) {
+    return fail("此月等級已於舊版月結統計一併過帳");
+  }
+
+  const drift = buildMonthlyStatBillingDrift_(statRow, ctx.billing);
+  if (drift.has_new_billing) {
+    return fail("本月月結統計已過帳，但過帳後又有新請款；請先作廢本月月結再重新過帳");
+  }
+
+  const billingForAdds = {
+    billing_net_consignment: statRow.billing_net_consignment,
+    billing_net_general: statRow.billing_net_general,
+    billing_net: statRow.billing_net_total
+  };
+  const adds = await resolveMonthlyStatCumulativeAdds_(sb, cumSchemeId, billingForAdds);
+  const cumulativeAddConsignment = adds.cumulative_add_consignment;
+  const cumulativeAddGeneral = adds.cumulative_add_general;
+  const cumulativeAddTotal = adds.cumulative_add_total;
+
+  const ts = nowIso();
+  const levelPostId = buildId_("CDML");
+
+  const row = {
+    level_post_id: levelPostId,
+    stat_id: String(statRow.stat_id || ""),
+    customer_id: customerId,
+    period_ym: periodYm,
+    cumulative_scheme_id: cumSchemeId,
+    billing_net_consignment: roundMoney_(statRow.billing_net_consignment),
+    billing_net_general: roundMoney_(statRow.billing_net_general),
+    billing_net_total: roundMoney_(statRow.billing_net_total),
+    cumulative_add_consignment: cumulativeAddConsignment,
+    cumulative_add_general: cumulativeAddGeneral,
+    cumulative_before: null,
+    cumulative_after: null,
+    cumulative_pending_tier_label: "",
+    cumulative_pending_price_rate: null,
+    cumulative_pending_from_ym: "",
+    status: "POSTED",
+    remark: String(p.remark || ""),
+    created_by: actor,
+    created_at: ts,
+    updated_by: "",
+    updated_at: null,
+    system_remark: ""
+  };
+
+  const { error: insErr } = await sb.from("commercial_dealer_level_post").insert(row);
+  if (insErr) return fail(insErr.message || String(insErr));
+
+  let cumulativeRes = { skipped: true };
+  if (cumulativeAddTotal > 1e-9) {
+    try {
+      cumulativeRes = await applyCustomerCumulativeAmountAdd_(sb, {
+        customerId,
+        billingNet: cumulativeAddTotal,
+        actor,
+        ts,
+        upgradeFromYm: periodYm
+      });
+    } catch (e) {
+      await sb
+        .from("commercial_dealer_level_post")
+        .update({
+          status: "VOID",
+          void_reason: "SYSTEM_ROLLBACK",
+          system_remark: appendSystemRemark_(row.system_remark, "[" + ts + "] insert rollback"),
+          updated_by: actor,
+          updated_at: ts
+        })
+        .eq("level_post_id", levelPostId);
+      return fail("累積更新失敗：" + (e?.message || String(e)));
+    }
+    if (cumulativeRes.err) {
+      await sb
+        .from("commercial_dealer_level_post")
+        .update({
+          status: "VOID",
+          void_reason: "SYSTEM_ROLLBACK",
+          system_remark: appendSystemRemark_(row.system_remark, "[" + ts + "] insert rollback"),
+          updated_by: actor,
+          updated_at: ts
+        })
+        .eq("level_post_id", levelPostId);
+      return fail(cumulativeRes.err);
+    }
+  }
+
+  const { error: updRowErr } = await sb
+    .from("commercial_dealer_level_post")
+    .update({
+      cumulative_before: cumulativeRes.cumulative_before != null ? cumulativeRes.cumulative_before : null,
+      cumulative_after: cumulativeRes.cumulative_after != null ? cumulativeRes.cumulative_after : null,
+      cumulative_pending_tier_label: cumulativeRes.pending_tier_label || "",
+      cumulative_pending_price_rate: cumulativeRes.pending_price_rate,
+      cumulative_pending_from_ym: cumulativeRes.pending_tier_label ? periodYm : "",
+      updated_by: actor,
+      updated_at: ts
+    })
+    .eq("level_post_id", levelPostId);
+  if (updRowErr) {
+    if (cumulativeAddTotal > 1e-9) {
+      try {
+        await rollbackCustomerCumulativeAdd_(sb, {
+          customerId,
+          amount: cumulativeAddTotal,
+          actor,
+          ts,
+          cumulativeRes
+        });
+      } catch (_eRb) {}
+    }
+    await sb
+      .from("commercial_dealer_level_post")
+      .update({
+        status: "VOID",
+        void_reason: "SYSTEM_ROLLBACK",
+        updated_by: actor,
+        updated_at: ts
+      })
+      .eq("level_post_id", levelPostId);
+    return fail(updRowErr.message || String(updRowErr));
+  }
+
+  row.cumulative_before = cumulativeRes.cumulative_before != null ? cumulativeRes.cumulative_before : null;
+  row.cumulative_after = cumulativeRes.cumulative_after != null ? cumulativeRes.cumulative_after : null;
+  row.cumulative_pending_tier_label = cumulativeRes.pending_tier_label || "";
+  row.cumulative_pending_price_rate = cumulativeRes.pending_price_rate;
+  row.cumulative_pending_from_ym = cumulativeRes.pending_tier_label ? periodYm : "";
+
+  await writeAuditLog_(
+    "commercial_dealer_level_post",
+    levelPostId,
+    "BUNDLE_POST_COMMERCIAL_DEALER_LEVEL",
+    actor,
+    JSON.stringify({
+      level_post_id: levelPostId,
+      stat_id: row.stat_id,
+      customer_id: customerId,
+      period_ym: periodYm,
+      cumulative_add_total: cumulativeAddTotal
+    })
+  );
+
+  return ok({
+    level_post_id: levelPostId,
+    stat_id: row.stat_id,
+    cumulative_add_total: cumulativeAddTotal,
+    cumulative: cumulativeRes.skipped ? null : cumulativeRes
+  });
+}
+
+async function voidCommercialDealerLevelPostBundle(p) {
+  if (!canOperateDealerRebate_(p._session)) return fail("Permission denied: commercial dealer level");
+
+  const levelPostId = String(p.level_post_id || "").trim();
+  if (!levelPostId) return fail("level_post_id required");
+
+  const voidReason = String(p.void_reason || "").trim();
+  if (!voidReason) return fail("void_reason required");
+
+  const actor = String(p.updated_by || p.created_by || "").trim();
+  if (!actor) return fail("updated_by required");
+
+  const sb = getSupabase();
+  const { data: row, error: getErr } = await sb
+    .from("commercial_dealer_level_post")
+    .select("*")
+    .eq("level_post_id", levelPostId)
+    .maybeSingle();
+  if (getErr) return fail(getErr.message || String(getErr));
+  if (!row) return fail("經銷等級過帳不存在: " + levelPostId);
+
+  const st = normId_(row.status);
+  if (st === "VOID") return ok({ level_post_id: levelPostId, message: "ALREADY_VOID", idempotent: true });
+  if (st !== "POSTED") return fail("僅可作廢已產生的經銷等級過帳（POSTED）");
+
+  const customerId = normId_(row.customer_id);
+  const ts = nowIso();
+  const removed = roundMoney_((row.cumulative_add_consignment || 0) + (row.cumulative_add_general || 0));
+
+  if (removed > 1e-9) {
+    const customer = await reloadCustomer_(sb, customerId);
+    if (!customer) return fail("Customer not found: " + customerId);
+
+    const before = roundMoney_(customer.dealer_cumulative_amount);
+    const after = roundMoney_(Math.max(0, before - removed));
+    const patch = {
+      dealer_cumulative_amount: after,
+      updated_by: actor,
+      updated_at: ts
+    };
+
+    const snapPending = String(row.cumulative_pending_tier_label || "").trim();
+    const custPending = String(customer.dealer_cumulative_pending_tier_label || "").trim();
+    if (snapPending && snapPending === custPending) {
+      patch.dealer_cumulative_pending_tier_label = "";
+      patch.dealer_cumulative_pending_price_rate = null;
+      patch.dealer_cumulative_pending_from_ym = "";
+    }
+
+    const { error: updErr } = await sb.from("customer").update(patch).eq("customer_id", customerId);
+    if (updErr) return fail(updErr.message || String(updErr));
+  }
+
+  const sysRemark = appendSystemRemark_(
+    row.system_remark,
+    "[" + ts + "] " + actor + " 作廢經銷等級過帳：" + voidReason
+  );
+
+  const { error: updRowErr } = await sb
+    .from("commercial_dealer_level_post")
+    .update({
+      status: "VOID",
+      void_reason: voidReason,
+      system_remark: sysRemark,
+      updated_by: actor,
+      updated_at: ts
+    })
+    .eq("level_post_id", levelPostId);
+  if (updRowErr) return fail(updRowErr.message || String(updRowErr));
+
+  await writeAuditLog_(
+    "commercial_dealer_level_post",
+    levelPostId,
+    "BUNDLE_VOID_COMMERCIAL_DEALER_LEVEL",
+    actor,
+    JSON.stringify({ level_post_id: levelPostId, void_reason: voidReason, cumulative_removed: removed })
+  );
+
+  return ok({ level_post_id: levelPostId, message: "VOIDED", cumulative_removed: removed });
+}
+
+async function voidLegacyLevelInStatRow_(sb, statRow, actor, voidReason, ts) {
+  const removed = roundMoney_(
+    (statRow.cumulative_add_consignment || 0) + (statRow.cumulative_add_general || 0)
+  );
+  const customerId = normId_(statRow.customer_id);
+  if (removed > 1e-9 && customerId) {
+    const customer = await reloadCustomer_(sb, customerId);
+    if (!customer) return fail("Customer not found: " + customerId);
+    const before = roundMoney_(customer.dealer_cumulative_amount);
+    const after = roundMoney_(Math.max(0, before - removed));
+    const patch = {
+      dealer_cumulative_amount: after,
+      updated_by: actor,
+      updated_at: ts
+    };
+    const snapPending = String(statRow.cumulative_pending_tier_label || "").trim();
+    const custPending = String(customer.dealer_cumulative_pending_tier_label || "").trim();
+    if (snapPending && snapPending === custPending) {
+      patch.dealer_cumulative_pending_tier_label = "";
+      patch.dealer_cumulative_pending_price_rate = null;
+      patch.dealer_cumulative_pending_from_ym = "";
+    }
+    const { error: updErr } = await sb.from("customer").update(patch).eq("customer_id", customerId);
+    if (updErr) return fail(updErr.message || String(updErr));
+  }
+  return { cumulative_removed: removed };
+}
+
+async function rollbackCustomerCumulativeAdd_(sb, opts) {
+  const customerId = normId_(opts?.customerId);
+  const removed = roundMoney_(opts?.amount);
+  const actor = String(opts?.actor || "").trim();
+  const ts = opts?.ts || nowIso();
+  const cumulativeRes = opts?.cumulativeRes || {};
+  if (!customerId || removed <= 1e-9) return;
+
+  const customer = await reloadCustomer_(sb, customerId);
+  if (!customer) return;
+
+  const before = roundMoney_(customer.dealer_cumulative_amount);
+  const after = roundMoney_(Math.max(0, before - removed));
+  const patch = {
+    dealer_cumulative_amount: after,
+    updated_by: actor,
+    updated_at: ts
+  };
+
+  const snapPending = String(cumulativeRes.pending_tier_label || "").trim();
+  const custPending = String(customer.dealer_cumulative_pending_tier_label || "").trim();
+  if (snapPending && snapPending === custPending) {
+    patch.dealer_cumulative_pending_tier_label = "";
+    patch.dealer_cumulative_pending_price_rate = null;
+    patch.dealer_cumulative_pending_from_ym = "";
+  }
+
+  const { error: updErr } = await sb.from("customer").update(patch).eq("customer_id", customerId);
+  if (updErr) throw new Error(updErr.message || String(updErr));
+}
+
+async function voidCommercialDealerMonthlyCloseBundle(p) {
+  if (!canOperateDealerRebate_(p._session)) return fail("Permission denied: commercial dealer monthly close");
+
+  const customerId = normId_(p.customer_id);
+  const periodYm = String(p.period_ym || "").trim();
+  if (!customerId) return fail("customer_id required");
+  if (!parsePeriodYm_(periodYm)) return fail("period_ym must be YYYY-MM");
+
+  const voidReason = String(p.void_reason || "").trim();
+  if (!voidReason) return fail("void_reason required");
+
+  const actor = String(p.updated_by || p.created_by || "").trim();
+  if (!actor) return fail("updated_by required");
+
+  const sb = getSupabase();
+  const ts = nowIso();
+  const steps = [];
+
+  const { data: rebate } = await sb
+    .from("commercial_dealer_rebate")
+    .select("rebate_id")
+    .eq("customer_id", customerId)
+    .eq("period_ym", periodYm)
+    .eq("status", "POSTED")
+    .maybeSingle();
+  if (rebate) {
+    const voidRebate = await voidCommercialDealerRebateBundle({
+      rebate_id: rebate.rebate_id,
+      void_reason: voidReason,
+      updated_by: actor,
+      created_by: actor,
+      _session: p._session,
+      _skipCumulativeRecalc: true,
+      _monthly_close_cascade: true
+    });
+    if (voidRebate && voidRebate.success === false) {
+      return fail(
+        (voidRebate.errors && voidRebate.errors[0]) ||
+          "作廢月結回饋失敗（可重試「作廢本月月結」續作）"
+      );
+    }
+    steps.push({ step: "rebate", rebate_id: rebate.rebate_id });
+  }
+
+  const levelRow = await loadActiveLevelPostRow_(sb, customerId, periodYm);
+  if (levelRow && normId_(levelRow.status) === "POSTED") {
+    const voidLevel = await voidCommercialDealerLevelPostBundle({
+      level_post_id: levelRow.level_post_id,
+      void_reason: voidReason,
+      updated_by: actor,
+      created_by: actor,
+      _session: p._session,
+      _monthly_close_cascade: true
+    });
+    if (voidLevel && voidLevel.success === false) {
+      const done = steps.map(function (s) {
+        return s.step;
+      });
+      return fail(
+        (voidLevel.errors && voidLevel.errors[0]) ||
+          "作廢經銷等級失敗（已完成：" +
+            (done.length ? done.join("、") : "無") +
+            "；可重試「作廢本月月結」續作）"
+      );
+    }
+    steps.push({ step: "level", level_post_id: levelRow.level_post_id });
+  }
+
+  const statRow = await loadActiveMonthlyStatRow_(sb, customerId, periodYm);
+  if (!statRow || normId_(statRow.status) !== "POSTED") {
+    if (steps.length) {
+      return fail(
+        "此客戶該月統計已作廢或不存在；已完成步驟：" +
+          steps.map(function (s) {
+            return s.step;
+          }).join("、")
+      );
+    }
+    return fail("此客戶該月無可作廢的月結統計");
+  }
+
+  if (isLegacyLevelBundledInStatRow_(statRow)) {
+    const legacyRes = await voidLegacyLevelInStatRow_(sb, statRow, actor, voidReason, ts);
+    if (legacyRes.err) return fail(legacyRes.err);
+    steps.push({ step: "legacy_level_in_stat", cumulative_removed: legacyRes.cumulative_removed });
+  }
+
+  const sysRemark = appendSystemRemark_(
+    statRow.system_remark,
+    "[" + ts + "] " + actor + " 作廢本月月結：" + voidReason
+  );
+  const { error: updStatErr } = await sb
+    .from("commercial_dealer_monthly_stat")
+    .update({
+      status: "VOID",
+      void_reason: voidReason,
+      system_remark: sysRemark,
+      updated_by: actor,
+      updated_at: ts
+    })
+    .eq("stat_id", statRow.stat_id);
+  if (updStatErr) {
+    return fail(
+      (updStatErr.message || String(updStatErr)) +
+        "（已完成：" +
+        steps
+          .map(function (s) {
+            return s.step;
+          })
+          .join("、") +
+        "；可重試「作廢本月月結」續作）"
+    );
+  }
+
+  try {
+    await recalculateCustomerCumulativeFromPostedRebates_(sb, customerId, actor, ts);
+  } catch (e) {
+    return fail(
+      "累積重算失敗：" +
+        (e?.message || String(e)) +
+        "（單據已作廢，請聯絡管理員校正累積）"
+    );
+  }
+
+  await writeAuditLog_(
+    "commercial_dealer_monthly_stat",
+    statRow.stat_id,
+    "BUNDLE_VOID_COMMERCIAL_DEALER_MONTHLY_CLOSE",
+    actor,
+    JSON.stringify({ customer_id: customerId, period_ym: periodYm, void_reason: voidReason, steps })
+  );
+
+  return ok({
+    message: "VOIDED",
+    customer_id: customerId,
+    period_ym: periodYm,
+    stat_id: statRow.stat_id,
+    steps
+  });
+}
+
+async function batchPostCommercialDealerMonthlyStatBundle(p) {
+  if (!canOperateDealerRebate_(p._session)) return fail("Permission denied: commercial dealer monthly stat batch");
+
+  const periodYm = String(p.period_ym || "").trim();
+  if (!parsePeriodYm_(periodYm)) return fail("period_ym must be YYYY-MM");
+
+  const actor = String(p.updated_by || p.created_by || "").trim();
+  if (!actor) return fail("created_by required");
+
+  const customerIds = parseMonthlyStatCustomerIds_(p);
+  if (!customerIds.length) return fail("customer_ids required");
+  if (customerIds.length > MONTHLY_STAT_BATCH_LIMIT_) {
+    return fail("單次最多 " + MONTHLY_STAT_BATCH_LIMIT_ + " 位客戶，請縮小篩選");
+  }
+
+  const succeeded = [];
+  const skipped = [];
+  const failed = [];
+
+  for (const cid of customerIds) {
+    const customerId = normId_(cid);
+    if (!customerId) continue;
+    try {
+      const sb = getSupabase();
+      const billing = await computeBillingNetForStatSource_(sb, customerId, periodYm, "ALL");
+      if (billing.err) {
+        skipped.push({ customer_id: customerId, reason: billing.err });
+        continue;
+      }
+      if (roundMoney_(billing.billing_net) <= 1e-9) {
+        skipped.push({ customer_id: customerId, reason: "本月無請款淨額" });
+        continue;
+      }
+      const existing = await loadActiveMonthlyStatRow_(sb, customerId, periodYm);
+      if (existing && normId_(existing.status) === "POSTED") {
+        const drift = buildMonthlyStatBillingDrift_(existing, billing);
+        if (drift.has_new_billing) {
+          skipped.push({ customer_id: customerId, reason: "已過帳・有新單" });
+        } else {
+          skipped.push({ customer_id: customerId, reason: "本月統計已過帳" });
+        }
+        continue;
+      }
+      if (existing) {
+        skipped.push({ customer_id: customerId, reason: "已有未過帳紀錄，請先處理" });
+        continue;
+      }
+
+      const res = await postCommercialDealerMonthlyStatBundle({
+        customer_id: customerId,
+        period_ym: periodYm,
+        remark: String(p.remark || ""),
+        created_by: actor,
+        updated_by: actor,
+        _session: p._session
+      });
+      if (res && res.success === false) {
+        failed.push({
+          customer_id: customerId,
+          reason: (res.errors && res.errors[0]) || "過帳失敗"
+        });
+      } else {
+        succeeded.push({ customer_id: customerId, stat_id: res.stat_id });
+      }
+    } catch (e) {
+      failed.push({ customer_id: customerId, reason: e?.message || String(e) });
+    }
+  }
+
+  return ok({
+    period_ym: periodYm,
+    succeeded,
+    skipped,
+    failed,
+    succeeded_count: succeeded.length,
+    skipped_count: skipped.length,
+    failed_count: failed.length
+  });
 }
 
 async function previewCommercialDealerRebateBundle(p) {
@@ -2623,41 +3589,107 @@ async function previewCommercialDealerRebateBundle(p) {
 
     const { data: existed } = await sb
       .from("commercial_dealer_rebate")
-      .select("rebate_id, status")
+      .select(
+        "rebate_id, status, billing_net, billing_net_consignment, billing_net_general, rebate_amount, rebate_pct, tier_snapshot_json, scheme_id, scheme_name_snapshot, settle_mode"
+      )
       .eq("customer_id", customerId)
       .eq("period_ym", periodYm)
       .neq("status", "VOID")
       .maybeSingle();
 
-    let cumulativePreview = {
-      enabled: false,
-      note: "月結累積（含寄賣）請先於上方「月結統計」過帳；一般出貨已於出貨過帳時累加。"
-    };
+    const { data: statRow } = await sb
+      .from("commercial_dealer_monthly_stat")
+      .select(
+        "stat_id, status, billing_net_consignment, billing_net_general, billing_net_total"
+      )
+      .eq("customer_id", customerId)
+      .eq("period_ym", periodYm)
+      .neq("status", "VOID")
+      .maybeSingle();
+    const monthlyStatPosted = normId_(statRow?.status) === "POSTED";
 
-    return ok({
-      customer_id: customerId,
-      period_ym: periodYm,
-      scheme_id: normId_(ctx.scheme.scheme_id),
-      scheme_name: String(ctx.scheme.scheme_name || ""),
-      billing_net: ctx.billing.billing_net,
-      billing_net_consignment: ctx.billing.billing_net_consignment,
-      billing_net_general: ctx.billing.billing_net_general,
-      gross_settlement: ctx.billing.gross_settlement,
-      gross_shipment: ctx.billing.gross_shipment,
-      stat_source: normId_(ctx.scheme.stat_source) || "CONSIGNMENT",
-      ar_discount_total: ctx.billing.ar_discount_total,
-      settlement_count: ctx.billing.settlement_count,
-      shipment_count: ctx.billing.shipment_count,
-      settlements: ctx.billing.settlements,
-      shipments: ctx.billing.shipments,
-      rebate_pct: ctx.rebate_pct,
-      rebate_amount: ctx.rebate_amount,
-      settle_mode_default: ctx.settle_mode_default,
-      tier_snapshot: ctx.tier || null,
-      already_posted: !!existed,
-      existing_rebate_id: existed ? String(existed.rebate_id || "") : "",
-      cumulative_preview: cumulativePreview
-    });
+    let previewBilling = ctx.billing;
+    let previewRebatePct = ctx.rebate_pct;
+    let previewRebateAmount = ctx.rebate_amount;
+    let previewTier = ctx.tier;
+    if (!existed && monthlyStatPosted && statRow) {
+      const snapBilling = billingPackFromStatRowForSource_(statRow, ctx.scheme.stat_source);
+      previewTier = pickTierForBilling_(snapBilling.billing_net, ctx.tiers);
+      previewRebatePct = previewTier ? Number(previewTier.rebate_pct || 0) : 0;
+      previewRebateAmount = roundMoney_((snapBilling.billing_net * previewRebatePct) / 100);
+      previewBilling = Object.assign({}, ctx.billing, snapBilling);
+    }
+
+    let cumulativePreview = { enabled: false };
+
+    let drift;
+    if (existed) {
+      drift = buildMonthlyStatBillingDrift_(
+        {
+          billing_net_consignment: existed.billing_net_consignment,
+          billing_net_general: existed.billing_net_general,
+          billing_net_total: existed.billing_net
+        },
+        ctx.billing
+      );
+    } else if (monthlyStatPosted && statRow) {
+      /** 與月結統計同一口徑（寄賣＋一般）比對，勿用回饋 stat_source 誤判一般差額 */
+      const liveAll = await computeBillingNetForStatSource_(sb, customerId, periodYm, "ALL");
+      drift = buildMonthlyStatBillingDrift_(statRow, liveAll);
+    } else {
+      drift = buildMonthlyStatBillingDrift_({}, ctx.billing);
+    }
+
+    let postedTierSnap = null;
+    if (existed?.tier_snapshot_json) {
+      try {
+        postedTierSnap = JSON.parse(String(existed.tier_snapshot_json));
+      } catch (_e) {
+        postedTierSnap = null;
+      }
+    }
+
+    return ok(
+      attachMonthlyStatBillingDriftFields_(
+        {
+          customer_id: customerId,
+          period_ym: periodYm,
+          scheme_id: existed
+            ? normId_(existed.scheme_id || ctx.scheme.scheme_id)
+            : normId_(ctx.scheme.scheme_id),
+          scheme_name: existed
+            ? String(existed.scheme_name_snapshot || ctx.scheme.scheme_name || "")
+            : String(ctx.scheme.scheme_name || ""),
+          billing_net: previewBilling.billing_net,
+          billing_net_consignment: previewBilling.billing_net_consignment,
+          billing_net_general: previewBilling.billing_net_general,
+          gross_settlement: previewBilling.gross_settlement,
+          gross_shipment: previewBilling.gross_shipment,
+          stat_source: normId_(ctx.scheme.stat_source) || "CONSIGNMENT",
+          ar_discount_total: ctx.billing.ar_discount_total,
+          settlement_count: ctx.billing.settlement_count,
+          shipment_count: ctx.billing.shipment_count,
+          settlements: ctx.billing.settlements,
+          shipments: ctx.billing.shipments,
+          rebate_pct: existed ? Number(existed.rebate_pct || 0) : previewRebatePct,
+          rebate_amount: existed
+            ? roundMoney_(existed.rebate_amount || 0)
+            : previewRebateAmount,
+          settle_mode_default: existed
+            ? String(existed.settle_mode || ctx.settle_mode_default || "").trim()
+            : ctx.settle_mode_default,
+          tier_snapshot: existed && postedTierSnap ? postedTierSnap : previewTier || null,
+          rebate_amount_source: existed ? "posted_snapshot" : monthlyStatPosted ? "stat_snapshot" : "live_preview",
+          already_posted: !!existed,
+          existing_rebate_id: existed ? String(existed.rebate_id || "") : "",
+          monthly_stat_posted: monthlyStatPosted,
+          needs_stat_first: !monthlyStatPosted && !existed,
+          existing_stat_id: statRow ? String(statRow.stat_id || "") : "",
+          cumulative_preview: cumulativePreview
+        },
+        drift
+      )
+    );
   } catch (e) {
     return fail(e?.message || String(e));
   }
@@ -2696,18 +3728,20 @@ async function postCommercialDealerRebateBundle(p) {
   const billingNet = roundMoney_(ctx.billing.billing_net);
   if (billingNet <= 1e-9) return fail("本月無請款淨額");
 
-  if (roundMoney_(ctx.billing.billing_net_consignment) > 1e-9) {
-    const { data: statRow } = await sb
-      .from("commercial_dealer_monthly_stat")
-      .select("stat_id")
-      .eq("customer_id", customerId)
-      .eq("period_ym", periodYm)
-      .neq("status", "VOID")
-      .maybeSingle();
-    if (!statRow) return fail("本月有寄賣請款淨額，請先產生「月結統計」");
-  }
+  const statCheck = await assertMonthlyStatPostedForRebate_(sb, customerId, periodYm);
+  if (statCheck.err) return fail(statCheck.err);
+  const statRow = statCheck.statRow;
 
-  const rebateAmount = roundMoney_(ctx.rebate_amount);
+  const snapBilling = billingPackFromStatRowForSource_(statRow, ctx.scheme.stat_source);
+  const tier = pickTierForBilling_(snapBilling.billing_net, ctx.tiers);
+  const rebatePct = tier ? Number(tier.rebate_pct || 0) : 0;
+  const rebateAmount = roundMoney_((snapBilling.billing_net * rebatePct) / 100);
+  ctx.billing = Object.assign({}, ctx.billing, snapBilling);
+  ctx.tier = tier;
+  ctx.rebate_pct = rebatePct;
+  ctx.rebate_amount = rebateAmount;
+
+  const rebateAmountFinal = roundMoney_(rebateAmount);
 
   let settleMode = normId_(p.settle_mode) || ctx.settle_mode_default;
   if (!["CREDIT_NOTE", "CARRY_FORWARD"].includes(settleMode)) return fail("settle_mode invalid");
@@ -2717,40 +3751,7 @@ async function postCommercialDealerRebateBundle(p) {
   let arId = "";
   let creditApplied = 0;
   let creditBalanceAfter = null;
-
-  if (rebateAmount > 1e-9) {
-    if (settleMode === "CREDIT_NOTE") {
-      let applyRes;
-      try {
-        applyRes = await applyRebateCreditNote_(
-          sb,
-          ctx.billing.ar_ids,
-          rebateAmount,
-          periodYm,
-          actor,
-          p._session
-        );
-      } catch (e) {
-        return fail(e?.message || String(e));
-      }
-      if (applyRes.err) return fail(applyRes.err);
-      arId = applyRes.ar_id || "";
-      creditApplied = roundMoney_(applyRes.credit_applied || 0);
-    } else {
-      const bal = roundMoney_(Number(ctx.customer.dealer_rebate_credit_balance || 0) + rebateAmount);
-      const { error: custErr } = await sb
-        .from("customer")
-        .update({
-          dealer_rebate_credit_balance: bal,
-          updated_by: actor,
-          updated_at: ts
-        })
-        .eq("customer_id", customerId);
-      if (custErr) return fail(custErr.message || String(custErr));
-      creditApplied = rebateAmount;
-      creditBalanceAfter = bal;
-    }
-  }
+  let balanceUpdated = false;
 
   const tierSnap = ctx.tier
     ? {
@@ -2773,12 +3774,12 @@ async function postCommercialDealerRebateBundle(p) {
     gross_settlement: ctx.billing.gross_settlement,
     gross_shipment: ctx.billing.gross_shipment,
     rebate_pct: ctx.rebate_pct,
-    rebate_amount: rebateAmount,
+    rebate_amount: rebateAmountFinal,
     tier_snapshot_json: tierSnap ? JSON.stringify(tierSnap) : "",
     settle_mode: settleMode,
     status: "POSTED",
-    ar_id: arId,
-    credit_applied: creditApplied,
+    ar_id: "",
+    credit_applied: 0,
     remark: String(p.remark || ""),
     created_by: actor,
     created_at: ts,
@@ -2789,6 +3790,69 @@ async function postCommercialDealerRebateBundle(p) {
 
   const { error: insErr } = await sb.from("commercial_dealer_rebate").insert(row);
   if (insErr) return fail(insErr.message || String(insErr));
+
+  try {
+    if (rebateAmountFinal > 1e-9) {
+      if (settleMode === "CREDIT_NOTE") {
+        let applyRes;
+        try {
+          applyRes = await applyRebateCreditNote_(
+            sb,
+            ctx.billing.ar_ids,
+            rebateAmountFinal,
+            periodYm,
+            actor,
+            p._session
+          );
+        } catch (e) {
+          throw new Error(e?.message || String(e));
+        }
+        if (applyRes.err) throw new Error(applyRes.err);
+        arId = applyRes.ar_id || "";
+        creditApplied = roundMoney_(applyRes.credit_applied || 0);
+      } else {
+        const bal = roundMoney_(Number(ctx.customer.dealer_rebate_credit_balance || 0) + rebateAmountFinal);
+        const { error: custErr } = await sb
+          .from("customer")
+          .update({
+            dealer_rebate_credit_balance: bal,
+            updated_by: actor,
+            updated_at: ts
+          })
+          .eq("customer_id", customerId);
+        if (custErr) throw new Error(custErr.message || String(custErr));
+        creditApplied = rebateAmountFinal;
+        creditBalanceAfter = bal;
+        balanceUpdated = true;
+      }
+    }
+
+    const { error: updErr } = await sb
+      .from("commercial_dealer_rebate")
+      .update({
+        ar_id: arId,
+        credit_applied: creditApplied,
+        updated_by: actor,
+        updated_at: ts
+      })
+      .eq("rebate_id", rebateId);
+    if (updErr) throw new Error(updErr.message || String(updErr));
+  } catch (e) {
+    await rollbackPostedRebateSettleFailure_(sb, {
+      rebateId,
+      customerId,
+      periodYm,
+      settleMode,
+      arId,
+      creditApplied,
+      rebateAmount: rebateAmountFinal,
+      balanceUpdated,
+      actor,
+      session: p._session,
+      ts
+    });
+    return fail(e?.message || String(e));
+  }
 
   await writeAuditLog_(
     "commercial_dealer_rebate",
@@ -2851,6 +3915,7 @@ async function voidCommercialDealerRebateBundle(p) {
   const settleMode = normId_(rebate.settle_mode);
   const rebateAmount = roundMoney_(rebate.rebate_amount || rebate.credit_applied);
 
+  const skipCumulativeRecalc = !!(p._skipCumulativeRecalc || p._monthly_close_cascade);
   const ts = nowIso();
 
   if (rebateAmount > 1e-9) {
@@ -2913,10 +3978,12 @@ async function voidCommercialDealerRebateBundle(p) {
   if (updErr) return fail(updErr.message || String(updErr));
 
   let cumulativeRecalc = {};
-  try {
-    cumulativeRecalc = await recalculateCustomerCumulativeFromPostedRebates_(sb, customerId, actor, ts);
-  } catch (e) {
-    return fail("累積重算失敗：" + (e?.message || String(e)));
+  if (!skipCumulativeRecalc) {
+    try {
+      cumulativeRecalc = await recalculateCustomerCumulativeFromPostedRebates_(sb, customerId, actor, ts);
+    } catch (e) {
+      return fail("累積重算失敗：" + (e?.message || String(e)));
+    }
   }
 
   await writeAuditLog_(
@@ -2953,9 +4020,16 @@ module.exports = {
   postCommercialDealerRebateBundle,
   voidCommercialDealerRebateBundle,
   listCommercialDealerMonthlyStatEnriched_,
+  listCommercialDealerMonthlyStatPeriodSummary_,
   previewCommercialDealerMonthlyStatBundle,
   postCommercialDealerMonthlyStatBundle,
   voidCommercialDealerMonthlyStatBundle,
+  batchPostCommercialDealerMonthlyStatBundle,
+  voidCommercialDealerMonthlyCloseBundle,
+  listCommercialDealerLevelPostEnriched_,
+  previewCommercialDealerLevelBundle,
+  postCommercialDealerLevelBundle,
+  voidCommercialDealerLevelPostBundle,
   previewCumulativeDealerForSettlementBundle,
   resolveCumulativeDealerPriceForSettlement_,
   applyCumulativeDealerPriceToLines_,
@@ -2968,6 +4042,7 @@ module.exports = {
   restoreDealerCreditOnSettlementVoid_,
   assertNoLockedDealerRebateForSettlementVoid_,
   assertNoLockedDealerRebateForShipmentVoid_,
+  assertNoPostedMonthlyStatForNewBilling_,
   schemeStatSourceAllows_,
   resolveBillingNetForCumulativeOnRebate_,
   computeBillingNetForStatSource_,

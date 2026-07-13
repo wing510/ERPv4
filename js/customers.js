@@ -1,4 +1,4 @@
-﻿/*********************************
+/*********************************
  * Customers Module - Enterprise v3 (API 版)
  *********************************/
 
@@ -167,11 +167,6 @@ function custSetDealerFields_(c) {
   if (cumEl) cumEl.value = String(row.dealer_cumulative_scheme_id || "").trim().toUpperCase();
   const modeEl = document.getElementById("c_dealer_rebate_settle_mode");
   if (modeEl) modeEl.value = String(row.dealer_rebate_settle_mode || "CREDIT_NOTE").trim().toUpperCase() || "CREDIT_NOTE";
-  const exclEl = document.getElementById("c_dealer_rebate_excluded");
-  if (exclEl) {
-    const ex = row.dealer_rebate_excluded === true || String(row.dealer_rebate_excluded || "").toUpperCase() === "TRUE";
-    exclEl.value = ex ? "true" : "false";
-  }
   const balEl = document.getElementById("c_dealer_rebate_credit_balance");
   if (balEl) balEl.value = custFmtDealerMoney_(row.dealer_rebate_credit_balance);
   const startedEl = document.getElementById("c_dealer_cumulative_started_at");
@@ -305,7 +300,6 @@ async function custMaybeSyncCumulativeTierDisplay_(row) {
 }
 
 function custCollectDealerFields_() {
-  const exclRaw = String(document.getElementById("c_dealer_rebate_excluded")?.value || "false").trim().toLowerCase();
   const rebateSchemeId = String(document.getElementById("c_dealer_rebate_scheme_id")?.value || "").trim().toUpperCase();
   const cumulativeSchemeId = String(document.getElementById("c_dealer_cumulative_scheme_id")?.value || "").trim().toUpperCase();
   const startedRaw = String(document.getElementById("c_dealer_cumulative_started_at")?.value || "").trim();
@@ -314,7 +308,7 @@ function custCollectDealerFields_() {
     dealer_scheme_id: rebateSchemeId,
     dealer_cumulative_scheme_id: cumulativeSchemeId,
     dealer_rebate_settle_mode: String(document.getElementById("c_dealer_rebate_settle_mode")?.value || "CREDIT_NOTE").trim().toUpperCase(),
-    dealer_rebate_excluded: exclRaw === "true",
+    dealer_rebate_excluded: false,
     dealer_cumulative_started_at: startedRaw || null
   };
 }

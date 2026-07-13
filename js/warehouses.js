@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Warehouses（API 版）
  */
 
@@ -117,8 +117,8 @@ async function createWarehouse(triggerEl){
       return;
     }
     showToast("倉庫建立成功");
-    clearWarehouseForm();
     await renderWarehouses();
+    await loadWarehouse(warehouse_id);
   }finally{
     hideSaveHint();
   }

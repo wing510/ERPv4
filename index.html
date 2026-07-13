@@ -1563,6 +1563,12 @@ tr.cc-history-detail-row-void .cc-pool-stack-sub{
 .ar-list-child-row{
   background: #fcfdff;
 }
+.ar-list-table tr.ar-list-void-row td{
+  color: #64748b;
+}
+.ar-list-table tr.ar-list-void-row.erp-list-row-open > td:first-child{
+  box-shadow: inset 3px 0 0 #94a3b8;
+}
 .ar-list-table td.ar-list-date-cell,
 .ar-list-table th.ar-list-date-col{
   text-align: left;
@@ -1802,9 +1808,14 @@ th span[id^="sort-"]{
   cursor:pointer;
   padding-right:88px;
 }
-.toast.warn{
+.toast.warn,
+.toast.warning{
   background:#ffedd5;
   color:#9a3412;
+}
+.toast.info{
+  background:#e0f2fe;
+  color:#0369a1;
 }
 .toast-text{
   flex:1;
@@ -1812,8 +1823,9 @@ th span[id^="sort-"]{
 }
 .toast-close{
   position:absolute;
-  top:6px;
+  top:50%;
   right:8px;
+  transform:translateY(-50%);
   border:none;
   background:transparent;
   color:inherit;
@@ -1828,8 +1840,9 @@ th span[id^="sort-"]{
 }
 .toast-copy{
   position:absolute;
-  top:8px;
+  top:50%;
   right:36px;
+  transform:translateY(-50%);
   border:1px solid rgba(153,27,27,.22);
   background:rgba(255,255,255,.45);
   color:inherit;
@@ -2862,7 +2875,7 @@ body.erp-locked .sidebar-backdrop{
   <a data-nav-module="commercial_dealer_customer" onclick="navigate('commercial_dealer_customer')" title="客戶綁定月結回饋／經銷等級方案">Dealer 方案客戶</a>
 
   <div class="section-title">Consignment 寄賣</div>
-  <a data-nav-module="consignment" onclick="navigate('consignment_case')" title="開寄賣案、查看品項池與歷史">Case 案件管理</a>
+  <a data-nav-module="consignment" onclick="navigate('consignment_case')" title="開寄賣案、查看品項池與歷史">Case 寄賣客戶</a>
   <a data-nav-module="consignment" onclick="navigate('consignment_settlement')" title="依品項池結算並產生應收">Settlement 結算</a>
   <a data-nav-module="consignment" onclick="navigate('consignment_return')" title="依加工廠 Lot 收回未售品項">Return 收回</a>
 

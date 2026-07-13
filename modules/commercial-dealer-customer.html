@@ -17,16 +17,16 @@
         <option value="其他">其他</option>
       </select>
       <select id="search_cdc_bind_status">
-        <option value="ALL">全部綁定</option>
-        <option value="ANY">僅已綁方案</option>
-        <option value="NONE">僅未綁方案</option>
+        <option value="ALL">全部客戶</option>
+        <option value="ANY">綁定方案</option>
+        <option value="NONE">未綁定</option>
       </select>
       <select id="search_cdc_status">
         <option value="ALL">全部狀態</option>
         <option value="ACTIVE" selected>ACTIVE（使用中）</option>
         <option value="INACTIVE">INACTIVE（停用）</option>
       </select>
-      <button type="button" class="btn-secondary" onclick="cdcResetSearch_()">重設</button>
+      <button type="button" class="btn-secondary" onclick="erpResetCurrentModule_()">重設</button>
     </div>
 
     <br>
@@ -73,13 +73,6 @@
         <select id="cdc_dealer_rebate_settle_mode">
           <option value="CREDIT_NOTE">折讓（扣當月應收）</option>
           <option value="CARRY_FORWARD">次月結算折抵</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>排除回饋</label>
-        <select id="cdc_dealer_rebate_excluded">
-          <option value="false">否（參加）</option>
-          <option value="true">是（不參加）</option>
         </select>
       </div>
     </div>

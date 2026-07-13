@@ -1,4 +1,4 @@
-﻿/*********************************
+/*********************************
  * Import Module v3（API 版）
  * 海外 Supplier → 報關 → Import Receipt（含報單資料） → Lot
  *********************************/
@@ -37,6 +37,12 @@ function importDocStatusZh_(status){
   if(s === "PARTIAL") return "部分收貨";
   if(s === "CANCELLED") return "已作廢";
   return (typeof termLabelZhOnly === "function" ? termLabelZhOnly(s) : s) || s;
+}
+
+/** 列表「收貨」：僅 OPEN／PARTIAL 可點 */
+function importListCanReceive_(status){
+  const st = String(status || "").trim().toUpperCase();
+  return st !== "CANCELLED" && st !== "CLOSED";
 }
 
 function impSetV_(id, v){
@@ -903,10 +909,7 @@ async function saveImportDocument(triggerEl){
       items_json: JSON.stringify(items)
     }, { method: "POST" });
 
-    // 成功後：視為已寫入，鎖住 ID，並清掉本機草稿
-    importEditing = true;
-    const idEl = document.getElementById("import_doc_id");
-    if(idEl) idEl.disabled = true;
+    // 成功後：清掉本機草稿，再以後端資料重載（略過同列收合）
     clearImportLocalDraft_();
     saveImportLocalDraft_();
 
@@ -917,8 +920,7 @@ async function saveImportDocument(triggerEl){
     }
 
     await renderImportDocuments();
-    // 建立/更新後：以後端資料重載，讓草稿列消失、狀態/項次一致
-    await loadImportDocument(doc.import_doc_id);
+    await loadImportDocument(doc.import_doc_id, { force: true });
     // 成功後：更新狀態快照
     importLoadedStatus_ = String((header?.status || doc.status || "OPEN") || "OPEN").toUpperCase();
     try{
@@ -1407,7 +1409,7 @@ async function cancelImportDocument(triggerEl){
 
     if(typeof invalidateCache === "function") invalidateCache("import_document");
     await renderImportDocuments();
-    await loadImportDocument(import_doc_id);
+    await loadImportDocument(import_doc_id, { force: true });
     showToast("報單已作廢（CANCELLED）");
   } catch(err){
     const msg = String(err && err.message != null ? err.message : err || "");
@@ -1423,7 +1425,7 @@ async function cancelImportDocument(triggerEl){
       try{
         if(typeof invalidateCache === "function") invalidateCache("import_document");
         await renderImportDocuments();
-        await loadImportDocument(import_doc_id);
+        await loadImportDocument(import_doc_id, { force: true });
         showToast("已重新載入最新資料，請確認後再操作", "warn", 6000);
         return;
       }catch(_eReload){
@@ -1439,11 +1441,15 @@ async function cancelImportDocument(triggerEl){
   }
 }
 
-async function loadImportDocument(importDocId){
+async function loadImportDocument(importDocId, options){
   const id = String(importDocId || "").trim().toUpperCase();
   if(!id) return;
   const curDoc = String(document.getElementById("import_doc_id")?.value || "").trim().toUpperCase();
-  if(importEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curDoc, id)){
+  const shouldToggle =
+    typeof erpTxnLoadShouldToggleClose_ === "function"
+      ? erpTxnLoadShouldToggleClose_(importEditing, curDoc, id, options)
+      : importEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curDoc, id);
+  if(shouldToggle){
     if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("import", curDoc, id, "importTableBody")) return;
   }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
     erpClearTxnListRowCollapsed_("import");
@@ -1502,7 +1508,10 @@ async function loadImportDocument(importDocId){
   document.getElementById("import_remark").value = doc.remark || "";
 
   // 只拉明細（報單主檔已用快取或 getOne）；產品名稱由產品主檔解析
-  const [allItems, products] = await Promise.all([getAll("import_item"), getAll("product").catch(() => [])]);
+  const [allItems, products] = await Promise.all([
+    getAll("import_item", { refresh: true }),
+    getAll("product").catch(() => [])
+  ]);
   const items = (allItems || []).filter(it => String(it.import_doc_id || "").trim().toUpperCase() === id);
   const prodList = Array.isArray(products) ? products : [];
   importProducts = prodList.filter(p => (p.status || "ACTIVE") === "ACTIVE");
@@ -1839,7 +1848,10 @@ async function renderImportDocuments(list=null){
     const open = typeof erpListRowOpenInRender_ === "function"
       ? erpListRowOpenInRender_("import", selId, docId.trim().toUpperCase())
       : selId === docId.trim().toUpperCase();
-    const btn = `<button class="btn-secondary" type="button" onclick="event.stopPropagation();gotoReceive('IMPORT','${safeDocId}')">收貨</button>`;
+    const canReceive = importListCanReceive_(st);
+    const btn = canReceive
+      ? `<button class="btn-secondary" type="button" onclick="event.stopPropagation();gotoReceive('IMPORT','${safeDocId}')">收貨</button>`
+      : `<button class="btn-secondary" type="button" disabled title="${st === "CANCELLED" ? "已作廢，不可收貨" : "已收完，不可再收貨"}">收貨</button>`;
     const docLink = doc.document_link || "";
     const linkCell = docLink ? `<a href="${docLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()">文件</a>` : "";
     tbody.innerHTML += `

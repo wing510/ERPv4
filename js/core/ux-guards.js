@@ -377,7 +377,7 @@
       return "確定撤回「送加工（扣庫）」？\n系統會回沖投料扣庫，並刪除本加工單的投料明細。\n\n限制：若已有任何回收（未作廢）或投料 Lot 已被下游使用，會被阻擋。";
     }
     if (k === "confirm.proc.cancel_order") {
-      return "確定取消此加工單？系統會建立回沖庫存異動。";
+      return "確定作廢此加工單？系統會建立回沖庫存異動。";
     }
     if (k === "confirm.proc.add_output_allow_loss") {
       return (

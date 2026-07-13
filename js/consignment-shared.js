@@ -199,9 +199,9 @@ function ccBuildCaseSummaryHtml_(meta, opts) {
     '<div style="margin-top:6px;color:#475569;">' +
     amountLine +
     "</div>" +
-    (remark
-      ? '<div style="margin-top:6px;"><strong>備註</strong>：' + ccEsc_(remark) + "</div>"
-      : "") +
+    '<div style="margin-top:6px;"><strong>備註</strong>：' +
+    ccEsc_(remark || "—") +
+    "</div>" +
     financeHtml
   );
 }
@@ -242,11 +242,13 @@ function ccGoReturn_(caseId) {
   navigate("consignment_return");
 }
 
-async function ccLoadMasterData_() {
+async function ccLoadMasterData_(options) {
+  const refresh = !!(options && options.refresh === true);
+  const getOpts = refresh ? { refresh: true } : undefined;
   const [cust, prod, wh] = await Promise.all([
-    getAll("customer").catch(function () { return []; }),
-    getAll("product").catch(function () { return []; }),
-    getAll("warehouse").catch(function () { return []; })
+    getAll("customer", getOpts).catch(function () { return []; }),
+    getAll("product", getOpts).catch(function () { return []; }),
+    getAll("warehouse", getOpts).catch(function () { return []; })
   ]);
   ccCustomers_ = {};
   (cust || []).forEach(function (c) {
@@ -405,6 +407,10 @@ async function ccCreateCase_(payload) {
   return callAPI(Object.assign({ action: "create_consignment_case_bundle" }, payload), { method: "POST" });
 }
 
+async function ccDeleteEmptyCase_(payload) {
+  return callAPI(Object.assign({ action: "delete_empty_consignment_case_bundle" }, payload), { method: "POST" });
+}
+
 async function ccPostSettlement_(payload, callOpts) {
   return callAPI(
     Object.assign({ action: "post_consignment_case_settlement_bundle" }, payload),
@@ -467,7 +473,7 @@ function ccFormatCumulativeDealerSettlementHtml_(ctx) {
     if (ctx.pending_price_rate != null) html += "（" + ctx.pending_price_rate + " 折）";
     html += "</div>";
   }
-  html += '<div style="color:#64748b;margin-top:4px;">出貨已帶入經銷價；無促銷品項結算單價＝經銷價（不再乘等級折數）</div></div>';
+  html += "</div>";
   return html;
 }
 
@@ -860,23 +866,150 @@ function ccPeriodYmFromYmd_(ymd) {
   return "";
 }
 
-async function ccLoadLockedDealerRebateMonths_(customerId) {
+/** 月結統計已過帳時阻擋新增請款；回傳 false 表示不可繼續 */
+async function ccAssertNoPostedMonthlyStatForBilling_(customerId, dateYmd) {
   const cid = String(customerId || "").trim().toUpperCase();
-  if (!cid) return new Set();
+  const periodYm = ccPeriodYmFromYmd_(dateYmd);
+  if (!cid || !periodYm || typeof callAPI !== "function" || typeof showToast !== "function") return true;
   try {
-    const r = await callAPI({ action: "list_commercial_dealer_rebate_enriched" }, { method: "GET" });
-    const rows = Array.isArray(r?.data) ? r.data : [];
-    const set = new Set();
-    rows.forEach(function (row) {
-      if (String(row.customer_id || "").trim().toUpperCase() !== cid) return;
-      if (String(row.status || "").trim().toUpperCase() === "VOID") return;
-      const ym = String(row.period_ym || "").trim();
-      if (ym) set.add(ym);
+    const statR = await callAPI(
+      {
+        action: "list_commercial_dealer_monthly_stat_period_summary",
+        period_ym: periodYm,
+        customer_ids: cid
+      },
+      { method: "GET", silent: true }
+    );
+    const row = (statR?.data || []).find(function (x) {
+      return String(x.customer_id || "").trim().toUpperCase() === cid;
     });
-    return set;
+    if (!row || String(row.status || "").trim().toUpperCase() !== "POSTED") return true;
+    const msg =
+      "此客戶 " +
+      periodYm +
+      " 月結統計已過帳，不建議直接新增請款。\n請先至 FINANCE 財務 → 月結統計作廢後方可補單。";
+    showToast(msg, "error", 8000);
+    return false;
   } catch (_e) {
-    return new Set();
+    return true;
   }
+}
+
+/** @deprecated 改由 ccAssertNoPostedMonthlyStatForBilling_ 於提交前阻擋 */
+async function ccMaybeWarnMonthlyStatStale_(customerId, dateYmd) {
+  void customerId;
+  void dateYmd;
+}
+
+async function ccLoadDealerSettlementVoidLocks_(customerId) {
+  const cid = String(customerId || "").trim().toUpperCase();
+  if (!cid) return { rebates: [], stats: [] };
+  try {
+    const [rebateR, statR] = await Promise.all([
+      callAPI({ action: "list_commercial_dealer_rebate_enriched", customer_id: cid }, { method: "GET" }),
+      callAPI({ action: "list_commercial_dealer_monthly_stat_enriched", customer_id: cid }, { method: "GET" })
+    ]);
+    const rebates = (Array.isArray(rebateR?.data) ? rebateR.data : [])
+      .filter(function (row) {
+        return (
+          String(row.customer_id || "").trim().toUpperCase() === cid &&
+          String(row.status || "").trim().toUpperCase() !== "VOID"
+        );
+      })
+      .map(function (row) {
+        return {
+          period_ym: String(row.period_ym || "").trim(),
+          created_at: row.created_at,
+          rebate_id: String(row.rebate_id || "").trim()
+        };
+      });
+    const stats = (Array.isArray(statR?.data) ? statR.data : [])
+      .filter(function (row) {
+        return (
+          String(row.customer_id || "").trim().toUpperCase() === cid &&
+          String(row.status || "").trim().toUpperCase() !== "VOID"
+        );
+      })
+      .map(function (row) {
+        return {
+          period_ym: String(row.period_ym || "").trim(),
+          created_at: row.created_at,
+          stat_id: String(row.stat_id || "").trim()
+        };
+      });
+    return { rebates: rebates, stats: stats };
+  } catch (_e) {
+    return { rebates: [], stats: [] };
+  }
+}
+
+/** @deprecated 請改用 ccLoadDealerSettlementVoidLocks_ */
+async function ccLoadLockedDealerRebateMonths_(customerId) {
+  const locks = await ccLoadDealerSettlementVoidLocks_(customerId);
+  const set = new Set();
+  (locks.rebates || []).forEach(function (row) {
+    if (row.period_ym) set.add(row.period_ym);
+  });
+  return set;
+}
+
+function ccSettlementCreatedMs_(row) {
+  const raw = String(row?.createdAt || row?.created_at || "").trim();
+  if (!raw) return NaN;
+  const t = new Date(raw).getTime();
+  return Number.isNaN(t) ? NaN : t;
+}
+
+function ccDocLockCreatedMs_(doc) {
+  const raw = String(doc?.created_at || "").trim();
+  if (!raw) return NaN;
+  const t = new Date(raw).getTime();
+  return Number.isNaN(t) ? NaN : t;
+}
+
+function ccSettlementVoidLockReason_(row, voidLocks) {
+  const locks = voidLocks || {};
+  const periodYm = ccPeriodYmFromYmd_(row.date);
+  if (!periodYm) return null;
+  const stlMs = ccSettlementCreatedMs_(row);
+  if (!stlMs || Number.isNaN(stlMs)) {
+    return {
+      title: "無法確認結算建立時間，暫不允許作廢"
+    };
+  }
+
+  const rebates = locks.rebates || [];
+  for (let i = 0; i < rebates.length; i++) {
+    const r = rebates[i];
+    if (String(r.period_ym || "").trim() !== periodYm) continue;
+    const lockMs = ccDocLockCreatedMs_(r);
+    if (!lockMs || Number.isNaN(lockMs) || stlMs < lockMs) {
+      return {
+        type: "rebate",
+        title:
+          "此筆結算已計入月結回饋（" +
+          (r.rebate_id || periodYm) +
+          "），請先到月結回饋作廢後再作廢結算"
+      };
+    }
+  }
+
+  const stats = locks.stats || [];
+  for (let i = 0; i < stats.length; i++) {
+    const s = stats[i];
+    if (String(s.period_ym || "").trim() !== periodYm) continue;
+    const lockMs = ccDocLockCreatedMs_(s);
+    if (!lockMs || Number.isNaN(lockMs) || stlMs < lockMs) {
+      return {
+        type: "stat",
+        title:
+          "此筆結算已計入月結統計（" +
+          (s.stat_id || periodYm) +
+          "），請先到月結統計作廢後再作廢結算"
+      };
+    }
+  }
+  return null;
 }
 
 function ccRenderHistoryRows_(settlements, returns, opts) {
@@ -1200,6 +1333,35 @@ function ccDetectPromoColFlagsFromActive_(activePack) {
   return flags;
 }
 
+/** 依品項實際套用方案（含多方案衝突時的手選）決定預覽欄位 */
+function ccDetectPromoColFlagsWithOverrides_(activePack, promoOverrides) {
+  const flags = { free: false, discount: false, fixedPrice: false };
+  const candidates = ccBuildPromoCandidatesFromActive_(activePack);
+  const productIds = {};
+  (candidates || []).forEach(function (c) {
+    productIds[String(c.product_id || "").trim().toUpperCase()] = 1;
+  });
+  Object.keys(productIds).forEach(function (pid) {
+    const promo = ccPickPromoForProduct_(pid, candidates, promoOverrides || {});
+    if (!promo) return;
+    const t = String(promo.promo_type || "").trim().toUpperCase();
+    if (t === "BUY_N_GET_M") flags.free = true;
+    if (t === "DISCOUNT_PCT") flags.discount = true;
+    if (t === "FIXED_PRICE") flags.fixedPrice = true;
+  });
+  return flags;
+}
+
+function ccMergePromoColFlags_(a, b) {
+  const x = a || {};
+  const y = b || {};
+  return {
+    free: !!(x.free || y.free),
+    discount: !!(x.discount || y.discount),
+    fixedPrice: !!(x.fixedPrice || y.fixedPrice)
+  };
+}
+
 function ccSettlementPromoCols_(it) {
   const dash = "—";
   const type = String(it.promo_type || "").trim().toUpperCase();
@@ -1280,9 +1442,9 @@ function ccFormatSettlementItemDetailHtml_(items) {
     '<table class="data-table" style="margin:8px 0;font-size:13px;background:#fff;">' +
     "<thead><tr>" +
     "<th>產品</th><th>加工廠 Lot</th><th>結算量</th>";
-  if (promoFlags.free) html += "<th>贈送</th>";
   if (promoFlags.discount) html += "<th>折扣%</th>";
   if (promoFlags.fixedPrice) html += "<th>促銷單價</th>";
+  if (promoFlags.free) html += "<th>贈送</th>";
   html += "<th>計價量</th><th>單位</th><th>單價</th><th>金額</th></tr></thead><tbody>";
   rows.forEach(function (it) {
     const q = ccFormatSettlementItemQty_(it);
@@ -1303,9 +1465,9 @@ function ccFormatSettlementItemDetailHtml_(items) {
       "<td>" +
       ccEsc_(String(q.settle)) +
       "</td>";
-    if (promoFlags.free) html += "<td>" + ccEsc_(promoCols.free) + "</td>";
     if (promoFlags.discount) html += "<td>" + ccEsc_(promoCols.discount) + "</td>";
     if (promoFlags.fixedPrice) html += "<td>" + ccEsc_(promoCols.fixedPrice) + "</td>";
+    if (promoFlags.free) html += "<td>" + ccEsc_(promoCols.free) + "</td>";
     html +=
       "<td>" +
       ccEsc_(String(q.billable)) +
@@ -1474,15 +1636,12 @@ function ccRenderHistoryTableHtml_(settlements, returns, tbodyId, opts) {
           );
         }
         if (row.kind === "settle" && row.status === "POSTED" && ccCanOperate_()) {
-          const locked = o.lockedRebatePeriods;
-          const periodYm = ccPeriodYmFromYmd_(row.date);
-          const rebateLocked =
-            locked &&
-            periodYm &&
-            (locked instanceof Set ? locked.has(periodYm) : locked[periodYm]);
-          if (rebateLocked) {
+          const lockReason = ccSettlementVoidLockReason_(row, o.dealerVoidLocks);
+          if (lockReason) {
             actions.push(
-              '<button class="btn-secondary btn-sm" type="button" disabled title="此月份已產生月結回饋，請先到 Rebate 月結回饋作廢該筆後，再作廢結算">作廢</button>'
+              '<button class="btn-secondary btn-sm" type="button" disabled title="' +
+                ccEsc_(lockReason.title) +
+                '">作廢</button>'
             );
           } else {
           actions.push(

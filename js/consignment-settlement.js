@@ -29,8 +29,13 @@ function ccApplyStlPoolPromoColVisibility_(flags) {
   table.classList.toggle("cc-stl-show-fixed", !!f.fixedPrice);
 }
 
-function ccRefreshStlPoolPromoColVisibility_() {
-  ccApplyStlPoolPromoColVisibility_(ccDetectPromoColFlagsFromActive_(ccStlActivePromo_));
+function ccRefreshStlPoolPromoColVisibility_(previewLines) {
+  const flags = ccDetectPromoColFlagsWithOverrides_(ccStlActivePromo_, ccStlPromoOverrides_);
+  if (previewLines && previewLines.length) {
+    ccApplyStlPoolPromoColVisibility_(ccMergePromoColFlags_(flags, ccDetectSettlementPromoColFlags_(previewLines)));
+  } else {
+    ccApplyStlPoolPromoColVisibility_(flags);
+  }
 }
 
 function ccApplySettlementPermissions_() {
@@ -101,6 +106,7 @@ function ccSettlementGetPreview_() {
 
 function ccSettlementUpdatePreviewCells_() {
   const preview = ccSettlementGetPreview_();
+  ccRefreshStlPoolPromoColVisibility_(preview.lines || []);
   const map = {};
   (preview.lines || []).forEach(function (ln) {
     map[String(ln.pool_item_id || "").trim().toUpperCase()] = ln;
@@ -136,7 +142,23 @@ function ccSettlementOnPromoOverrideChange_() {
     const sid = String(sel.value || "").trim().toUpperCase();
     if (pid && sid) ccStlPromoOverrides_[pid] = sid;
   });
+  ccRefreshSettlementPoolPromoHints_();
   ccSettlementUpdatePreviewCells_();
+}
+
+function ccRefreshSettlementPoolPromoHints_() {
+  document.querySelectorAll("#cc_stl_pool_tbody tr[data-pool-id]").forEach(function (tr) {
+    const pid = String(tr.getAttribute("data-pool-id") || "").trim().toUpperCase();
+    const poolItem = (ccStlPoolItems_ || []).find(function (it) {
+      return String(it.pool_item_id || "").trim().toUpperCase() === pid;
+    });
+    if (!poolItem) return;
+    const productCell = tr.querySelector("td");
+    if (!productCell) return;
+    const base = ccFormatPoolProductLotCell_(poolItem);
+    const promoHint = ccPromoLabelForPoolRow_(poolItem);
+    productCell.innerHTML = base + promoHint;
+  });
 }
 
 function ccRenderSettlementConflictPicks_() {
@@ -154,11 +176,14 @@ function ccRenderSettlementConflictPicks_() {
     .map(function (pid) {
       const opts = conflicts[pid] || [];
       const pname = ccProductName_(pid);
+      const defaultPick = ccPickPromoForProduct_(pid, opts, {});
+      const defaultSid = String(defaultPick?.scheme_id || opts[0]?.scheme_id || "").trim().toUpperCase();
       const options = opts
         .map(function (c) {
           const sid = String(c.scheme_id || "").trim().toUpperCase();
           const label = String(c.scheme_name || sid) + "（" + (CC_PROMO_TYPE_LABELS_[c.promo_type] || c.promo_type) + "）";
-          return '<option value="' + ccEsc_(sid) + '">' + ccEsc_(label) + "</option>";
+          const selected = sid === defaultSid ? " selected" : "";
+          return '<option value="' + ccEsc_(sid) + '"' + selected + ">" + ccEsc_(label) + "</option>";
         })
         .join("");
       return (
@@ -180,10 +205,8 @@ function ccRenderSettlementConflictPicks_() {
 
 function ccPromoLabelForPoolRow_(poolItem) {
   const pid = String(poolItem.product_id || "").trim().toUpperCase();
-  const promos = ccStlActivePromo_?.promos || [];
-  const hit = promos.find(function (p) {
-    return String(p.product_id || "").trim().toUpperCase() === pid;
-  });
+  const candidates = ccBuildPromoCandidatesFromActive_(ccStlActivePromo_);
+  const hit = ccPickPromoForProduct_(pid, candidates, ccStlPromoOverrides_);
   if (!hit) return "";
   const type = CC_PROMO_TYPE_LABELS_[String(hit.promo_type || "").toUpperCase()] || hit.promo_type;
   return '<div class="cc-pool-stack-sub">促銷：' + ccEsc_(String(hit.scheme_name || hit.scheme_id) + " · " + type) + "</div>";
@@ -243,9 +266,9 @@ function ccRenderSettlementPool_() {
         '" min="0" max="' +
         remStr +
         '" step="0.001" value="0" style="width:100px;" oninput="ccSettlementOnQtyInput_(this)"></td>' +
-        '<td class="cc-stl-free cc-stl-col-free text-muted">—</td>' +
         '<td class="cc-stl-discount cc-stl-col-discount text-muted">—</td>' +
         '<td class="cc-stl-fixed cc-stl-col-fixed text-muted">—</td>' +
+        '<td class="cc-stl-free cc-stl-col-free text-muted">—</td>' +
         '<td class="cc-stl-billable text-muted">—</td>' +
         '<td class="cc-stl-subtotal text-muted">—</td>' +
         "</tr>"
@@ -316,7 +339,7 @@ async function ccSettlementLoadCase_(caseId) {
   try {
     ccStlCaseMeta_ = (await ccEnsureEnrichedCase_(id, { force: true })) || null;
     const customerId = String(ccStlCaseMeta_?.customer_id || "").trim().toUpperCase();
-    const lockedRebatePeriods = await ccLoadLockedDealerRebateMonths_(customerId);
+    const dealerVoidLocks = await ccLoadDealerSettlementVoidLocks_(customerId);
     const poolAndStl = await Promise.all([ccListPool_(id), ccListSettlements_(id), ccSettlementLoadPromos_(id)]);
     ccStlPoolItems_ = poolAndStl[0] || [];
     ccRenderSettlementSummary_();
@@ -324,7 +347,7 @@ async function ccSettlementLoadCase_(caseId) {
     ccRenderHistoryTableHtml_(poolAndStl[1], [], "cc_stl_history_tbody", {
       kindFilter: "settle",
       settleDetail: true,
-      lockedRebatePeriods: lockedRebatePeriods
+      dealerVoidLocks: dealerVoidLocks
     });
     ccApplySettlementPermissions_();
   } catch (_e) {
@@ -450,13 +473,19 @@ async function ccSettlementSubmit_(triggerEl) {
     return;
   }
 
+  const custId = String(ccStlCaseMeta_?.customer_id || "").trim().toUpperCase();
+  if (custId && typeof ccAssertNoPostedMonthlyStatForBilling_ === "function") {
+    const okBill = await ccAssertNoPostedMonthlyStatForBilling_(custId, settlementDate);
+    if (!okBill) return;
+  }
+
   const payloadItems = items.map(function (it) {
     return { pool_item_id: it.pool_item_id, settle_qty: it.settle_qty };
   });
   const promoOverrides =
     Object.keys(ccStlPromoOverrides_ || {}).length > 0 ? JSON.stringify(ccStlPromoOverrides_) : "";
 
-  if (triggerEl) triggerEl.disabled = true;
+  if (typeof showSaveHint === "function") showSaveHint(triggerEl || document.getElementById("cc_stl_submit_btn"));
   try {
     const serverPreview = await ccPreviewSettlementPromo_(
       {
@@ -517,6 +546,7 @@ async function ccSettlementSubmit_(triggerEl) {
       } catch (_reloadErr) {}
     }
   } finally {
+    if (typeof hideSaveHint === "function") hideSaveHint();
     ccApplySettlementPermissions_();
   }
 }
@@ -552,10 +582,14 @@ function ccNavDealerRebate_() {
   navigate("dealer_rebate");
   if (!custId) return;
   setTimeout(function () {
-    const sel = document.getElementById("dr_rebate_customer_id");
-    if (sel) {
-      sel.value = custId;
-      if (typeof drRebateOnCustomerChange_ === "function") drRebateOnCustomerChange_();
+    if (typeof drStatCustSelect_ === "function") {
+      drStatCustSelect_(custId);
+    } else {
+      const sel = document.getElementById("dr_rebate_customer_id");
+      if (sel) {
+        sel.value = custId;
+        if (typeof drRebateOnCustomerChange_ === "function") drRebateOnCustomerChange_();
+      }
     }
   }, 400);
 }

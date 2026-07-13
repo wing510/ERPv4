@@ -713,7 +713,8 @@ function formatTraceTxReadable_(bundle, extraBundles){
     const hasSO = !!(so && String(so.so_id || "").trim());
     const soType = String(so && so.so_type || "").trim().toUpperCase();
     const soTypeZhMap = {
-      NORMAL: "正常訂單",
+      NORMAL: "一般買斷",
+      CONSIGNMENT: "寄賣補貨",
       SAMPLE: "樣品",
       GIFT: "贈品",
       PR: "公關",
@@ -1418,7 +1419,7 @@ function traceFormatTxValue_(key, val, row, tableKey){
   if(k === "relation_type") return traceRelationTypeZh_(v) || v;
   if(k === "ref_type" || k === "parent_ref_type" || k === "reship_ref_type") return traceRefTypeZh_(v) || v;
   if(k === "so_type"){
-    const m = { NORMAL: "正常訂單", SAMPLE: "樣品", GIFT: "贈品", PR: "公關", RESHIP: "補寄", OTHER: "其他" };
+    const m = { NORMAL: "一般買斷", CONSIGNMENT: "寄賣補貨", SAMPLE: "樣品", GIFT: "贈品", PR: "公關", RESHIP: "補寄", OTHER: "其他" };
     return m[v.toUpperCase()] || traceStatusZh_(v) || v;
   }
   if(k === "status"){
@@ -1859,7 +1860,8 @@ async function renderTraceLotTxLinks_(rootLotId){
 
   // 若含出貨：補上銷售用途（so_type）中文（NORMAL/RESHIP/…）
   const soTypeZhMap = {
-    NORMAL: "正常訂單",
+    NORMAL: "一般買斷",
+    CONSIGNMENT: "寄賣補貨",
     SAMPLE: "樣品",
     GIFT: "贈品",
     PR: "公關",

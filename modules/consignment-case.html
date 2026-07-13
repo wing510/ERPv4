@@ -1,26 +1,23 @@
-<!-- ===== Case 案件管理 ===== -->
+<!-- ===== Case 寄賣客戶 ===== -->
 <div class="card">
   <div class="card-header card-header-flex">
     <span>
-      Case 案件管理
+      Case 寄賣客戶
       <button type="button" class="btn-sheet" onclick="openSheetLink('consignment_case')" title="寄賣案件">Sheet</button>
       <span id="ccCaseStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">手動開案 → 出貨掛案累加品項池 → 結算／收回</span>
     </span>
     <span data-help="consignmentCaseMain"></span>
   </div>
   <div class="card-body">
-    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 16px;margin-bottom:12px;">
-      <div class="form-group" style="margin:0;min-width:160px;">
-        <select id="cc_filter_status" onchange="ccReloadCaseList_()" aria-label="狀態篩選">
-          <option value="OPEN">進行中</option>
-          <option value="ALL">全部</option>
-          <option value="CLOSED">已結案</option>
-        </select>
-      </div>
-      <div class="button-group" style="margin-top:0;width:auto;flex-wrap:nowrap;">
-        <button class="btn-secondary" type="button" onclick="ccReloadCaseList_()">重新整理</button>
-        <button class="btn-secondary" id="cc_toggle_new_case_btn" type="button" onclick="ccToggleNewCasePanel_()">開新寄賣案</button>
-      </div>
+    <div class="search-toolbar" style="margin-bottom:12px;">
+      <input type="text" id="search_cc_case_keyword" class="search-keyword" placeholder="搜尋案件ID或客戶" aria-label="搜尋案件ID或客戶">
+      <select id="cc_filter_status" onchange="ccReloadCaseList_()" aria-label="狀態篩選">
+        <option value="OPEN">進行中</option>
+        <option value="ALL">全部</option>
+        <option value="CLOSED">已結案</option>
+      </select>
+      <button class="btn-secondary" type="button" onclick="erpResetCurrentModule_()">重設</button>
+      <button class="btn-secondary" id="cc_toggle_new_case_btn" type="button" onclick="ccToggleNewCasePanel_()">開新寄賣案</button>
     </div>
 
     <div id="cc_new_case_panel" style="display:none;margin-bottom:16px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
@@ -37,12 +34,12 @@
           <label>開案日 *</label>
           <input type="date" id="cc_new_open_date">
         </div>
-        <div class="form-group" style="grid-column:span 2;">
+        <div class="form-group">
           <label>備註</label>
           <input type="text" id="cc_new_remark">
         </div>
-        <div class="button-group" style="margin-top:0;grid-column:span 1;align-self:end;flex-wrap:nowrap;">
-          <button class="btn-primary" id="cc_create_btn" type="button" onclick="ccCreateCaseSubmit_(this)">建立寄賣案</button>
+        <div class="button-group" style="margin-top:0;grid-column:span 2;align-self:end;flex-wrap:nowrap;">
+          <button class="btn-primary" id="cc_create_btn" type="button" onclick="ccCreateCaseSubmit_(this)">建立</button>
           <button class="btn-secondary" type="button" onclick="ccClearNewCaseForm_()">清空</button>
         </div>
       </div>
@@ -50,9 +47,18 @@
 
     <style>
       .cc-case-row:hover { background: #f1f5f9; }
+      .cc-case-list-table th.cc-col-month-settle,
+      .cc-case-list-table td.cc-col-month-settle{
+        text-align:center;
+      }
+      .cc-case-list-table th.cc-col-settle-outstanding,
+      .cc-case-list-table td.cc-col-settle-outstanding{
+        text-align:right;
+        white-space:nowrap;
+      }
     </style>
     <div class="table-wrap">
-      <table class="data-table">
+      <table class="data-table cc-case-list-table">
         <thead>
           <tr>
             <th>案件ID</th>
@@ -60,11 +66,12 @@
             <th>開案日</th>
             <th>狀態</th>
             <th>已收/預估應收(%)</th>
-            <th>備註</th>
+            <th class="cc-col-month-settle">本月結算</th>
+            <th class="cc-col-settle-outstanding">結算未收金額</th>
           </tr>
         </thead>
         <tbody id="cc_case_tbody">
-          <tr><td colspan="6" class="text-muted">載入中…</td></tr>
+          <tr><td colspan="7" class="text-muted">載入中…</td></tr>
         </tbody>
       </table>
     </div>
@@ -77,15 +84,28 @@
     <span data-help="consignmentCaseDetail"></span>
   </div>
   <div class="card-body">
-    <div id="cc_summary_box" style="margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;line-height:1.6;"></div>
-
-    <div class="button-group" style="margin-bottom:16px;">
-      <button class="btn-secondary" type="button" id="cc_btn_go_settle" onclick="ccGoSettlementFromDetail_()">結算</button>
-      <button class="btn-secondary" type="button" id="cc_btn_go_return" onclick="ccGoReturnFromDetail_()">收回</button>
+    <div id="cc_summary_box" style="margin-bottom:12px;padding:12px;background:#f8fafc;border-radius:8px;font-size:14px;line-height:1.6;"></div>
+    <div class="button-group" id="cc_remark_action_row" style="margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+      <button class="btn-secondary" type="button" id="cc_btn_go_settle" onclick="ccGoSettlementFromDetail_()">前往結算</button>
+      <button class="btn-secondary" type="button" id="cc_btn_go_return" onclick="ccGoReturnFromDetail_()">前往收回</button>
+      <button type="button" class="btn-secondary" id="cc_edit_remark_btn" onclick="ccOpenRemarkEdit_()">編輯備註</button>
+      <button type="button" class="btn-secondary" id="cc_save_remark_btn" style="display:none;" onclick="ccSaveCaseRemark_()">儲存備註</button>
+      <button type="button" class="btn-secondary" id="cc_cancel_remark_btn" style="display:none;" onclick="ccCancelRemarkEdit_()">取消</button>
+      <button type="button" class="btn-secondary" id="cc_delete_empty_case_btn" style="display:none;" onclick="ccDeleteEmptyCaseSubmit_()">刪除空案</button>
+      <input type="text" id="cc_detail_remark" class="cc-detail-remark-input" style="display:none;" aria-label="備註">
     </div>
 
     <h4 style="margin:0 0 10px 0;">品項池</h4>
     <style>
+      #cc_remark_action_row .cc-detail-remark-input{
+        flex:1 1 200px;
+        min-width:200px;
+        width:auto;
+        max-width:none;
+        height:36px;
+        box-sizing:border-box;
+        margin:0;
+      }
       .cc-pool-stack-cell{ line-height:1.35; min-width:0; }
       .cc-pool-stack-main{ line-height:1.25; }
       .cc-pool-stack-sub{ font-size:12px; color:#64748b; margin-top:2px; }

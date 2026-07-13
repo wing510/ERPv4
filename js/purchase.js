@@ -1,4 +1,4 @@
-﻿/*********************************
+/*********************************
  * Purchase Orders Module v2 (API 版)
  * STEP 1：PO 不產生庫存
  *********************************/
@@ -47,6 +47,12 @@ function poNormPoStatus_(raw){
 function poIsTerminalStatus_(){
   const st = poNormPoStatus_(poLoadedStatus_);
   return st === "CLOSED" || st === "CANCELLED";
+}
+
+/** 列表「收貨」：僅 OPEN／PARTIAL 可點 */
+function poListCanReceive_(status){
+  const st = poNormPoStatus_(status);
+  return st !== "CANCELLED" && st !== "CLOSED";
 }
 
 /** 有收貨紀錄，或主檔已結案／作廢：不可改結構欄位與明細結構（備註除外） */
@@ -1026,7 +1032,7 @@ async function createPurchaseOrder(triggerEl){
   }
 
   await renderPurchaseOrders();
-  resetPOForm();
+  await loadPurchaseOrder(po_id, { force: true });
   showToast("採購單已建立");
   } catch (err) {
     const msg = String(err && err.message != null ? err.message : err || "").trim();
@@ -1035,11 +1041,15 @@ async function createPurchaseOrder(triggerEl){
   } finally { hideSaveHint(); }
 }
 
-async function loadPurchaseOrder(poId){
+async function loadPurchaseOrder(poId, options){
   const id = String(poId || "").trim().toUpperCase();
   if(!id) return;
   const curPo = String(document.getElementById("po_id")?.value || "").trim().toUpperCase();
-  if(poEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curPo, id)){
+  const shouldToggle =
+    typeof erpTxnLoadShouldToggleClose_ === "function"
+      ? erpTxnLoadShouldToggleClose_(poEditing, curPo, id, options)
+      : poEditing && typeof erpListRowToggleClose_ === "function" && erpListRowToggleClose_(curPo, id);
+  if(shouldToggle){
     if(typeof erpTryToggleCloseTxnListRow_ === "function" && erpTryToggleCloseTxnListRow_("purchase", curPo, id, "poTableBody")) return;
   }else if(typeof erpClearTxnListRowCollapsed_ === "function"){
     erpClearTxnListRowCollapsed_("purchase");
@@ -1181,7 +1191,10 @@ async function renderPurchaseOrders(list=null){
     const open = typeof erpListRowOpenInRender_ === "function"
       ? erpListRowOpenInRender_("purchase", selId, poId.trim().toUpperCase())
       : selId === poId.trim().toUpperCase();
-    const btn = `<button class="btn-secondary" type="button" onclick="event.stopPropagation();gotoReceive('PO','${safePoId}')">收貨</button>`;
+    const canReceive = poListCanReceive_(po.status);
+    const btn = canReceive
+      ? `<button class="btn-secondary" type="button" onclick="event.stopPropagation();gotoReceive('PO','${safePoId}')">收貨</button>`
+      : `<button class="btn-secondary" type="button" disabled title="${poNormPoStatus_(po.status) === "CANCELLED" ? "已作廢，不可收貨" : "已收完，不可再收貨"}">收貨</button>`;
     const docLink = String(po.document_link || "").trim();
     const linkCell = docLink
       ? `<a href="${docLink.replace(/"/g, "&quot;")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">連結</a>`
@@ -1264,7 +1277,7 @@ async function cancelPurchaseOrder(triggerEl){
 
     if(typeof invalidateCache === "function") invalidateCache("purchase_order");
     await renderPurchaseOrders();
-    await loadPurchaseOrder(po_id);
+    await loadPurchaseOrder(po_id, { force: true });
     showToast("採購單已作廢（CANCELLED）");
   } catch(err){
     const msg = String(err && err.message != null ? err.message : err || "");
@@ -1280,7 +1293,7 @@ async function cancelPurchaseOrder(triggerEl){
       try{
         if(typeof invalidateCache === "function") invalidateCache("purchase_order");
         await renderPurchaseOrders();
-        await loadPurchaseOrder(po_id);
+        await loadPurchaseOrder(po_id, { force: true });
         showToast("已重新載入最新資料，請確認後再操作", "warn", 6000);
         return;
       }catch(_eReload){

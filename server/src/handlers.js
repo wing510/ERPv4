@@ -23,6 +23,8 @@ const {
 } = require("./bundles/ar");
 const {
   createConsignmentCaseBundle,
+  updateConsignmentCaseRemarkBundle,
+  deleteEmptyConsignmentCaseBundle,
   listConsignmentCaseEnriched_,
   listConsignmentCaseLite_,
   listConsignmentCasePoolByCase_,
@@ -51,9 +53,16 @@ const {
   postCommercialDealerRebateBundle,
   voidCommercialDealerRebateBundle,
   listCommercialDealerMonthlyStatEnriched_,
+  listCommercialDealerMonthlyStatPeriodSummary_,
   previewCommercialDealerMonthlyStatBundle,
   postCommercialDealerMonthlyStatBundle,
   voidCommercialDealerMonthlyStatBundle,
+  batchPostCommercialDealerMonthlyStatBundle,
+  voidCommercialDealerMonthlyCloseBundle,
+  listCommercialDealerLevelPostEnriched_,
+  previewCommercialDealerLevelBundle,
+  postCommercialDealerLevelBundle,
+  voidCommercialDealerLevelPostBundle,
   previewCumulativeDealerForSettlementBundle,
   syncCustomerCumulativeTierBundle
 } = require("./bundles/commercial-dealer");
@@ -1122,7 +1131,8 @@ const EXACT_LIST_ROUTES = {
   list_commercial_dealer_scheme_enriched: listCommercialDealerSchemeEnriched_,
   list_commercial_dealer_customer_enriched: listCommercialDealerCustomerEnriched_,
   list_commercial_dealer_rebate_enriched: listCommercialDealerRebateEnriched_,
-  list_commercial_dealer_monthly_stat_enriched: listCommercialDealerMonthlyStatEnriched_
+  list_commercial_dealer_monthly_stat_enriched: listCommercialDealerMonthlyStatEnriched_,
+  list_commercial_dealer_monthly_stat_period_summary: listCommercialDealerMonthlyStatPeriodSummary_
 };
 
 async function handleListAction(action, p) {
@@ -1161,6 +1171,8 @@ const ROUTES = Object.assign(
     settle_ar_bundle: settleArBundle,
     force_close_ar_bundle: forceCloseArBundle,
     create_consignment_case_bundle: createConsignmentCaseBundle,
+    update_consignment_case_remark_bundle: updateConsignmentCaseRemarkBundle,
+    delete_empty_consignment_case_bundle: deleteEmptyConsignmentCaseBundle,
     post_consignment_case_settlement_bundle: postConsignmentCaseSettlementBundle,
     cancel_consignment_case_settlement_bundle: cancelConsignmentCaseSettlementBundle,
     cancel_consignment_case_return_bundle: cancelConsignmentCaseReturnBundle,
@@ -1177,6 +1189,12 @@ const ROUTES = Object.assign(
     preview_commercial_dealer_monthly_stat_bundle: previewCommercialDealerMonthlyStatBundle,
     post_commercial_dealer_monthly_stat_bundle: postCommercialDealerMonthlyStatBundle,
     void_commercial_dealer_monthly_stat_bundle: voidCommercialDealerMonthlyStatBundle,
+    batch_post_commercial_dealer_monthly_stat_bundle: batchPostCommercialDealerMonthlyStatBundle,
+    void_commercial_dealer_monthly_close_bundle: voidCommercialDealerMonthlyCloseBundle,
+    list_commercial_dealer_level_post_enriched: listCommercialDealerLevelPostEnriched_,
+    preview_commercial_dealer_level_bundle: previewCommercialDealerLevelBundle,
+    post_commercial_dealer_level_bundle: postCommercialDealerLevelBundle,
+    void_commercial_dealer_level_post_bundle: voidCommercialDealerLevelPostBundle,
     preview_cumulative_dealer_for_settlement: previewCumulativeDealerForSettlementBundle,
     sync_customer_cumulative_tier: syncCustomerCumulativeTierBundle,
     register_einvoice_bundle: registerEinvoiceBundle,

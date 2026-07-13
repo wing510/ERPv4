@@ -45,8 +45,19 @@ function arDueReduction_(row) {
   return diff > 0.009 ? diff : 0;
 }
 
+/** 結算／出貨作廢後寫入的 AR（status 仍為 SETTLED，close_mode = VOID） */
+function arIsVoidedAr_(row) {
+  return String(row?.close_mode || "").trim().toUpperCase() === "VOID";
+}
+
+/** 客戶合計列／表尾加總：作廢列不計入 */
+function arCountsInTotals_(row) {
+  return !arIsVoidedAr_(row);
+}
+
 function arFmtDueCell_(row) {
   const due = Number(row?.amount_due || 0);
+  if (arIsVoidedAr_(row)) return arEsc_(arFmtMoney_(due));
   const reduced = arDueReduction_(row);
   if (!(reduced > 0)) return arEsc_(arFmtMoney_(due));
   return (
@@ -99,12 +110,15 @@ function arSummaryHeadline_(row) {
   const cname = arCustomerName_(row);
   const tag = arSourceTypeTag_(row);
   const currency = String(row?.currency || "USD").trim() || "USD";
-  const st = arStatusLabel_(row?.status);
-  const stTitle = arStatusTitle_(row?.status);
+  const st = arStatusLabelForRow_(row);
+  const stTitle = arIsVoidedAr_(row) ? "VOID" : arStatusTitle_(row?.status);
+  const stHtml = arIsVoidedAr_(row)
+    ? '<span style="color:#94a3b8;font-weight:600;">' + arEsc_(st) + "</span>"
+    : arEsc_(st);
   return (
     "<strong>客戶：</strong>" + arEsc_(cname) + "（" + arEsc_(tag) + "）| " +
     "<strong>幣別：</strong>" + arEsc_(currency) + " | " +
-    '<strong>狀態：</strong><span title="' + arEsc_(stTitle) + '">' + arEsc_(st) + "</span>"
+    '<strong>狀態：</strong><span title="' + arEsc_(stTitle) + '">' + stHtml + "</span>"
   );
 }
 
@@ -446,12 +460,26 @@ const AR_STATUS_LABELS_ = {
 
 const AR_CLOSE_MODE_LABELS_ = {
   NORMAL: "正常結清",
-  FORCE: "手動沖銷結案"
+  FORCE: "手動沖銷結案",
+  VOID: "來源已作廢"
 };
 
 function arStatusLabel_(status) {
   const s = String(status || "").trim().toUpperCase();
   return AR_STATUS_LABELS_[s] || String(status || "—");
+}
+
+function arStatusLabelForRow_(row) {
+  if (arIsVoidedAr_(row)) return "已作廢";
+  return arStatusLabel_(row?.status);
+}
+
+function arStatusCellHtml_(row) {
+  if (arIsVoidedAr_(row)) {
+    return '<span style="color:#94a3b8;font-weight:600;">已作廢</span>';
+  }
+  const st = String(row?.status || "").toUpperCase();
+  return arEsc_(arStatusLabel_(st));
 }
 
 function arCloseModeLabel_(mode) {
@@ -725,14 +753,16 @@ function arBuildCustomerGroups_(rows) {
       let worstReminder = null;
       let earliestDate = "";
       list.forEach(function (row) {
-        sumSystem += Number(row.amount_system || 0);
-        sumDue += Number(row.amount_due || 0);
-        sumRec += Number(row.amount_received || 0);
-        sumOut += arOutstanding_(row);
+        if (arCountsInTotals_(row)) {
+          sumSystem += Number(row.amount_system || 0);
+          sumDue += Number(row.amount_due || 0);
+          sumRec += Number(row.amount_received || 0);
+          sumOut += arOutstanding_(row);
+        }
         const st = String(row.status || "").toUpperCase();
         const od = Number(row.overdue_days || 0);
-        if (st !== "SETTLED" && od > maxOverdue) maxOverdue = od;
-        if (st !== "SETTLED" && od <= 0 && row.is_reminder) {
+        if (!arIsVoidedAr_(row) && st !== "SETTLED" && od > maxOverdue) maxOverdue = od;
+        if (!arIsVoidedAr_(row) && st !== "SETTLED" && od <= 0 && row.is_reminder) {
           const du = row.days_until_overdue;
           if (du != null && (worstReminder == null || du < worstReminder)) worstReminder = du;
         }
@@ -1839,6 +1869,7 @@ function arRenderListTotals_(rows) {
   let sumRec = 0;
   let sumOut = 0;
   list.forEach(function (row) {
+    if (!arCountsInTotals_(row)) return;
     sumSystem += Number(row.amount_system || 0);
     sumDue += Number(row.amount_due || 0);
     sumRec += Number(row.amount_received || 0);
@@ -1881,12 +1912,15 @@ function arRenderListRow_(row, opts) {
   const safeId = arId.replace(/'/g, "\\'");
   const isOpen = arId.toUpperCase() === String(arSelectedId_ || "").toUpperCase();
   const st = String(row.status || "").toUpperCase();
+  const voided = arIsVoidedAr_(row);
   const overdue = Number(row.overdue_days || 0);
   const isReminder = !!row.is_reminder;
   const daysUntil = row.days_until_overdue;
   let odTxt = "—";
   let extraStyle = nested ? "" : "";
-  if (overdue > 0 && st !== "SETTLED") {
+  if (voided) {
+    extraStyle = "";
+  } else if (overdue > 0 && st !== "SETTLED") {
     odTxt = '<span style="color:#b42318;font-weight:600;">逾期 ' + overdue + " 天</span>";
     if (!nested) extraStyle = ' style="background:#fef2f2;"';
   } else if (isReminder && st !== "SETTLED" && daysUntil != null) {
@@ -1896,6 +1930,7 @@ function arRenderListRow_(row, opts) {
   const srcCell = arFormatSourceListCell_(row);
   const openCls = isOpen ? " erp-list-row-open" : "";
   const nestedCls = nested ? " ar-list-child-row" : "";
+  const voidCls = voided ? " ar-list-void-row" : "";
   const idUp = arId.toUpperCase();
   const canPick = arCanOperate_() && arBatchEligibleRow_(row);
   const pickCell = canPick
@@ -1911,7 +1946,7 @@ function arRenderListRow_(row, opts) {
       : "";
   const custSrcCell = '<td class="logs-stack-cell ar-list-src-cell">' + srcCell + "</td>";
   return (
-    '<tr class="erp-list-row-selectable' + openCls + nestedCls + '"' + extraStyle +
+    '<tr class="erp-list-row-selectable' + openCls + nestedCls + voidCls + '"' + extraStyle +
     ' data-ar-id="' + arEsc_(arId) + '" onclick="arSelect_(\'' + safeId + "')\">" +
     pickCell +
     '<td class="logs-stack-cell ar-list-date-cell">' + arFormatArDateCell_(row) + "</td>" +
@@ -1920,7 +1955,7 @@ function arRenderListRow_(row, opts) {
     "<td class=\"logs-stack-cell\"><div class=\"logs-stack-main\">" + arFmtDueCell_(row) + "</div></td>" +
     "<td>" + arEsc_(arFmtMoney_(row.amount_received)) + "</td>" +
     "<td>" + arEsc_(arFmtMoney_(arOutstanding_(row))) + "</td>" +
-    '<td title="' + arEsc_(st) + '">' + arEsc_(arStatusLabel_(st)) + "</td>" +
+    '<td title="' + arEsc_(arIsVoidedAr_(row) ? "VOID" : st) + '">' + arStatusCellHtml_(row) + "</td>" +
     "<td>" + odTxt + "</td>" +
     "</tr>"
   );
@@ -2055,7 +2090,7 @@ async function arSelect_(arId) {
   if (box) {
     const reduced = arDueReduction_(row);
     let adjustNote = "";
-    if (reduced > 0) {
+    if (reduced > 0 && !arIsVoidedAr_(row)) {
       adjustNote =
         '<div style="color:#b45309;margin-top:6px;"><strong>已調降應收：</strong>' +
         arEsc_(arFmtMoney_(reduced)) +

@@ -1,10 +1,51 @@
-<!-- ===== Outsource 委外加工單（PROCESS） ===== -->
-<div class="card">
+<!-- ===== Outsource 委外加工單（列表） ===== -->
+<div class="card" id="proc_list_card">
   <div class="card-header card-header-flex">
     <span>
       Outsource 委外加工單
       <button type="button" class="btn-sheet" onclick="openSheetLink('process_order')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
-      <span id="procStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">加工流程：新單 — 填主檔後按下方「建立」</span>
+    </span>
+    <span data-help="outsourceList"></span>
+  </div>
+  <div class="card-body">
+    <div class="search-toolbar search-toolbar-master">
+      <input type="text" id="proc_search_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
+      <select id="proc_search_status">
+        <option value="">全部狀態</option>
+        <option value="OPEN">OPEN（開單中）</option>
+        <option value="POSTED">POSTED（已結案）</option>
+        <option value="CANCELLED">CANCELLED（已作廢）</option>
+      </select>
+      <button type="button" class="btn-secondary" onclick="erpResetCurrentModule_()">重設</button>
+    </div>
+
+    <br>
+
+    <div class="table-wrapper table-wrapper-master">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>加工單ID</th>
+            <th>類型</th>
+            <th>來源類別</th>
+            <th>加工廠</th>
+            <th>狀態</th>
+            <th>建立時間</th>
+          </tr>
+        </thead>
+        <tbody id="procTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 加工單明細（主檔） ===== -->
+<div class="card" id="proc_edit_card">
+  <div class="card-header card-header-flex">
+    <span>
+      加工單明細
+      <button type="button" class="btn-sheet" onclick="openSheetLink('process_order')" title="在 Google Sheets 開啟對應工作表">Sheet</button>
+      <span id="procStatusHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">加工流程：新單 — 填主檔後按「1) 建立加工單」</span>
       <span id="procInvHint" style="font-size:12px;color:#64748b;font-weight:500;margin-left:10px;">庫存狀態：未載入 — 請先建立或載入加工單</span>
     </span>
     <span style="display:flex;align-items:center;gap:10px;">
@@ -61,7 +102,7 @@
     <div class="button-group">
       <button class="btn-primary" id="proc_create_btn" onclick="createProcessOrderOnly(this)">1) 建立加工單</button>
       <button class="btn-secondary" id="proc_update_hdr_btn" onclick="updateProcessOrderHeader(this)">更新備註/預計到貨日期</button>
-      <button class="btn-secondary" id="proc_cancel_btn" onclick="cancelProcessOrder(this)">取消加工單（回沖）</button>
+      <button class="btn-secondary" id="proc_cancel_btn" onclick="cancelProcessOrder(this)">作廢加工單</button>
       <button class="btn-secondary" onclick="resetProcessForm()">清除</button>
       <button class="btn-secondary" onclick="openLogs('process_order', document.getElementById('proc_id')?.value || '', 'process')">Log</button>
     </div>
@@ -138,7 +179,7 @@
 
     <div class="button-group" style="margin-top:10px;">
       <button class="btn-primary" id="proc_issue_btn" onclick="issueProcessOrder()">2) 送加工（扣庫）</button>
-      <button class="btn-secondary" onclick="scrollToEditorTop()">回到上方</button>
+      <button class="btn-secondary" onclick="procScrollToForm_()">回到主檔</button>
     </div>
   </div>
 </div>
@@ -259,42 +300,7 @@
 
     <div class="button-group" style="margin-top:10px;">
       <button class="btn-primary" id="proc_receive_btn" onclick="receiveProcessOutput()">3) 回收加工品</button>
-      <button class="btn-secondary" onclick="scrollToEditorTop()">回到上方</button>
-    </div>
-  </div>
-</div>
-
-<!-- ===== 加工單列表 ===== -->
-<div class="card">
-  <div class="card-header card-header-flex">
-    <span>加工單列表</span>
-    <span data-help="outsourceList"></span>
-  </div>
-  <div class="card-body">
-    <div class="search-toolbar" style="margin-bottom:12px;">
-      <input type="text" id="proc_search_keyword" class="search-keyword" placeholder="搜尋關鍵字" aria-label="搜尋關鍵字">
-      <select id="proc_search_status">
-        <option value="">全部狀態</option>
-        <option value="OPEN">OPEN（開單中）</option>
-        <option value="POSTED">POSTED（已結案）</option>
-        <option value="CANCELLED">CANCELLED（已取消）</option>
-      </select>
-      <button type="button" class="btn-secondary" onclick="resetProcListSearch()">重設</button>
-    </div>
-    <div class="table-wrapper">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>加工單ID</th>
-            <th>類型</th>
-            <th>來源類別</th>
-            <th>加工廠</th>
-            <th>狀態</th>
-            <th>建立時間</th>
-          </tr>
-        </thead>
-        <tbody id="procTableBody"></tbody>
-      </table>
+      <button class="btn-secondary" onclick="procScrollToForm_()">回到主檔</button>
     </div>
   </div>
 </div>

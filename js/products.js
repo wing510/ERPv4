@@ -1,4 +1,4 @@
-﻿let editingMode = false;
+let editingMode = false;
 let productLoadInFlight_ = false;
 let productPendingLoadId_ = "";
 
@@ -323,7 +323,7 @@ async function createProduct(triggerEl){
   await createRecord("product", product);
 
   await renderProducts();
-  clearForm();
+  await loadProduct(id);
 
   showToast("產品建立成功");
   } finally { hideSaveHint(); }

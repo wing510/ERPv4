@@ -16,6 +16,7 @@ const { assertNoArForShipmentCancel_, voidArForCancelledShipment_ } = require(".
 const { createGeneralShipmentArWithCommercial_ } = require("./consignment-promo");
 const {
   assertNoLockedDealerRebateForShipmentVoid_,
+  assertNoPostedMonthlyStatForNewBilling_,
   reverseCumulativeOnGeneralShipmentVoid_,
   syncCustomerCumulativeFromSources_
 } = require("./commercial-dealer");
@@ -93,6 +94,52 @@ async function postShipmentBundle(p) {
   const items = itemsPack.data;
   if (!items.length) return fail("Shipment items required");
 
+  const plannedBySoItem = {};
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i] || {};
+    const lotId = String(it.lot_id || "").trim().toUpperCase();
+    if (!lotId) return fail("lot_id required (items[" + i + "])");
+    const q = Number(it.ship_qty || 0);
+    if (!(q > 0)) return fail("ship_qty must be > 0 (items[" + i + "])");
+    const itemSoId = String(it.so_id || soId || "").trim().toUpperCase();
+    const soItemId = String(it.so_item_id || "").trim().toUpperCase();
+    if (!itemSoId) return fail("so_id required (items[" + i + "])");
+    if (!soItemId) return fail("so_item_id required (items[" + i + "])");
+    if (itemSoId !== soId) return fail("items[" + i + "].so_id must match shipment so_id");
+    plannedBySoItem[soItemId] = (plannedBySoItem[soItemId] || 0) + q;
+  }
+
+  const plannedIds = Object.keys(plannedBySoItem);
+  for (let k = 0; k < plannedIds.length; k++) {
+    const soItemId = plannedIds[k];
+    const { data: soItemRow, error: soItemErr } = await sb
+      .from("sales_order_item")
+      .select("*")
+      .eq("so_item_id", soItemId)
+      .maybeSingle();
+    if (soItemErr) return fail(soItemErr.message || String(soItemErr));
+    if (!soItemRow) return fail("Sales order item not found: " + soItemId);
+    if (String(soItemRow.so_id || "").trim().toUpperCase() !== soId) {
+      return fail("so_item_id does not belong to sales order: " + soItemId);
+    }
+    const orderQty = Number(soItemRow.order_qty || 0);
+    const shippedQty = Number(soItemRow.shipped_qty || 0);
+    const planned = Number(plannedBySoItem[soItemId] || 0);
+    if (shippedQty + planned > orderQty + 1e-9) {
+      return fail(
+        "Ship qty exceeds sales order remaining (so_item_id=" +
+          soItemId +
+          ", order=" +
+          orderQty +
+          ", shipped=" +
+          shippedQty +
+          ", this_shipment=" +
+          planned +
+          ")"
+      );
+    }
+  }
+
   const { data: recipient, error: recipErr } = await sb
     .from("customer_recipient")
     .select("*")
@@ -110,6 +157,21 @@ async function postShipmentBundle(p) {
   const recipientAddress = String(p.recipient_address || recipient.address || "").trim();
   const recipientPhone = String(p.recipient_phone || recipient.phone || "").trim();
   if (!recipientName && !recipientNameEn) return fail("recipient_name or recipient_name_en required");
+
+  const { data: soTypeRow, error: soTypeErr } = await sb
+    .from("sales_order")
+    .select("so_type")
+    .eq("so_id", soId)
+    .maybeSingle();
+  if (soTypeErr) return fail(soTypeErr.message || String(soTypeErr));
+  const soTypePre = String(soTypeRow?.so_type || "NORMAL").trim().toUpperCase();
+  if (soTypePre === "NORMAL") {
+    const monthlyBlock = await assertNoPostedMonthlyStatForNewBilling_(sb, {
+      customerId,
+      shipDate
+    });
+    if (monthlyBlock?.err) return fail(monthlyBlock.err);
+  }
 
   const txId = await ensureSalesOrderTx_(soId, actor);
   const ts = timestamptzFromClient_(p.created_at);

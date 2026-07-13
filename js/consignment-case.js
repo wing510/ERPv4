@@ -5,11 +5,102 @@
 var ccSelectedCaseId_ = "";
 var ccSelectedCaseMeta_ = null;
 var ccCaseRows_ = [];
+var ccRemarkEditOpen_ = false;
+var ccDetailEmptyDeletable_ = false;
 
 function ccApplyCasePermissions_() {
   const ok = ccCanOperate_();
   const btn = document.getElementById("cc_create_btn");
   if (btn) btn.disabled = !ok;
+  const editBtn = document.getElementById("cc_edit_remark_btn");
+  const remarkBtn = document.getElementById("cc_save_remark_btn");
+  const remarkInput = document.getElementById("cc_detail_remark");
+  if (editBtn) editBtn.disabled = !ok;
+  if (remarkBtn) remarkBtn.disabled = !ok;
+  if (remarkInput) remarkInput.disabled = !ok;
+  ccSyncDeleteEmptyBtn_();
+}
+
+function ccSyncDeleteEmptyBtn_() {
+  const btn = document.getElementById("cc_delete_empty_case_btn");
+  if (!btn) return;
+  const can = ccCanOperate_();
+  const hasCase = !!String(ccSelectedCaseId_ || "").trim();
+  const empty = !!ccDetailEmptyDeletable_;
+  const show = can && hasCase && empty;
+  btn.style.display = show ? "" : "none";
+  btn.disabled = !show;
+}
+
+function ccSyncDetailRemark_(meta) {
+  const el = document.getElementById("cc_detail_remark");
+  if (!el) return;
+  el.value = String((meta && meta.remark) || "").trim();
+}
+
+function ccSyncRemarkEditUi_() {
+  const editing = !!ccRemarkEditOpen_;
+  const input = document.getElementById("cc_detail_remark");
+  const editBtn = document.getElementById("cc_edit_remark_btn");
+  const saveBtn = document.getElementById("cc_save_remark_btn");
+  const cancelBtn = document.getElementById("cc_cancel_remark_btn");
+  if (input) input.style.display = editing ? "" : "none";
+  if (editBtn) editBtn.style.display = editing ? "none" : "";
+  if (saveBtn) saveBtn.style.display = editing ? "" : "none";
+  if (cancelBtn) cancelBtn.style.display = editing ? "" : "none";
+}
+
+function ccCloseRemarkEdit_() {
+  ccRemarkEditOpen_ = false;
+  ccSyncRemarkEditUi_();
+}
+
+function ccOpenRemarkEdit_() {
+  if (!ccCanOperate_()) return showToast("您沒有權限修改備註（須會計／CEO／GA／ADMIN）", "error");
+  if (!String(ccSelectedCaseId_ || "").trim()) return showToast("請先選擇案件", "error");
+  ccSyncDetailRemark_(ccSelectedCaseMeta_);
+  ccRemarkEditOpen_ = true;
+  ccSyncRemarkEditUi_();
+  const el = document.getElementById("cc_detail_remark");
+  if (el && typeof el.focus === "function") el.focus();
+}
+
+function ccCancelRemarkEdit_() {
+  ccSyncDetailRemark_(ccSelectedCaseMeta_);
+  ccCloseRemarkEdit_();
+}
+
+async function ccSaveCaseRemark_() {
+  if (!ccCanOperate_()) return showToast("您沒有權限修改備註（須會計／CEO／GA／ADMIN）", "error");
+  const caseId = String(ccSelectedCaseId_ || "").trim().toUpperCase();
+  if (!caseId) return showToast("請先選擇案件", "error");
+  const remark = String(document.getElementById("cc_detail_remark")?.value || "").trim();
+  const btn = document.getElementById("cc_save_remark_btn");
+  if (btn) btn.disabled = true;
+  try {
+    await callAPI(
+      {
+        action: "update_consignment_case_remark_bundle",
+        case_id: caseId,
+        remark: remark,
+        updated_by: getCurrentUser(),
+        created_by: getCurrentUser()
+      },
+      { method: "POST" }
+    );
+    if (ccSelectedCaseMeta_) ccSelectedCaseMeta_.remark = remark;
+    const row = (ccCaseRows_ || []).find(function (c) {
+      return String(c.case_id || "").trim().toUpperCase() === caseId;
+    });
+    if (row) row.remark = remark;
+    ccRenderSummary_();
+    ccCloseRemarkEdit_();
+    showToast("備註已儲存", "success");
+  } catch (err) {
+    if (!(err && err.erpApiToastShown)) showToast("儲存備註失敗", "error");
+  } finally {
+    ccApplyCasePermissions_();
+  }
 }
 
 function ccIsNewCasePanelOpen_() {
@@ -109,8 +200,11 @@ function ccScrollToCaseDetail_() {
 function ccCloseCaseDetail_() {
   ccSelectedCaseId_ = "";
   ccSelectedCaseMeta_ = null;
+  ccDetailEmptyDeletable_ = false;
+  ccCloseRemarkEdit_();
   const card = document.getElementById("cc_detail_card");
   if (card) card.style.display = "none";
+  ccSyncDetailRemark_(null);
   ccSyncCaseListRowHighlight_();
 }
 
@@ -126,12 +220,30 @@ function ccToggleCaseRow_(caseId) {
   ccSelectCase_(id);
 }
 
+function ccGetCaseListFiltered_() {
+  const kw = String(document.getElementById("search_cc_case_keyword")?.value || "")
+    .trim()
+    .toUpperCase();
+  const rows = ccCaseRows_ || [];
+  if (!kw) return rows;
+  return rows.filter(function (c) {
+    const id = String(c.case_id || "").trim().toUpperCase();
+    const name = String(c.customer_name || "").trim().toUpperCase();
+    const custId = String(c.customer_id || "").trim().toUpperCase();
+    const custDisp = String(ccCustomerDisplayName_(c) || "").trim().toUpperCase();
+    return id.indexOf(kw) >= 0 || name.indexOf(kw) >= 0 || custId.indexOf(kw) >= 0 || custDisp.indexOf(kw) >= 0;
+  });
+}
+
 function ccRenderCaseList_() {
   const body = document.getElementById("cc_case_tbody");
   if (!body) return;
-  const rows = ccCaseRows_ || [];
+  const rows = ccGetCaseListFiltered_();
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6" class="text-muted">尚無寄賣案</td></tr>';
+    body.innerHTML =
+      '<tr><td colspan="7" class="text-muted">' +
+      (ccCaseRows_ && ccCaseRows_.length ? "查無符合條件的案件" : "尚無寄賣案") +
+      "</td></tr>";
     return;
   }
   const selId = String(ccSelectedCaseId_ || "").trim().toUpperCase();
@@ -147,6 +259,8 @@ function ccRenderCaseList_() {
           ' <span style="font-size:11px;color:#b45309;font-weight:600;white-space:nowrap;">財務未結清</span>';
       }
       const amtCell = ccFmtReceivedNetPct_(c);
+      const monthCloseCnt = String(Number(c.month_settlement_count || 0));
+      const settleOutstanding = ccFmtMoney_(c.ar_outstanding_amount);
       const safeId = id.replace(/'/g, "\\'");
       const open = selId === id;
       return (
@@ -174,8 +288,11 @@ function ccRenderCaseList_() {
         "<td>" +
         ccEsc_(amtCell) +
         "</td>" +
-        "<td>" +
-        ccEsc_(String(c.remark || "").trim() || "—") +
+        "<td class=\"cc-col-month-settle\">" +
+        ccEsc_(monthCloseCnt) +
+        "</td>" +
+        "<td class=\"cc-col-settle-outstanding\">" +
+        ccEsc_(settleOutstanding) +
         "</td>" +
         "</tr>"
       );
@@ -240,9 +357,17 @@ function ccRenderPoolTable_(items) {
     .join("");
 }
 
+async function ccCaseResetSearch_() {
+  const kw = document.getElementById("search_cc_case_keyword");
+  if (kw) kw.value = "";
+  const st = document.getElementById("cc_filter_status");
+  if (st) st.value = "OPEN";
+  await ccReloadCaseList_();
+}
+
 async function ccReloadCaseList_() {
   const body = document.getElementById("cc_case_tbody");
-  if (body) body.innerHTML = '<tr><td colspan="6" class="text-muted">載入中…</td></tr>';
+  if (body) body.innerHTML = '<tr><td colspan="7" class="text-muted">載入中…</td></tr>';
   const status = String(document.getElementById("cc_filter_status")?.value || "OPEN");
   try {
     ccCaseRows_ = await ccListCases_({ status: status });
@@ -257,7 +382,7 @@ async function ccReloadCaseList_() {
       ccCloseCaseDetail_();
     }
   } catch (_e) {
-    if (body) body.innerHTML = '<tr><td colspan="6" class="text-muted">載入失敗</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="7" class="text-muted">載入失敗</td></tr>';
   }
 }
 
@@ -279,6 +404,8 @@ async function ccSelectCase_(caseId) {
   if (card) card.style.display = "";
 
   ccRenderSummary_();
+  ccCloseRemarkEdit_();
+  ccSyncDetailRemark_(ccSelectedCaseMeta_);
 
   const poolBody = document.getElementById("cc_pool_tbody");
   if (poolBody) poolBody.innerHTML = '<tr><td colspan="8" class="text-muted">載入中…</td></tr>';
@@ -288,16 +415,51 @@ async function ccSelectCase_(caseId) {
       ccListSettlements_(id),
       ccListReturns_(id)
     ]);
+    ccDetailEmptyDeletable_ = !(pool || []).length && !(stls || []).length && !(rets || []).length;
     ccRenderPoolTable_(pool);
     ccRenderHistoryTableHtml_(stls, rets, "cc_history_tbody", { caseDetail: true });
   } catch (_e) {
+    ccDetailEmptyDeletable_ = false;
     if (poolBody) poolBody.innerHTML = '<tr><td colspan="8" class="text-muted">載入失敗</td></tr>';
     const hist = document.getElementById("cc_history_tbody");
     if (hist) hist.innerHTML = '<tr><td colspan="5" class="text-muted">載入失敗</td></tr>';
   }
 
   ccSyncCaseListRowHighlight_();
+  ccSyncDeleteEmptyBtn_();
   ccScrollToCaseDetail_();
+}
+
+async function ccDeleteEmptyCaseSubmit_() {
+  if (!ccCanOperate_()) return showToast("您沒有權限刪除寄賣案（須會計／CEO／GA／ADMIN）", "error");
+  const caseId = String(ccSelectedCaseId_ || "").trim().toUpperCase();
+  if (!caseId) return showToast("請先選擇案件", "error");
+  if (!ccDetailEmptyDeletable_) {
+    return showToast("僅限無出貨、無結算、無收回的空案可刪除", "error");
+  }
+
+  const msg =
+    "確定刪除此寄賣案？\n\n僅限無出貨、無結算、無收回的空案可刪；刪除後無法復原。\n\n案件ID：" +
+    caseId;
+  const okConfirm = typeof erpConfirm_ === "function" ? await erpConfirm_(msg) : window.confirm(msg);
+  if (!okConfirm) return;
+
+  const btn = document.getElementById("cc_delete_empty_case_btn");
+  if (btn) btn.disabled = true;
+  try {
+    await ccDeleteEmptyCase_({
+      case_id: caseId,
+      updated_by: getCurrentUser(),
+      created_by: getCurrentUser()
+    });
+    showToast("寄賣案已刪除：" + caseId, "success", 5000);
+    ccCloseCaseDetail_();
+    await ccReloadCaseList_();
+  } catch (err) {
+    if (!(err && err.erpApiToastShown)) showToast("刪除失敗：請稍後重試", "error");
+  } finally {
+    ccSyncDeleteEmptyBtn_();
+  }
 }
 
 function ccGoSettlementFromDetail_() {
@@ -373,5 +535,10 @@ async function consignmentCaseInit() {
   ccSyncNewCaseToggleBtn_();
   ccSelectedCaseId_ = "";
   ccSelectedCaseMeta_ = null;
+  if (typeof bindAutoSearchToolbar_ === "function") {
+    bindAutoSearchToolbar_([["search_cc_case_keyword", "input"]], function () {
+      ccRenderCaseList_();
+    });
+  }
   await ccReloadCaseList_();
 }

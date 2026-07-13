@@ -11,6 +11,13 @@
   </div>
 
   <div class="card-body">
+    <div
+      id="so_consignment_banner"
+      style="display:none;margin-bottom:14px;padding:10px 14px;background:#f0f9ff;border-left:4px solid #0ea5e9;border-radius:6px;font-size:13px;line-height:1.6;color:#0c4a6e;"
+    >
+      <strong>寄賣補貨單</strong>：內部出貨依據，<strong>不給店家</strong>。價格為出貨入池參考，非最終收款；促銷與應收於 <strong>Consignment 結算</strong> 產生。<br>
+      流程：① 建補貨單 → ② 出貨（掛寄賣案） → ③ 結算
+    </div>
     <div class="form-grid-4">
       <div class="form-group">
         <label>銷售單ID *</label>
@@ -20,8 +27,8 @@
       <div class="form-group">
         <label>用途 *</label>
         <select id="so_type">
-          <option value="NORMAL">一般</option>
-          <option value="CONSIGNMENT">寄賣</option>
+          <option value="NORMAL">一般買斷</option>
+          <option value="CONSIGNMENT">寄賣補貨</option>
           <option value="SAMPLE">樣品</option>
           <option value="GIFT">贈品</option>
           <option value="PR">公關</option>
@@ -95,15 +102,28 @@
     <span data-help="salesItems"></span>
   </div>
   <div class="card-body">
-    <div class="form-grid-4">
+    <div class="form-grid-4" id="so_item_form_grid">
+      <!-- 第一行：產品 / 促銷預覽 / 可用量 / 訂購數量 -->
       <div class="form-group">
         <label>產品（規格）*</label>
         <select id="so_item_product_id" onchange="onSelectSOProduct()"></select>
       </div>
 
       <div class="form-group">
+        <label id="so_item_promo_preview_label">促銷預覽</label>
+        <input
+          type="text"
+          id="so_item_promo_preview"
+          value=""
+          readonly
+          placeholder=""
+          title="一般買斷：選客戶與產品後預覽促銷；填數量後顯示計價／贈送；寄賣補貨：促銷於結算頁套用"
+        >
+      </div>
+
+      <div class="form-group">
         <label>可用量</label>
-        <input type="text" id="so_item_available_qty" readonly placeholder="選產品後帶入" title="全倉可出貨合計（ACTIVE＋QA已放行＋未過期）">
+        <input type="text" id="so_item_available_qty" readonly placeholder="選產品後帶入" title="全倉可出貨合計（ACTIVE＋QA已放行＋未過期）；寄賣出貨時從倉庫扣庫">
       </div>
 
       <div class="form-group">
@@ -112,6 +132,7 @@
         <input type="hidden" id="so_item_unit" value="">
       </div>
 
+      <!-- 第二行：牌價 / 折數 / 單價 / 金額 -->
       <div class="form-group">
         <label>牌價</label>
         <input type="text" id="so_item_list_price" readonly placeholder="選產品後帶入">
@@ -119,7 +140,7 @@
 
       <div class="form-group">
         <label>折數(%)</label>
-        <input type="number" id="so_item_discount_pct" min="0" max="100" step="0.01" placeholder="如 85" oninput="soApplyDiscountToUnitPrice_()">
+        <input type="number" id="so_item_discount_pct" min="0" max="100" step="0.01" placeholder="" oninput="soApplyDiscountToUnitPrice_()">
       </div>
 
       <div class="form-group">
@@ -128,16 +149,11 @@
       </div>
 
       <div class="form-group">
-        <label>金額</label>
-        <input type="text" id="so_item_amount" value="0.00" readonly>
+        <label id="so_item_amount_label">金額</label>
+        <input type="text" id="so_item_amount" value="0.00" readonly title="">
       </div>
 
-      <div class="form-group">
-        <label>促銷預覽</label>
-        <input type="text" id="so_item_promo_preview" value="" readonly placeholder="（無符合促銷）">
-      </div>
-
-      <div class="form-group" style="grid-column:span 2;">
+      <div class="form-group form-group-span-2">
         <label>備註</label>
         <input type="text" id="so_item_remark">
       </div>
@@ -159,7 +175,7 @@
             <th>訂購數量</th>
             <th>已出貨</th>
             <th id="so_item_unit_price_th">單價</th>
-            <th>金額</th>
+            <th id="so_item_amount_th">金額</th>
             <th>狀態</th>
             <th>操作</th>
           </tr>
@@ -196,7 +212,7 @@
         <option value="SHIPPED">SHIPPED（全數出貨）</option>
         <option value="CANCELLED">CANCELLED（已取消）</option>
       </select>
-      <button type="button" class="btn-secondary" onclick="resetSalesSearch()">重設</button>
+      <button type="button" class="btn-secondary" onclick="erpResetCurrentModule_()">重設</button>
     </div>
     <div class="table-wrapper">
       <table class="data-table">

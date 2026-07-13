@@ -5,6 +5,53 @@
 // 避免「切換模組時，上一個模組的 async 還在跑」導致偶發 null 元素錯誤
 let __ERP_MODULE_LOAD_SEQ__ = 0;
 
+/** 模組 init 名稱 → 左側選單 navigate 鍵（重設時 fallback） */
+var ERP_MODULE_INIT_TO_NAV_ = {
+  dashboard: "dashboard",
+  products: "products",
+  suppliers: "suppliers",
+  customers: "customers",
+  warehouses: "warehouses",
+  users: "users",
+  purchase: "purchase",
+  lots: "lots",
+  movements: "movements",
+  warehouseStock: "warehouse_stock",
+  split: "split",
+  merge: "merge",
+  outsource: "outsource",
+  receive: "receive",
+  sales: "sales",
+  shipping: "shipping",
+  consignmentCase: "consignment_case",
+  consignmentSettlement: "consignment_settlement",
+  consignmentPromo: "consignment_promo",
+  commercialDealer: "commercial_dealer",
+  commercialDealerCustomer: "commercial_dealer_customer",
+  dealerRebate: "dealer_rebate",
+  consignmentReturn: "consignment_return",
+  ar: "ar",
+  invoice: "invoice",
+  invoice_blank: "invoice_blank",
+  trace: "trace",
+  logs: "logs",
+  companySettings: "company_settings",
+  import: "import"
+};
+
+/** 列表「重設」：等同點左側選單，重新載入目前模組 */
+function erpResetCurrentModule_() {
+  try {
+    var route = String(window.__ERP_ACTIVE_NAV_ROUTE__ || "").trim();
+    if (!route) {
+      var mod = String(window.__ERP_ACTIVE_MODULE__ || "").trim();
+      if (mod && ERP_MODULE_INIT_TO_NAV_[mod]) route = ERP_MODULE_INIT_TO_NAV_[mod];
+    }
+    if (route && typeof navigate === "function") navigate(route);
+  } catch (_e) {}
+}
+try { window.erpResetCurrentModule_ = erpResetCurrentModule_; } catch (_eResetFn) {}
+
 function erpAllowedModuleSet_(){
   try{
     var raw = "";
@@ -591,6 +638,7 @@ function navigate(module) {
       loadModule("modules/dashboard.html");
   }
   try{ erpSetActiveNavRoute_(navRoute); }catch(_eNavActive){}
+  try{ window.__ERP_ACTIVE_NAV_ROUTE__ = navRoute; }catch(_eNavRoute){}
 }
 
 document.addEventListener("DOMContentLoaded", function () {

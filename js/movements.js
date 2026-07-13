@@ -1,4 +1,4 @@
-﻿/*********************************
+/*********************************
  * Movements Module（API 版）
  * - 實際扣庫/入庫都寫入 inventory_movement
  * - 後端會阻擋負庫存，且 OUT 類型只允許 APPROVED lot
@@ -443,8 +443,9 @@ async function mvInitWarehouseDropdown_(){
 function mvInitIssuedToDropdown_(){
   const sel = document.getElementById("mv_issued_to");
   if(!sel) return;
-  const users = (mvUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE");
-  users.sort((a,b)=>String(a.user_name||"").localeCompare(String(b.user_name||"")));
+  const users = (typeof erpSortUsersForDropdown_ === "function")
+    ? erpSortUsersForDropdown_((mvUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE"))
+    : (mvUsers || []).filter(u => String(u.status || "").toUpperCase() === "ACTIVE");
 
   const userOpts = users.map(u => {
     const name = String(u.user_name || "").trim();
@@ -845,8 +846,8 @@ function mvShipSoTypePrefixZh_(m){
   if(mt !== "SHIP_OUT" && rt !== "SHIPMENT" && rt !== "SHIPMENT_CANCEL") return "";
   const refId = String(m?.ref_id || "").trim().toUpperCase();
   const soType = mvShipmentSoTypeBySid_[refId];
-  if(soType === "CONSIGNMENT") return "寄賣";
-  if(soType === "NORMAL") return "一般";
+  if(soType === "CONSIGNMENT") return "寄賣補貨";
+  if(soType === "NORMAL") return "一般買斷";
   return "";
 }
 
