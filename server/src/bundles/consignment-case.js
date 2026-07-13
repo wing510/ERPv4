@@ -415,6 +415,157 @@ async function callCcVoidRpc_(sb, rpcName, params) {
   return ok(data || {});
 }
 
+function buildSettlementRpcItemsJson_(settlementId, items, computedMap, poolMap) {
+  return (items || []).map((it, j) => {
+    const poolItemId = normId_(it.pool_item_id);
+    const comp = computedMap[poolItemId] || {};
+    const poolItem = poolMap[poolItemId] || {};
+    const qty = Number(comp.settle_qty != null ? comp.settle_qty : it.settle_qty || 0);
+    const unitPrice = Number(comp.settle_unit_price != null ? comp.settle_unit_price : poolItem.unit_price || 0);
+    return {
+      settlement_item_id: settlementId + "-IT-" + String(j + 1).padStart(3, "0"),
+      pool_item_id: poolItemId,
+      shipment_item_id: normId_(poolItem.shipment_item_id),
+      so_item_id: normId_(poolItem.so_item_id),
+      product_id: normId_(poolItem.product_id),
+      settle_qty: qty,
+      billable_qty: Number(comp.billable_qty != null ? comp.billable_qty : qty),
+      free_qty: Number(comp.free_qty || 0),
+      unit: String(poolItem.unit || ""),
+      list_unit_price: Number(comp.list_unit_price != null ? comp.list_unit_price : poolItem.unit_price || 0),
+      settle_unit_price: unitPrice,
+      unit_price: unitPrice,
+      amount: roundMoney_(Number(comp.amount != null ? comp.amount : unitPrice * qty)),
+      promo_scheme_id: String(comp.promo_scheme_id || ""),
+      promo_type: String(comp.promo_type || ""),
+      promo_scheme_name: String(comp.promo_scheme_name || ""),
+      promo_discount_pct: comp.promo_discount_pct != null ? Number(comp.promo_discount_pct) : null,
+      promo_buy_qty: comp.promo_buy_qty != null ? Number(comp.promo_buy_qty) : null,
+      promo_scheme_free_qty: comp.promo_scheme_free_qty != null ? Number(comp.promo_scheme_free_qty) : null,
+      remark: String(it.remark || "")
+    };
+  });
+}
+
+function buildReturnRpcLinesJson_(returnId, planRes, items) {
+  const lines = [];
+  let lineIdx = 0;
+  for (let li = 0; li < ((planRes && planRes.lines) || []).length; li++) {
+    const line = planRes.lines[li];
+    for (let ai = 0; ai < ((line && line.allocations) || []).length; ai++) {
+      const alloc = line.allocations[ai];
+      lineIdx += 1;
+      lines.push({
+        return_item_id: returnId + "-IT-" + String(lineIdx).padStart(3, "0"),
+        pool_item_id: normId_(alloc.pool_item_id),
+        qty: Number(alloc.qty || 0),
+        source_lot_id: normId_(alloc.lot_id),
+        product_id: normId_(alloc.product_id),
+        unit: String(alloc.unit || ""),
+        unit_price: Number(alloc.unit_price || 0),
+        factory_lot: normLot_(line.factory_lot),
+        shipment_item_id: normId_(alloc.shipment_item_id),
+        so_item_id: normId_(alloc.so_item_id),
+        remark: String((items[li] && items[li].remark) || "")
+      });
+    }
+  }
+  return lines;
+}
+
+async function tryPostSettlementPhase2TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_post_settlement_phase2_tx", {
+    p_settlement_id: normId_(o.settlementId),
+    p_case_id: normId_(o.caseId),
+    p_customer_id: normId_(o.customerId),
+    p_transaction_id: String(o.txId || "").trim(),
+    p_settlement_date: o.settlementDate,
+    p_amount_system: Number(o.amountSystem || 0),
+    p_currency: String(o.currency || "USD").trim().toUpperCase() || "USD",
+    p_so_id: normId_(o.soId),
+    p_shipment_id: normId_(o.shipmentId),
+    p_remark: String(o.remark || ""),
+    p_dealer_cumulative_tier_label: o.dealerCtx && o.dealerCtx.enabled ? String(o.dealerCtx.tier_label || "") : "",
+    p_dealer_cumulative_price_rate: o.dealerCtx && o.dealerCtx.enabled ? Number(o.dealerCtx.price_rate) : null,
+    p_dealer_cumulative_price_source: o.dealerCtx && o.dealerCtx.enabled ? String(o.dealerCtx.price_source || "CURRENT") : "",
+    p_items_json: o.itemsJson || [],
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+
+  if (error) {
+    const msg = String(error.message || error);
+    if (/could not find the function|schema cache|42883|function .* does not exist/i.test(msg)) {
+      return { rpcMissing: true };
+    }
+    if (/column.*does not exist|Could not find the '.*' column/i.test(msg)) {
+      return { rpcMissing: true, hint: msg };
+    }
+    return fail(msg);
+  }
+  if (!data || data.ok !== true) {
+    return fail(String((data && data.error) || "erp_cc_post_settlement_phase2_tx failed"));
+  }
+
+  return ok(
+    Object.assign({}, data, {
+      message: String(data.message || "SETTLED"),
+      settlement_id: normId_(data.settlement_id || o.settlementId),
+      case_id: normId_(data.case_id || o.caseId),
+      ar_id: String(data.ar_id || "AR-STL-" + normId_(o.settlementId)).trim().toUpperCase(),
+      amount_system: roundMoney_(Number(data.amount_system != null ? data.amount_system : o.amountSystem || 0)),
+      dealer_credit_applied: roundMoney_(Number(data.dealer_credit_applied || 0)),
+      dealer_credit_in_tx: data.dealer_credit_in_tx === true,
+      settlement_rpc: data.settlement_rpc === true,
+      idempotent: !!data.idempotent
+    })
+  );
+}
+
+async function tryPostReturnPhase2TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_post_return_phase2_tx", {
+    p_return_id: normId_(o.returnId),
+    p_case_id: normId_(o.caseId),
+    p_customer_id: normId_(o.customerId),
+    p_transaction_id: String(o.txId || "").trim(),
+    p_return_reason: normId_(o.returnReason),
+    p_return_date: o.returnDate,
+    p_return_warehouse_id: normId_(o.returnWarehouseId),
+    p_filter_unit_price: o.filterUnitPrice != null && String(o.filterUnitPrice).trim() !== "" ? roundMoney_(o.filterUnitPrice) : null,
+    p_remark: String(o.remark || ""),
+    p_lines_json: o.linesJson || [],
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+
+  if (error) {
+    const msg = String(error.message || error);
+    if (/could not find the function|schema cache|42883|function .* does not exist/i.test(msg)) {
+      return { rpcMissing: true };
+    }
+    if (/column.*does not exist|Could not find the '.*' column/i.test(msg)) {
+      return { rpcMissing: true, hint: msg };
+    }
+    return fail(msg);
+  }
+  if (!data || data.ok !== true) {
+    return fail(String((data && data.error) || "erp_cc_post_return_phase2_tx failed"));
+  }
+
+  return ok(
+    Object.assign({}, data, {
+      message: String(data.message || "RETURNED"),
+      return_id: normId_(data.return_id || o.returnId),
+      case_id: normId_(data.case_id || o.caseId),
+      item_count: Number(data.item_count || (o.linesJson || []).length),
+      return_rpc: data.return_rpc === true,
+      idempotent: !!data.idempotent
+    })
+  );
+}
+
 async function rollbackCancelSettlementDraft_(sb, settlementId, poolReverts, actor, ts) {
   for (let i = 0; i < (poolReverts || []).length; i++) {
     const rev = poolReverts[i] || {};
@@ -1608,6 +1759,75 @@ async function postConsignmentCaseSettlementBundleCore_(p) {
   }
 
   const ts = nowIso();
+  const rpcItems = buildSettlementRpcItemsJson_(settlementId, items, computedMap, poolMap);
+  const rpcRes = await tryPostSettlementPhase2TxRpc_(sb, {
+    settlementId,
+    caseId,
+    customerId,
+    txId,
+    settlementDate,
+    amountSystem,
+    currency,
+    soId: firstSoId,
+    shipmentId: firstShipmentId,
+    remark: String(p.remark || ""),
+    dealerCtx,
+    itemsJson: rpcItems,
+    actor,
+    ts
+  });
+  if (!rpcRes.rpcMissing) {
+    if (rpcRes.success === false) return rpcRes;
+    const arId = String(rpcRes.ar_id || "AR-STL-" + settlementId).trim().toUpperCase();
+    const dealerCreditApplied = roundMoney_(Number(rpcRes.dealer_credit_applied || 0));
+    let dealerCreditInfo = "";
+    if (!rpcRes.dealer_credit_in_tx) {
+      const creditRes = await applyDealerCreditAtSettlement_({
+        sb,
+        settlementId,
+        arId,
+        customerId,
+        settlementDate,
+        actor,
+        session: p._session,
+        ts
+      });
+      if (creditRes && creditRes.err) {
+        dealerCreditInfo = String(creditRes.err);
+      } else if (creditRes && creditRes.defer_reason) {
+        dealerCreditInfo = String(creditRes.defer_reason);
+      }
+    }
+    if (!rpcRes.idempotent) {
+      await writeAuditLog_(
+        "consignment_case_settlement",
+        settlementId,
+        "BUNDLE_POST_CONSIGNMENT_CASE_SETTLEMENT",
+        actor,
+        JSON.stringify({
+          settlement_id: settlementId,
+          case_id: caseId,
+          ar_id: arId,
+          amount_system: amountSystem,
+          dealer_credit_applied: dealerCreditApplied,
+          dealer_credit_info: dealerCreditInfo,
+          rpc: "erp_cc_post_settlement_phase2_tx"
+        })
+      );
+    }
+    return ok({
+      message: "SETTLED",
+      settlement_id: settlementId,
+      case_id: caseId,
+      ar_id: arId,
+      amount_system: amountSystem,
+      dealer_credit_applied: dealerCreditApplied,
+      dealer_credit_info: dealerCreditInfo,
+      settlement_rpc: rpcRes.settlement_rpc === true,
+      idempotent: !!rpcRes.idempotent
+    });
+  }
+
   const poolReverts = [];
   let arIdDraft = "";
 
@@ -1777,7 +1997,8 @@ async function postConsignmentCaseSettlementBundleCore_(p) {
       ar_id: arId,
       amount_system: amountSystem,
       dealer_credit_applied: dealerCreditApplied,
-      dealer_credit_info: dealerCreditInfo
+      dealer_credit_info: dealerCreditInfo,
+      settlement_rpc: false
     });
   } catch (err) {
     try {
@@ -1893,6 +2114,46 @@ async function postConsignmentCaseReturnBundle(p) {
     p.filter_unit_price != null && String(p.filter_unit_price).trim() !== ""
       ? roundMoney_(p.filter_unit_price)
       : null;
+
+  const rpcLines = buildReturnRpcLinesJson_(returnId, planRes, items);
+  const rpcRes = await tryPostReturnPhase2TxRpc_(sb, {
+    returnId,
+    caseId,
+    customerId,
+    txId,
+    returnReason,
+    returnDate,
+    returnWarehouseId,
+    filterUnitPrice: filterPrice,
+    remark,
+    linesJson: rpcLines,
+    actor,
+    ts
+  });
+  if (!rpcRes.rpcMissing) {
+    if (rpcRes.success === false) return rpcRes;
+    if (!rpcRes.idempotent) {
+      await writeAuditLog_(
+        "consignment_case_return",
+        returnId,
+        "BUNDLE_POST_CONSIGNMENT_CASE_RETURN",
+        actor,
+        JSON.stringify({
+          return_id: returnId,
+          case_id: caseId,
+          item_count: rpcRes.item_count || rpcLines.length,
+          rpc: "erp_cc_post_return_phase2_tx"
+        })
+      );
+    }
+    return ok({
+      message: "RETURNED",
+      return_id: returnId,
+      case_id: caseId,
+      return_rpc: rpcRes.return_rpc === true,
+      idempotent: !!rpcRes.idempotent
+    });
+  }
 
   const poolReverts = [];
   const returnDraftReverts_ = { poolReverts: poolReverts, createdLotIds: [] };
@@ -2024,7 +2285,8 @@ async function postConsignmentCaseReturnBundle(p) {
     return ok({
       message: "RETURNED",
       return_id: returnId,
-      case_id: caseId
+      case_id: caseId,
+      return_rpc: false
     });
   } catch (err) {
     await rollbackCaseReturnDraft_(sb, returnId, returnDraftReverts_, actor, ts);

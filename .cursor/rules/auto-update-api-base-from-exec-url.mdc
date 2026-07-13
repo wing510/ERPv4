@@ -1,0 +1,15 @@
+---
+description: When user pastes Apps Script /exec URL, update API_BASE in js/core/config.js
+alwaysApply: true
+---
+
+# Auto-update API_BASE_DEV/PROD from pasted /exec URL
+
+When the user pastes a Google Apps Script Web App URL that ends with `/exec` (e.g. `https://script.google.com/macros/s/.../exec`), treat it as the intended backend endpoint and do the following automatically:
+
+- If the user explicitly says it's **DEV/開發/測試**: update `js/core/config.js` → `defaults.API_BASE_DEV` to the pasted `/exec` URL.
+- If the user explicitly says it's **PROD/正式**: update `js/core/config.js` → `defaults.API_BASE_PROD` to the pasted `/exec` URL.
+- Keep the previous value as a short inline comment on the same line for rollback reference (do not add long comments).
+- Do not ask the user to confirm; apply immediately.
+- After editing, remind the user to redeploy/refresh as needed and that opening `/exec` directly returns `Unknown or missing action` unless `action` is provided.
+

@@ -897,6 +897,10 @@ const SCHEMA = {
     "ar_id",
     "payment_date",
     "amount",
+    "status",
+    "void_reason",
+    "voided_by",
+    "voided_at",
     "remark",
     "created_by",
     "created_at",
@@ -912,7 +916,9 @@ const SCHEMA = {
     "amount_after",
     "reason",
     "adjusted_by",
-    "adjusted_at"
+    "adjusted_at",
+    "source_type",
+    "source_id"
   ],
 
   commercial_invoice: [

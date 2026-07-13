@@ -776,7 +776,7 @@ const HelpConfig = {
     • 綁定<strong>月結回饋方案</strong>、<strong>經銷等級方案</strong>、回饋方式、累積起算日<br>
     • 不要月結回饋：月結回饋方案改<strong>（未設定）</strong> → 更新<br>
     • 月結累積、目前／次月等級、次月折抵為唯讀（寄賣與一般請款淨額於 FINANCE 財務 → <strong>月結統計</strong> → <strong>確認經銷等級</strong>時計入累積）<br>
-    • <strong>本月預覽</strong>：展開當月請款摘要；純一般出貨顯示精簡一行；有寄賣顯示完整明細；若已過帳後又有新單，顯示橘色提醒須作廢重過帳<br>
+    • <strong>本月預覽</strong>：展開當月請款摘要；純一般出貨顯示精簡一行；有寄賣顯示完整明細；若已過帳後 AR 有變動，顯示橘色提醒須作廢重過帳<br>
     • <strong>月結統計</strong>：帶入目前客戶與當月，跳至 FINANCE 財務 → 月結統計<br>
     • 取消方案：下拉改（未設定）→ 更新<br>
     • <strong>權限</strong>：Users 勾選 commercial_dealer_customer 即可編輯
@@ -799,7 +799,7 @@ const HelpConfig = {
   dealerMonthlyStat: `
     <strong>月結統計</strong><br>
     • 月結分<strong>三步</strong>：<strong>月結統計過帳</strong>（定案請款）→ <strong>確認經銷等級</strong>（有綁等級方案）→ <strong>月結回饋</strong>（有綁回饋方案）；等級與回饋互不強制先後，但<strong>皆須先完成統計過帳</strong><br>
-    • 上方<strong>客戶列表</strong>：可搜尋、點列選客戶；「寄賣結算／一般出貨／請款淨額」為當月金額（未過帳灰字）；過帳後若有新單，金額改灰字顯示<strong>即時請款</strong>；「次月折抵」僅綁月結回饋方案時顯示餘額（未綁 —）；「經銷等級累積」僅綁等級方案時顯示<strong>所選月份月底</strong>已過帳累計（未綁 —）；「本月統計」：<strong>已過帳</strong>／<strong>已過帳・有新單</strong>（橘）／<strong>預覽未過帳</strong>（有請款即可，含未綁方案客戶）／無請款 —；操作欄可<strong>過帳</strong>快捷；篩選列旁<strong>批次過帳</strong><br>
+    • 上方<strong>客戶列表</strong>：可搜尋、點列選客戶；「寄賣結算／一般出貨／請款淨額」為當月金額（未過帳灰字）；過帳後若 AR 有變動，金額改灰字顯示<strong>即時請款</strong>；「次月折抵」為<strong>所選月份結算可套用</strong>之折抵餘額（回饋月須早於所選月；未綁方案 —）；「經銷等級累積」僅綁等級方案時顯示<strong>所選月份月底</strong>已過帳累計（未綁 —）；「本月統計」：<strong>已過帳</strong>／<strong>已過帳・AR有變動</strong>（橘）／<strong>預覽未過帳</strong>（有請款即可，含未綁方案客戶）／無請款 —；操作欄可<strong>過帳</strong>快捷；篩選列旁<strong>批次過帳</strong><br>
     • 點列客戶後，下方<strong>本月月結摘要</strong>合併顯示請款淨額、等級累積、回饋預覽（虛線分隔）；摘要下方按鈕：<strong>月結統計過帳</strong>、<strong>確認經銷等級</strong>（有綁才顯示）、<strong>月結回饋</strong>（有綁才顯示）<br>
     • <strong>沒綁方案</strong>的客戶也可<strong>月結統計過帳</strong>（僅定案請款、鎖月）<br>
     • 回饋方式依 <strong>Dealer 方案客戶</strong> 預設；要改方式請作廢後至方案客戶修改再重過帳<br>

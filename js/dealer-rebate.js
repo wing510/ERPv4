@@ -91,6 +91,8 @@ var DR_STAT_POST_BTN_LABEL_ = "月結統計過帳";
 var DR_LEVEL_POST_BTN_LABEL_ = "確認經銷等級";
 var DR_REBATE_POST_BTN_LABEL_ = "月結回饋";
 var DR_STAT_BATCH_LIMIT_ = 20;
+var DR_BILLING_DRIFT_BADGE_STAT_ = "已過帳・AR有變動";
+var DR_BILLING_DRIFT_PHRASE_ = "過帳後 AR 有變動";
 var drMonthlyClosePostInFlight_ = false;
 
 function drHasBillingNet_(n) {
@@ -357,7 +359,6 @@ function drFmtTierCell_(label, rate) {
 }
 function drFmtRebateBasisDetail_(pack) {
   if (!pack) return "（寄賣結算 " + drFmtMoney_(0) + "）";
-  if (pack.from_posted) return "（產生時快照）";
   const statSource = String(pack.stat_source || "CONSIGNMENT").trim().toUpperCase();
   const billingCons = Number(
     pack.billing_net_consignment != null ? pack.billing_net_consignment : pack.billing_net || 0
@@ -365,14 +366,14 @@ function drFmtRebateBasisDetail_(pack) {
   const billingGen = Number(pack.billing_net_general || 0);
   const parts = [];
   if (statSource === "ALL") {
-    parts.push("寄賣結算 " + drFmtMoney_(billingCons));
-    parts.push("一般出貨 " + drFmtMoney_(billingGen));
+    if (billingCons > 0.009) parts.push("寄賣結算 " + drFmtMoney_(billingCons));
+    if (billingGen > 0.009) parts.push("一般出貨 " + drFmtMoney_(billingGen));
   } else if (statSource === "GENERAL") {
     parts.push("一般出貨 " + drFmtMoney_(billingGen || pack.billing_net || 0));
   } else {
     parts.push("寄賣結算 " + drFmtMoney_(billingCons));
   }
-  return "（" + parts.join("；") + "）";
+  return parts.length ? "（" + parts.join("；") + "）" : "";
 }
 
 function drSnapshotDetailPack_(pack) {
@@ -425,19 +426,16 @@ function drBillingPackForDisplay_(pack, opts) {
 
 function drLevelStatusInlineHtml_(statPosted, statStale, billingNet) {
   if (statPosted && statStale) {
-    return '<span class="dr-monthly-close-step-warn">已過帳・有新單</span>';
+    return '<span class="dr-monthly-close-step-warn">' + DR_BILLING_DRIFT_BADGE_STAT_ + "</span>";
   }
   if (statPosted) return '<span class="dr-monthly-close-step-done">已過帳</span>';
   if (!(billingNet > 0.009)) return '<span class="dr-monthly-close-step-muted">無請款</span>';
   return '<span class="dr-monthly-close-step-warn">' + DR_MONTHLY_CLOSE_STEP2_NEED_STAT_ + "</span>";
 }
 
-function drRebateStatusInlineHtml_(hasRebate, rebatePosted, rebateStale, rebatePack, statPack, statPosted, billingNet) {
+function drRebateStatusInlineHtml_(hasRebate, rebatePosted, rebatePack, statPack, statPosted, billingNet) {
   if (!hasRebate || drRebateSchemeNone_) {
     return '<span class="dr-monthly-close-step-muted">未綁定方案</span>';
-  }
-  if (rebatePosted && rebateStale) {
-    return '<span class="dr-monthly-close-step-warn">已產生・有新單</span>';
   }
   if (rebatePosted) return '<span class="dr-monthly-close-step-done">已產生</span>';
   if (!statPosted) {
@@ -549,7 +547,7 @@ function drUpdateMonthlyCloseActions_() {
       : statPosted
         ? "本月統計已過帳"
         : billingStale
-          ? "過帳後有新單，請先作廢本月月結"
+          ? DR_BILLING_DRIFT_PHRASE_ + "，請先作廢本月月結"
           : !(billingNet > 0.009)
             ? "本月無請款淨額"
             : "";
@@ -569,7 +567,7 @@ function drUpdateMonthlyCloseActions_() {
         : levelPosted
           ? "本月等級已確認"
           : billingStale
-            ? "過帳後有新單，請先作廢本月月結"
+            ? DR_BILLING_DRIFT_PHRASE_ + "，請先作廢本月月結"
             : "";
   }
 
@@ -593,7 +591,7 @@ function drUpdateMonthlyCloseActions_() {
       : needStat
         ? DR_MONTHLY_CLOSE_STEP2_NEED_STAT_
         : billingStale
-          ? "過帳後有新單，請先作廢本月月結"
+          ? DR_BILLING_DRIFT_PHRASE_ + "，請先作廢本月月結"
           : rebatePosted
             ? "本月回饋已產生"
             : !(rebateNet > 0.009)
@@ -628,7 +626,8 @@ function drBuildBillingSummaryHtml_() {
     html +=
       '<div style="color:#b45309;margin-bottom:8px;">月結統計已過帳（' +
       ccEsc_(statPack.existing_stat_id || "—") +
-      "），但過帳後又有新請款" +
+      "），但" +
+      DR_BILLING_DRIFT_PHRASE_ +
       (parts.length ? "（" + ccEsc_(parts.join("；")) + "）" : "") +
       "，請先<strong>作廢本月月結</strong>再重新過帳。</div>";
   }
@@ -636,7 +635,7 @@ function drBuildBillingSummaryHtml_() {
   html += drFmtBillingNetLine_(topPack, { stale: statStale });
   const statusHtml = statPosted
     ? statStale
-      ? '<span class="dr-monthly-close-step-warn">已過帳・有新單</span>'
+      ? '<span class="dr-monthly-close-step-warn">' + DR_BILLING_DRIFT_BADGE_STAT_ + "</span>"
       : '<span class="dr-monthly-close-step-done">已過帳</span>'
     : Number(topPack.billing_net || 0) > 0.009
       ? '<span class="dr-monthly-close-step-warn">預覽未過帳</span>'
@@ -720,7 +719,6 @@ function drBuildRebateSummaryHtml_() {
     drRebateStatusInlineHtml_(
       true,
       rebatePosted,
-      rebateStale,
       rebateDisplayPack,
       statPack,
       statPosted,
@@ -730,7 +728,7 @@ function drBuildRebateSummaryHtml_() {
   html +=
     "<div><strong>計算基準</strong>：" +
     drFmtMoney_(rebateDisplayPack.billing_net || 0) +
-    drFmtRebateBasisDetail_(rebateDisplayPack) +
+    drFmtRebateBasisDetail_(drSnapshotDetailPack_(rebateDisplayPack)) +
     "</div>";
   html += drRebateSchemeDetailHtml_(rebateDisplayPack, { skipSchemeLine: true });
   return html;
@@ -851,7 +849,7 @@ async function drStatPost_(opts) {
     return false;
   }
   if (drMonthlyCloseBillingStale_(drStatPreviewPack_, drRebatePreviewPack_)) {
-    if (!skipConfirm) showToast("過帳後又有新請款，請先作廢月結統計再重新過帳", "warn");
+    if (!skipConfirm) showToast(DR_BILLING_DRIFT_PHRASE_ + "，請先作廢月結統計再重新過帳", "warn");
     return false;
   }
 
@@ -1052,7 +1050,7 @@ async function drLevelPost_() {
     return showToast("本月等級已確認", "warn");
   }
   if (drMonthlyCloseBillingStale_(drStatPreviewPack_, drRebatePreviewPack_)) {
-    return showToast("過帳後又有新單，請先作廢本月月結", "warn");
+    return showToast(DR_BILLING_DRIFT_PHRASE_ + "，請先作廢本月月結", "warn");
   }
   const cum = drLevelPreviewPack_.cumulative_preview || {};
   if (cum.err) return showToast(String(cum.err), "warn");
@@ -1611,13 +1609,21 @@ function drRebatePackFromRow_(row) {
           : null
     };
   }
+  const billingCons =
+    row.billing_net_consignment != null
+      ? Number(row.billing_net_consignment || 0)
+      : Number(row.billing_net || 0);
+  const billingGen = row.billing_net_general != null ? Number(row.billing_net_general || 0) : 0;
+  let statSource = "CONSIGNMENT";
+  if (billingCons > 0.009 && billingGen > 0.009) statSource = "ALL";
+  else if (billingGen > 0.009 && billingCons <= 0.009) statSource = "GENERAL";
   return {
     scheme_name: row.scheme_name_snapshot || row.scheme_id || "—",
     scheme_id: row.scheme_id || "",
-    stat_source: "CONSIGNMENT",
+    stat_source: statSource,
     billing_net: row.billing_net,
-    billing_net_consignment: Number(row.billing_net || 0),
-    billing_net_general: 0,
+    billing_net_consignment: billingCons,
+    billing_net_general: billingGen,
     rebate_amount: row.rebate_amount,
     rebate_pct: row.rebate_pct,
     settle_mode_default: row.settle_mode,
@@ -1801,7 +1807,8 @@ function drRebateShowDetailBox_(boxId, pack, titleHtml) {
         '<div style="color:#b45309;">此客戶該月已有有效回饋（' +
         ccEsc_(pack.existing_rebate_id || "—") +
         "）。</div>" +
-        '<div style="color:#b45309;margin-top:6px;">過帳後又有新請款' +
+        '<div style="color:#b45309;margin-top:6px;">' +
+        DR_BILLING_DRIFT_PHRASE_ +
         (parts.length ? "（" + ccEsc_(parts.join("；")) + "）" : "") +
         "，請先<strong>作廢</strong>月結回饋，再<strong>作廢</strong>月結統計重新過帳後再產生。</div>";
     } else {
@@ -1830,7 +1837,8 @@ function drRebateShowDetailBox_(boxId, pack, titleHtml) {
   if (pack.has_new_billing && pack.monthly_stat_posted && !pack.already_posted) {
     const parts = drFmtBillingDriftParts_(pack);
     html +=
-      '<div style="color:#b45309;margin-bottom:8px;">月結統計已過帳，但過帳後又有新請款' +
+      '<div style="color:#b45309;margin-bottom:8px;">月結統計已過帳，但' +
+      DR_BILLING_DRIFT_PHRASE_ +
       (parts.length ? "（" + ccEsc_(parts.join("；")) + "）" : "") +
       "，請先<strong>作廢本月月結</strong>再重新過帳，方可" + DR_REBATE_POST_BTN_LABEL_ + "。</div>";
   }
@@ -2037,8 +2045,8 @@ async function drRebatePost_(opts) {
     if (!skipConfirm) {
       showToast(
         drRebatePreviewPack_?.monthly_stat_posted
-          ? "月結統計已過帳但請款已變動，請先作廢月結統計再重新過帳"
-          : "過帳後又有新請款，請先作廢月結回饋與月結統計",
+          ? DR_BILLING_DRIFT_PHRASE_ + "，請先作廢月結統計再重新過帳"
+          : DR_BILLING_DRIFT_PHRASE_ + "，請先作廢月結回饋與月結統計",
         "warn"
       );
     }
@@ -2336,6 +2344,11 @@ function drStatCustMonthBillingNetSortValue_(customerId) {
 }
 
 function drStatCustCreditBalance_(row) {
+  const cid = String(row?.customer_id || "").trim().toUpperCase();
+  const hit = drStatCustMonthIndex_[cid];
+  if (hit && hit.eligible_rebate_credit != null) {
+    return Number(hit.eligible_rebate_credit || 0);
+  }
   const live = drStatCustLiveCustRow_(row);
   return Number(live?.dealer_rebate_credit_balance || 0);
 }
@@ -2355,7 +2368,11 @@ function drStatCustCreditBalanceCellHtml_(row) {
   if (!rebateId && !(credit > 1e-9)) {
     return '<span class="text-muted">—</span>';
   }
-  return ccEsc_(drFmtMoney_(credit));
+  return (
+    '<span title="所選月份結算可套用之次月折抵餘額（回饋月份須早於所選月）">' +
+    ccEsc_(drFmtMoney_(credit)) +
+    "</span>"
+  );
 }
 
 function drStatCustHasCumulativeScheme_(row) {
@@ -2383,7 +2400,9 @@ function drStatCustMonthCellHtml_(customerId) {
     if (st === "POSTED") {
       if (hit.has_new_billing) {
         return (
-          '<span style="color:#b45309;font-weight:600;" title="過帳後有新寄賣結算或一般出貨">已過帳・有新單</span>'
+          '<span style="color:#b45309;font-weight:600;" title="過帳後請款淨額有變動（新結算／出貨或應收調整）">' +
+          DR_BILLING_DRIFT_BADGE_STAT_ +
+          "</span>"
         );
       }
       return '<span style="color:#15803d;font-weight:600;">已過帳</span>';
@@ -2618,7 +2637,8 @@ async function drStatCustRefreshMonthData_() {
         live_billing_net: row.live_billing_net,
         billing_net_consignment_diff: row.billing_net_consignment_diff,
         billing_net_general_diff: row.billing_net_general_diff,
-        billing_net_diff: row.billing_net_diff
+        billing_net_diff: row.billing_net_diff,
+        eligible_rebate_credit: row.eligible_rebate_credit
       };
     });
   } catch (_e) {}

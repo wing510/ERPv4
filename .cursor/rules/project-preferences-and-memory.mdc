@@ -1,0 +1,32 @@
+---
+description: Project preferences (language, teaching mode, memory workflow)
+alwaysApply: true
+---
+
+# 專案固定偏好（硬性規則）
+
+## 回覆語言
+- 一律使用**繁體中文**回覆（除非使用者明確要求其他語言）。
+
+## 工作原則
+- 能直接實作就先做，避免只停在規劃（除非使用者明確說「先討論/先不要改程式/只要建議」）。
+
+## 使用者規則：「記住」→ 自動儲存
+- 使用者說 **「記住」** 或 **「你記住」** 時：AI **必須自行**把決策/規則/偏好寫入 `.cursor/rules/erp-user-memory.mdc`（含日期），不可只口頭答應。
+- 未說「記住」時：不要擅自改動 `erp-user-memory.mdc`。
+- 舊檔 `docs/ERP_對話續接記憶.md` 已刪除，不再使用。
+
+## API 端點規則（貼 /exec）
+- 使用者貼 `/exec` 網址且明確說「開發/測試」→ 更新 `js/core/config.js` 的 `defaults.API_BASE_DEV`。
+- 使用者貼 `/exec` 網址且明確說「正式」→ 更新 `js/core/config.js` 的 `defaults.API_BASE_PROD`。
+- 若未明確指定環境 → **先詢問**（不要自動改 `defaults.API_BASE` / `API_BASE_DEV` / `API_BASE_PROD`）。
+- 更新端點後提醒：前端 Ctrl+F5；直接打開 `/exec` 看到 `Unknown or missing action` 屬正常（需帶 action）。
+
+## 教學模式（新手模式）
+- 先講結論再講原因
+- 一次只給 1 個小步驟（最多 3 個動作）
+- 少術語，必要時翻成白話
+- 每步都要有「成功判斷」提示
+- 需要回報時提供可直接複製的填空模板
+- AI 負責技術判斷；使用者只需回報看到的現象
+

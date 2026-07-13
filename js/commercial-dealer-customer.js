@@ -783,7 +783,7 @@ function cdcStatRenderPreview_(pack) {
     if (pack.has_new_billing) {
       const parts = cdcFmtBillingDriftParts_(pack);
       html +=
-        '<div style="color:#b45309;margin-bottom:6px;">過帳後有新請款' +
+        '<div style="color:#b45309;margin-bottom:6px;">過帳後 AR 有變動' +
         (parts.length ? "（" + cdcEsc_(parts.join("；")) + "）" : "") +
         "，請至 FINANCE 財務 → <strong>月結統計</strong> 作廢後重新過帳。</div>";
     }

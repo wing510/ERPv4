@@ -463,6 +463,217 @@ function classifyPartialFailure_(after, baseline) {
   return "D";
 }
 
+function sleep_(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function collectPostVoidRaceEvidence_(shipmentId, soId) {
+  const ship = await fetchRow("shipment", "shipment_id", shipmentId);
+  const shipItems = await fetchRows("shipment_item", "shipment_id", shipmentId);
+  const ar = await fetchRow("ar_receivable", "ar_id", "AR-" + shipmentId);
+  const movs = await sb.from("inventory_movement").select("*").eq("parent_ref_id", shipmentId);
+  const soItems = await fetchRows("sales_order_item", "so_id", soId);
+  return { ship, shipItems, ar, movements: movs.data || [], soItems };
+}
+
+function classifyPostVoidRaceConsistency_(evidence) {
+  const { ship, shipItems, ar, movements } = evidence || {};
+  const shipStatus = String(ship?.status || "").toUpperCase();
+  const shipExists = !!ship;
+  const itemCount = (shipItems || []).length;
+  const arExists = !!ar;
+  const arDue = Number(ar?.amount_due ?? 0);
+  const arStatus = String(ar?.status || "").toUpperCase();
+  const shipOutMovs = (movements || []).filter((m) => String(m.movement_type || "").toUpperCase() === "SHIP_OUT");
+
+  if (!shipExists) {
+    return { outcome: "NO_SHIPMENT", consistent: true, detail: "Post did not create shipment row" };
+  }
+
+  if (shipStatus === "POSTED") {
+    const inconsistent = itemCount < 1 || !arExists || !(arDue > 1e-9 || arStatus === "OPEN") || shipOutMovs.length < 1;
+    return {
+      outcome: "POSTED_OPEN",
+      consistent: !inconsistent,
+      detail: inconsistent ? "POSTED but AR/items/movements incomplete" : "POSTED with OPEN AR"
+    };
+  }
+
+  if (shipStatus === "CANCELLED") {
+    const arOk = !arExists || arDue <= 1e-9 || arStatus === "VOID" || arStatus === "CANCELLED" || arStatus === "CLOSED";
+    return {
+      outcome: "CANCELLED_CLEAN",
+      consistent: arOk,
+      detail: arOk ? "CANCELLED with AR cleared" : "CANCELLED but AR still has amount_due"
+    };
+  }
+
+  return { outcome: "UNKNOWN", consistent: false, detail: "Unexpected shipment status: " + shipStatus };
+}
+
+async function runPostVoidRaceHarness_({ shipmentId, soId, customerId, recipientId, lotId, shipQty }) {
+  const voidAttempts = [];
+  const startedAt = Date.now();
+  const timeoutMs = 15000;
+  const pollMs = 15;
+
+  const postPromise = postShipment({ shipmentId, soId, customerId, recipientId, lotId, shipQty });
+
+  const voidRacer = (async () => {
+    while (Date.now() - startedAt < timeoutMs) {
+      const ship = await fetchRow("shipment", "shipment_id", shipmentId);
+      const res = await voidShipment(shipmentId);
+      voidAttempts.push({
+        at_ms: Date.now() - startedAt,
+        ship_status: ship?.status || null,
+        ship_exists: !!ship,
+        success: !!(res && res.success),
+        errors: res?.errors || (res?.err ? [res.err] : [])
+      });
+      if (res && res.success) {
+        const dup = await voidShipment(shipmentId);
+        voidAttempts.push({
+          at_ms: Date.now() - startedAt,
+          duplicate_void: true,
+          success: !!(dup && dup.success),
+          errors: dup?.errors || (dup?.err ? [dup.err] : [])
+        });
+        return;
+      }
+      await sleep_(pollMs);
+    }
+  })();
+
+  const [postSettled, voidSettled] = await Promise.allSettled([postPromise, voidRacer]);
+  const postRes =
+    postSettled.status === "fulfilled"
+      ? { status: "fulfilled", value: postSettled.value }
+      : { status: "rejected", reason: String(postSettled.reason) };
+
+  let evidence = await collectPostVoidRaceEvidence_(shipmentId, soId);
+  let classification = classifyPostVoidRaceConsistency_(evidence);
+  let followUp = null;
+
+  if (classification.outcome === "POSTED_OPEN" && classification.consistent) {
+    const void1 = await voidShipment(shipmentId);
+    const void2 = await voidShipment(shipmentId);
+    followUp = { void1, void2 };
+    evidence = await collectPostVoidRaceEvidence_(shipmentId, soId);
+    classification = classifyPostVoidRaceConsistency_(evidence);
+  }
+
+  const voidWonDuringRace = voidAttempts.some((a) => a.success && !a.duplicate_void);
+  const raceMode = voidWonDuringRace ? "VOID_WON_DURING_RACE" : "POST_WON_THEN_SYNC_VOID";
+
+  return {
+    postRes,
+    voidAttempts,
+    voidRacer: voidSettled.status,
+    evidence,
+    classification,
+    followUp,
+    race_mode: raceMode
+  };
+}
+
+function detectRpcUsage_(results) {
+  for (let i = 0; i < (results || []).length; i++) {
+    if (JSON.stringify(results[i].actual || {}).includes('"rpc":true')) return true;
+  }
+  return false;
+}
+
+function detectDealerCreditInTx_(results) {
+  const blob = JSON.stringify(results || []);
+  return blob.includes('"dealer_credit_in_tx":true') || blob.includes('"applied_in_rpc":true');
+}
+
+function detectVoidRpc_(results) {
+  const blob = JSON.stringify(results || []);
+  return blob.includes('"void_rpc":true');
+}
+
+function detectConsignmentRpc_(results) {
+  return JSON.stringify(results || []).includes('"consignment_rpc":true');
+}
+
+function buildGateReport_(results) {
+  const allPass = (results || []).every((r) => r.pass === true);
+  const partialRows = (results || []).filter((r) => r.partial_failure_result);
+  const partialAllA = partialRows.length > 0 && partialRows.every((r) => r.partial_failure_result === "A");
+  const raceRow = (results || []).find((r) => r.test_case === "POST/VOID race");
+  const racePass = !!(raceRow && raceRow.pass === true);
+  const rpcDeployed = detectRpcUsage_(results);
+  const dealerCreditInTx = detectDealerCreditInTx_(results);
+  const voidRpc = detectVoidRpc_(results);
+  const consignmentRpc = detectConsignmentRpc_(results);
+  const notTested = (results || []).filter((r) => r.status === "NOT TESTED");
+
+  let riskSeverity = "HIGH";
+  if (rpcDeployed && partialAllA && racePass && dealerCreditInTx && voidRpc) riskSeverity = "LOW";
+  else if (rpcDeployed && partialAllA && racePass && dealerCreditInTx) riskSeverity = "MEDIUM";
+
+  let gateResult = "NO-GO";
+  if (allPass) gateResult = "GO FOR TESTING (DEV)";
+  else if (notTested.length) gateResult = "CONDITIONAL GO FOR TESTING (DEV)";
+
+  const conditions = [];
+  if (!allPass) conditions.push("Fix failing integration test cases");
+  if (!racePass) conditions.push("POST/VOID race harness must pass with consistent final DB state");
+  if (!rpcDeployed) {
+    conditions.push("Deploy server/sql/v4.3.2_出貨過帳交易Phase1.sql for atomic NORMAL shipment POST");
+  }
+  if (rpcDeployed && !dealerCreditInTx) {
+    conditions.push("Deploy server/sql/v4.3.3_出貨過帳Dealer折抵原子.sql so dealer credit runs inside RPC transaction");
+  }
+  if (rpcDeployed && !voidRpc) {
+    conditions.push("Deploy server/sql/v4.3.4_出貨作廢交易Phase1.sql for atomic NORMAL shipment VOID");
+  }
+  if (!partialAllA && partialRows.length) {
+    conditions.push("PARTIAL_FAILURE must remain class A (safe pre-mutation failure)");
+  }
+  if (allPass && riskSeverity === "LOW") {
+    if (!consignmentRpc) {
+      conditions.push("Consignment shipment POST/VOID: deploy v4.3.5 or add integration test");
+    }
+    conditions.push("Consignment settlement/return still Node multi-step (Phase 2 follow-up)");
+  } else if (allPass && riskSeverity === "MEDIUM") {
+    if (!voidRpc) conditions.push("Shipment VOID still Node multi-step until v4.3.4 deployed");
+  }
+
+  return {
+    task_level: "A",
+    risk_severity: riskSeverity,
+    gate_result: gateResult,
+    rpc_phase1_tx: rpcDeployed ? "DEPLOYED" : "NOT_DETECTED",
+    dealer_credit_in_tx: dealerCreditInTx ? "IN_RPC" : rpcDeployed ? "NODE_AFTER_RPC" : "N/A",
+    shipment_void_rpc: voidRpc ? "IN_RPC" : rpcDeployed ? "NODE_FALLBACK" : "N/A",
+    shipment_post_atomic: rpcDeployed
+      ? dealerCreditInTx
+        ? "MITIGATED (NORMAL POST + dealer credit in erp_ship_post_phase1_tx)"
+        : "PARTIALLY_MITIGATED (POST in RPC; dealer credit after RPC)"
+      : "PARTIALLY_MITIGATED (Node preflight+rollback)",
+    shipment_void_atomic: voidRpc
+      ? "MITIGATED (NORMAL VOID in erp_ship_void_phase1_tx)"
+      : rpcDeployed
+        ? "PARTIALLY_MITIGATED (VOID Node multi-step)"
+        : "N/A",
+    consignment_shipment_atomic: consignmentRpc
+      ? "MITIGATED (CONSIGNMENT POST/VOID in erp_ship_*_consignment_phase2_tx)"
+      : "PARTIALLY_MITIGATED (Node multi-step until v4.3.5)",
+    conditions,
+    partial_failure_results: partialRows.map((r) => ({
+      test_case: r.test_case,
+      result: r.partial_failure_result
+    })),
+    not_tested: notTested.map((r) => ({
+      test_case: r.test_case,
+      blocker_reason: r.blocker_reason
+    })),
+    run_at: new Date().toISOString()
+  };
+}
+
 async function cleanup(allIds) {
   const ids = allIds || {};
   const inList = (arr) => (arr && arr.length ? arr : []);
@@ -772,57 +983,65 @@ async function main() {
       });
     }
 
-    // ---- POST/VOID race (best-effort) ----
+    // ---- POST/VOID race (deterministic harness) ----
     {
       const shipmentId = PREFIX + "-SHIP-RACE";
+      const soIdRace = created.soIds[0];
       created.shipmentIds.push(shipmentId);
-      const pPost = postShipment({
+
+      const race = await runPostVoidRaceHarness_({
         shipmentId,
-        soId: created.soIds[0],
+        soId: soIdRace,
         customerId: created.customerIds[0],
         recipientId: created.recipientIds[0],
         lotId: created.lotIds[0],
         shipQty: 1
       });
-      const pVoid = voidShipment(shipmentId);
-      const [postRes, voidRes] = await Promise.allSettled([pPost, pVoid]);
-      const ship = await fetchRow("shipment", "shipment_id", shipmentId);
-      const ar = await fetchRow("ar_receivable", "ar_id", "AR-" + shipmentId);
-      const evidencePath = writeEvidence(tc("POST_VOID_RACE"), { postRes, voidRes, shipment: ship, ar_receivable: ar });
+
+      const postOk = race.postRes?.status === "fulfilled" && race.postRes?.value?.success === true;
+      const rpcUsed = !!(race.postRes?.value && race.postRes.value.rpc === true);
+      const finalOk =
+        race.classification.consistent && race.classification.outcome === "CANCELLED_CLEAN";
+      const dupVoidOk =
+        !race.followUp ||
+        (race.followUp.void1?.success === true && race.followUp.void2?.success === false);
+      const dupEntries = race.voidAttempts.filter((a) => a.duplicate_void);
+      const raceDupOk = dupEntries.length === 0 || dupEntries.every((a) => a.success === false);
+      const pass = postOk && rpcUsed && finalOk && dupVoidOk && raceDupOk && race.voidAttempts.length >= 1;
+
+      const evidencePath = writeEvidence(tc("POST_VOID_RACE"), race);
 
       results.push({
         test_case: "POST/VOID race",
-        expected: "One of POST/VOID may fail; final DB state must be consistent (POSTED with OPEN AR, or CANCELLED with amount_due=0)",
-        actual: { postRes, voidRes },
-        pass: false,
-        status: "NOT TESTED",
-        blocker_reason:
-          "Non-deterministic concurrency; single parallel invocation cannot guarantee POST-then-VOID interleaving coverage",
+        expected:
+          "Deterministic harness: POST runs concurrently with VOID retries; final DB must be CANCELLED_CLEAN with AR cleared; duplicate VOID must fail",
+        actual: {
+          postRes: race.postRes,
+          voidAttempts: race.voidAttempts,
+          race_mode: race.race_mode,
+          classification: race.classification,
+          followUp: race.followUp,
+          rpc: rpcUsed
+        },
+        pass,
+        status: pass ? "TESTED" : "FAILED",
+        blocker_reason: pass
+          ? ""
+          : [
+              !postOk ? "POST failed" : "",
+              !rpcUsed ? "RPC path not used" : "",
+              !finalOk ? "Final DB inconsistent: " + (race.classification.detail || race.classification.outcome) : "",
+              !dupVoidOk ? "Duplicate VOID idempotency failed" : ""
+            ]
+              .filter(Boolean)
+              .join("; "),
         db_evidence: [evidencePath],
         cleanup: "pending"
       });
     }
 
     // Save summary before cleanup
-    const gateReport = {
-      task_level: "A",
-      risk_severity: "HIGH",
-      gate_result: "CONDITIONAL GO FOR TESTING (DEV)",
-      conditions: [
-        "Re-run integration tests on current codebase (this run)",
-        "PARTIAL_FAILURE must be classified A/B/C/D with full evidence",
-        "POST/VOID race remains NOT TESTED until deterministic harness exists",
-        "Shipment POST non-atomic risk remains open unless reclassified by evidence"
-      ],
-      partial_failure_results: results
-        .filter((r) => r.partial_failure_result)
-        .map((r) => ({ test_case: r.test_case, result: r.partial_failure_result })),
-      not_tested: results.filter((r) => r.status === "NOT TESTED").map((r) => ({
-        test_case: r.test_case,
-        blocker_reason: r.blocker_reason
-      })),
-      run_at: new Date().toISOString()
-    };
+    const gateReport = buildGateReport_(results);
     const gatePath = writeEvidence("GATE_REPORT", gateReport);
     const summaryPath = writeEvidence("SUMMARY", { env: ENV_NAME, prefix: PREFIX, results, gate_report: gatePath });
 

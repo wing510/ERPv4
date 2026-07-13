@@ -81,6 +81,114 @@ const AR_GAP_WRITEOFF_LABELS_ = {
   ROUNDING: "尾數折讓"
 };
 
+/** AR 調整 log 冪等鍵（與 server/sql v4.3.3+ 對齊） */
+const AR_ADJ_SOURCE_ = {
+  MANUAL_ADJUST: "MANUAL_ADJUST",
+  SHIPMENT_CREDIT: "SHIPMENT_CREDIT",
+  SHIPMENT_CREDIT_VOID: "SHIPMENT_CREDIT_VOID",
+  SHIPMENT_VOID: "SHIPMENT_VOID",
+  SETTLEMENT_CREDIT: "SETTLEMENT_CREDIT",
+  MONTHLY_REBATE_CN: "MONTHLY_REBATE_CN",
+  MONTHLY_REBATE_CN_VOID: "MONTHLY_REBATE_CN_VOID",
+  PAYMENT_GAP_WRITEOFF: "PAYMENT_GAP_WRITEOFF",
+  PAYMENT_GAP_WRITEOFF_VOID: "PAYMENT_GAP_WRITEOFF_VOID",
+  AR_FORCE_CLOSE: "AR_FORCE_CLOSE",
+  CONSIGNMENT_SETTLEMENT_VOID: "CONSIGNMENT_SETTLEMENT_VOID",
+  AR_SYSTEM_REPAIR: "AR_SYSTEM_REPAIR"
+};
+
+function resolveAdjustSource_(p, adjustId) {
+  const explicitType = String(p?.source_type || "").trim().toUpperCase();
+  const explicitId = normArId_(p?.source_id);
+  if (explicitType && explicitId) return { sourceType: explicitType, sourceId: explicitId };
+
+  if (p?._from_settlement_dealer_credit) {
+    const sid = normArId_(p.settlement_id);
+    if (sid) return { sourceType: AR_ADJ_SOURCE_.SETTLEMENT_CREDIT, sourceId: sid };
+  }
+  if (p?._from_shipment_dealer_credit) {
+    const sid = normArId_(p.shipment_id);
+    if (sid) return { sourceType: AR_ADJ_SOURCE_.SHIPMENT_CREDIT, sourceId: sid };
+  }
+  if (p?._rebate_cn) {
+    const rebId = normArId_(p.rebate_id);
+    const arId = normArId_(p.ar_id);
+    if (rebId && arId) return { sourceType: AR_ADJ_SOURCE_.MONTHLY_REBATE_CN, sourceId: rebId + ":" + arId };
+  }
+  if (p?._rebate_cn_void) {
+    const rebId = normArId_(p.rebate_id);
+    const arId = normArId_(p.ar_id);
+    if (rebId && arId) return { sourceType: AR_ADJ_SOURCE_.MONTHLY_REBATE_CN_VOID, sourceId: rebId + ":" + arId };
+  }
+  if (p?._system_repair) {
+    const arId = normArId_(p.ar_id);
+    if (arId) return { sourceType: AR_ADJ_SOURCE_.AR_SYSTEM_REPAIR, sourceId: arId };
+  }
+  return { sourceType: AR_ADJ_SOURCE_.MANUAL_ADJUST, sourceId: normArId_(adjustId) };
+}
+
+async function insertArAdjustmentLog_(sb, opts) {
+  const adjustId = normArId_(opts.adjustId);
+  const arId = normArId_(opts.arId);
+  const sourceType = String(opts.sourceType || "").trim().toUpperCase();
+  const sourceId = normArId_(opts.sourceId);
+  const ts = opts.ts || nowIso();
+
+  if (sourceType && sourceId) {
+    const { data: existed, error: exErr } = await sb
+      .from("ar_amount_adjustment_log")
+      .select("adjust_id, amount_before, amount_after")
+      .eq("source_type", sourceType)
+      .eq("source_id", sourceId)
+      .maybeSingle();
+    if (exErr) return { err: exErr.message || String(exErr) };
+    if (existed) {
+      return {
+        adjustId: existed.adjust_id,
+        idempotent: true,
+        amount_before: roundMoney_(existed.amount_before),
+        amount_after: roundMoney_(existed.amount_after)
+      };
+    }
+  }
+
+  const row = {
+    adjust_id: adjustId,
+    ar_id: arId,
+    amount_before: roundMoney_(opts.amountBefore),
+    amount_after: roundMoney_(opts.amountAfter),
+    reason: String(opts.reason || ""),
+    adjusted_by: String(opts.actor || "").trim(),
+    adjusted_at: ts
+  };
+  if (sourceType && sourceId) {
+    row.source_type = sourceType;
+    row.source_id = sourceId;
+  }
+
+  const { error: logErr } = await sb.from("ar_amount_adjustment_log").insert(row);
+  if (logErr) {
+    if (/duplicate|unique|23505/i.test(logErr.message || "") && sourceType && sourceId) {
+      const { data: existed2, error: exErr2 } = await sb
+        .from("ar_amount_adjustment_log")
+        .select("adjust_id, amount_before, amount_after")
+        .eq("source_type", sourceType)
+        .eq("source_id", sourceId)
+        .maybeSingle();
+      if (!exErr2 && existed2) {
+        return {
+          adjustId: existed2.adjust_id,
+          idempotent: true,
+          amount_before: roundMoney_(existed2.amount_before),
+          amount_after: roundMoney_(existed2.amount_after)
+        };
+      }
+    }
+    return { err: logErr.message || String(logErr) };
+  }
+  return { adjustId: adjustId, idempotent: false };
+}
+
 function gapWriteoffLabel_(code) {
   return AR_GAP_WRITEOFF_LABELS_[String(code || "").trim().toUpperCase()] || "";
 }
@@ -123,18 +231,21 @@ async function executePaymentGapWriteoff_(sb, opts) {
   const adjustId = buildId_("ARA");
   const adjReason = "登記收款沖銷差額：" + plan.label;
 
-  const { error: logErr } = await sb.from("ar_amount_adjustment_log").insert({
-    adjust_id: adjustId,
-    ar_id: arId,
-    amount_before: plan.dueBefore,
-    amount_after: plan.newDue,
+  const ins = await insertArAdjustmentLog_(sb, {
+    adjustId: adjustId,
+    arId: arId,
+    amountBefore: plan.dueBefore,
+    amountAfter: plan.newDue,
     reason: adjReason,
-    adjusted_by: actor,
-    adjusted_at: iso
+    actor: actor,
+    ts: iso,
+    sourceType: AR_ADJ_SOURCE_.PAYMENT_GAP_WRITEOFF,
+    sourceId: paymentId
   });
-  if (logErr) return { err: logErr.message || String(logErr) };
+  if (ins.err) return { err: ins.err };
+  if (ins.idempotent) return { adjustId: ins.adjustId, newDue: ins.amount_after, system_remark: opts.ar?.system_remark || "" };
 
-  const paySm = "gap_writeoff|adjust_id=" + adjustId;
+  const paySm = "gap_writeoff|adjust_id=" + (ins.adjustId || adjustId);
   const { error: payErr } = await sb
     .from("ar_payment")
     .update({ system_remark: paySm, updated_by: actor, updated_at: iso })
@@ -146,19 +257,34 @@ async function executePaymentGapWriteoff_(sb, opts) {
     "[" + iso + "] " + actor + " 登記收款沖銷差額 " + plan.dueBefore + " → " + plan.newDue + "（" + plan.label + "，" + paymentId + "）"
   );
 
-  return { adjustId: adjustId, newDue: plan.newDue, system_remark: sysRemark };
+  return { adjustId: ins.adjustId || adjustId, newDue: plan.newDue, system_remark: sysRemark };
 }
 
 async function restoreGapWriteoffOnVoid_(sb, ar, arId, pay, actor, ts) {
+  const paymentId = normArId_(pay.payment_id);
   const gapWo = parsePaymentGapWriteoff_(pay);
-  if (!gapWo || !gapWo.adjust_id) return { due: roundMoney_(ar.amount_due), restored: false };
+  if (!paymentId && (!gapWo || !gapWo.adjust_id)) return { due: roundMoney_(ar.amount_due), restored: false };
 
-  const { data: adj, error } = await sb
-    .from("ar_amount_adjustment_log")
-    .select("*")
-    .eq("adjust_id", gapWo.adjust_id)
-    .maybeSingle();
-  if (error) return { err: error.message || String(error) };
+  let adj = null;
+  if (gapWo.adjust_id) {
+    const { data, error } = await sb
+      .from("ar_amount_adjustment_log")
+      .select("*")
+      .eq("adjust_id", gapWo.adjust_id)
+      .maybeSingle();
+    if (error) return { err: error.message || String(error) };
+    adj = data;
+  }
+  if (!adj && paymentId) {
+    const { data, error } = await sb
+      .from("ar_amount_adjustment_log")
+      .select("*")
+      .eq("source_type", AR_ADJ_SOURCE_.PAYMENT_GAP_WRITEOFF)
+      .eq("source_id", paymentId)
+      .maybeSingle();
+    if (error) return { err: error.message || String(error) };
+    adj = data;
+  }
   if (!adj) return { due: roundMoney_(ar.amount_due), restored: false };
 
   const beforeDue = roundMoney_(ar.amount_due);
@@ -168,18 +294,21 @@ async function restoreGapWriteoffOnVoid_(sb, ar, arId, pay, actor, ts) {
   }
 
   const revId = buildId_("ARA");
-  const { error: logErr } = await sb.from("ar_amount_adjustment_log").insert({
-    adjust_id: revId,
-    ar_id: arId,
-    amount_before: beforeDue,
-    amount_after: restoredDue,
+  const ins = await insertArAdjustmentLog_(sb, {
+    adjustId: revId,
+    arId: arId,
+    amountBefore: beforeDue,
+    amountAfter: restoredDue,
     reason: "作廢收款還原沖銷差額（" + String(adj.reason || "") + "）",
-    adjusted_by: actor,
-    adjusted_at: ts
+    actor: actor,
+    ts: ts,
+    sourceType: AR_ADJ_SOURCE_.PAYMENT_GAP_WRITEOFF_VOID,
+    sourceId: paymentId
   });
-  if (logErr) return { err: logErr.message || String(logErr) };
+  if (ins.err) return { err: ins.err };
+  if (ins.idempotent) return { due: roundMoney_(ins.amount_after), restored: true, revId: ins.adjustId };
 
-  return { due: restoredDue, restored: true, revId: revId };
+  return { due: restoredDue, restored: true, revId: ins.adjustId || revId };
 }
 
 function calcArStatusFromAmounts_(amountDue, amountReceived, isSettled) {
@@ -319,6 +448,8 @@ async function enrichArConsignmentCaseFields_(sb, rows) {
 }
 
 function isArPaymentVoided_(pay) {
+  const st = String(pay?.status || "").trim().toUpperCase();
+  if (st === "VOID") return true;
   const sm = String(pay?.system_remark || "");
   if (sm.indexOf("VOIDED|") >= 0) return true;
   return roundMoney_(pay?.amount) <= 1e-9 && String(pay?.remark || "").indexOf("[已作廢]") === 0;
@@ -379,6 +510,11 @@ async function loadArMapForPayments_(sb, pays) {
 }
 
 function parsePaymentVoidMeta_(pay) {
+  const voidedAt = String(pay?.voided_at || "").trim();
+  const voidedBy = String(pay?.voided_by || "").trim();
+  if (voidedAt || voidedBy) {
+    return { at: voidedAt, by: voidedBy };
+  }
   const sm = String(pay?.system_remark || "");
   const atM = sm.match(/VOIDED\|(?:[^|]*\|)*at=([^|]+)/);
   const byM = sm.match(/VOIDED\|(?:[^|]*\|)*by=([^|]+)/);
@@ -501,13 +637,209 @@ function arPaymentVoidOriginalAmount_(pay) {
 }
 
 async function sumArPayments_(sb, arId) {
-  const { data, error } = await sb.from("ar_payment").select("amount").eq("ar_id", arId);
+  const { data, error } = await sb.from("ar_payment").select("amount, status, system_remark, remark").eq("ar_id", arId);
   if (error) throw new Error(error.message || String(error));
   let sum = 0;
   (data || []).forEach((row) => {
+    if (isArPaymentVoided_(row)) return;
     sum += Number(row.amount || 0);
   });
   return roundMoney_(sum);
+}
+
+async function tryRegisterArPaymentPhase4TxRpc_(sb, opts) {
+  const {
+    paymentId,
+    arId,
+    paymentDate,
+    amount,
+    remark,
+    actor,
+    ts,
+    arRemarkAppend,
+    gapWriteoff
+  } = opts || {};
+
+  const rpcArgs = {
+    p_payment_id: paymentId,
+    p_ar_id: arId,
+    p_payment_date: paymentDate,
+    p_amount: amount,
+    p_remark: remark || "",
+    p_actor: actor,
+    p_ts: ts,
+    p_ar_remark_append: arRemarkAppend || ""
+  };
+  if (gapWriteoff) rpcArgs.p_gap_writeoff_json = gapWriteoff;
+
+  const { data, error } = await sb.rpc("erp_ar_post_payment_phase4_tx", rpcArgs);
+
+  if (error) {
+    const msg = String(error.message || error);
+    if (/could not find the function|schema cache|42883|function .* does not exist/i.test(msg)) {
+      return { rpcMissing: true };
+    }
+    if (/column.*does not exist|Could not find the '.*' column/i.test(msg)) {
+      return { rpcMissing: true, hint: msg };
+    }
+    return fail(msg);
+  }
+  if (!data || data.ok !== true) {
+    return fail(String((data && data.error) || "erp_ar_post_payment_phase4_tx failed"));
+  }
+
+  return ok({
+    message: data.idempotent
+      ? gapWriteoff
+        ? "PAYMENT_REGISTERED_GAP_WRITEOFF_IDEMPOTENT"
+        : "PAYMENT_REGISTERED_IDEMPOTENT"
+      : gapWriteoff
+        ? "PAYMENT_REGISTERED_GAP_WRITEOFF"
+        : "PAYMENT_REGISTERED",
+    ar_id: String(data.ar_id || arId).trim().toUpperCase(),
+    payment_id: String(data.payment_id || paymentId).trim().toUpperCase(),
+    amount_received: Number(data.amount_received || 0),
+    amount_due: Number(data.amount_due || 0),
+    status: String(data.status || ""),
+    reopened: data.reopened === true,
+    payment_rpc: data.payment_rpc === true,
+    gap_writeoff: gapWriteoff
+      ? {
+          gap: roundMoney_(Number(gapWriteoff.amount_before || 0) - Number(gapWriteoff.amount_after || 0)),
+          amount_due_after: Number(data.amount_due || gapWriteoff.amount_after || 0)
+        }
+      : data.gap_writeoff === true
+        ? { rpc: true }
+        : null,
+    idempotent: data.idempotent === true
+  });
+}
+
+async function tryRegisterArPaymentBatchPhase4TxRpc_(sb, opts) {
+  const { batchId, paymentDate, allocations, remarkPrefix, actor, ts } = opts || {};
+
+  const { data, error } = await sb.rpc("erp_ar_post_payment_batch_phase4_tx", {
+    p_batch_id: batchId,
+    p_payment_date: paymentDate,
+    p_allocations_json: allocations || [],
+    p_remark_prefix: remarkPrefix || "",
+    p_actor: actor,
+    p_ts: ts
+  });
+
+  if (error) {
+    const msg = String(error.message || error);
+    if (/could not find the function|schema cache|42883|function .* does not exist/i.test(msg)) {
+      return { rpcMissing: true };
+    }
+    if (/column.*does not exist|Could not find the '.*' column/i.test(msg)) {
+      return { rpcMissing: true, hint: msg };
+    }
+    return fail(msg);
+  }
+  if (!data || data.ok !== true) {
+    return fail(String((data && data.error) || "erp_ar_post_payment_batch_phase4_tx failed"));
+  }
+
+  const rows = Array.isArray(data.allocations) ? data.allocations : [];
+  return ok({
+    message: "BATCH_PAYMENT_REGISTERED",
+    batch_id: String(data.batch_id || batchId).trim().toUpperCase(),
+    batch_rpc: data.batch_rpc === true,
+    allocations: rows.map(function (row) {
+      return {
+        ar_id: String(row.ar_id || "").trim().toUpperCase(),
+        payment_id: String(row.payment_id || "").trim().toUpperCase(),
+        amount: Number(row.amount || 0),
+        amount_received: Number(row.amount_received || 0),
+        status: String(row.status || "")
+      };
+    })
+  });
+}
+
+async function tryVoidArPaymentBatchPhase4TxRpc_(sb, opts) {
+  const { batchId, voidReason, actor, ts } = opts || {};
+
+  const { data, error } = await sb.rpc("erp_ar_void_payment_batch_phase4_tx", {
+    p_batch_id: batchId,
+    p_void_reason: voidReason || "",
+    p_actor: actor,
+    p_ts: ts
+  });
+
+  if (error) {
+    const msg = String(error.message || error);
+    if (/could not find the function|schema cache|42883|function .* does not exist/i.test(msg)) {
+      return { rpcMissing: true };
+    }
+    if (/column.*does not exist|Could not find the '.*' column/i.test(msg)) {
+      return { rpcMissing: true, hint: msg };
+    }
+    return fail(msg);
+  }
+  if (!data || data.ok !== true) {
+    return fail(String((data && data.error) || "erp_ar_void_payment_batch_phase4_tx failed"));
+  }
+
+  const rows = Array.isArray(data.allocations) ? data.allocations : [];
+  return ok({
+    message: "BATCH_PAYMENT_VOIDED",
+    batch_id: String(data.batch_id || batchId).trim().toUpperCase(),
+    voided_count: Number(data.voided_count || rows.length || 0),
+    batch_void_rpc: data.batch_void_rpc === true,
+    allocations: rows.map(function (row) {
+      return {
+        ar_id: String(row.ar_id || "").trim().toUpperCase(),
+        payment_id: String(row.payment_id || "").trim().toUpperCase(),
+        voided_amount: Number(row.voided_amount || 0),
+        amount_received: Number(row.amount_received || 0),
+        status: String(row.status || ""),
+        reopened: row.reopened === true || row.reopened === "true"
+      };
+    })
+  });
+}
+
+async function tryVoidArPaymentPhase4TxRpc_(sb, opts) {
+  const { paymentId, voidReason, actor, ts, arRemarkAppend } = opts || {};
+
+  const { data, error } = await sb.rpc("erp_ar_void_payment_phase4_tx", {
+    p_payment_id: paymentId,
+    p_void_reason: voidReason || "",
+    p_actor: actor,
+    p_ts: ts,
+    p_ar_remark_append: arRemarkAppend || ""
+  });
+
+  if (error) {
+    const msg = String(error.message || error);
+    if (/could not find the function|schema cache|42883|function .* does not exist/i.test(msg)) {
+      return { rpcMissing: true };
+    }
+    if (/column.*does not exist|Could not find the '.*' column/i.test(msg)) {
+      return { rpcMissing: true, hint: msg };
+    }
+    return fail(msg);
+  }
+  if (!data || data.ok !== true) {
+    return fail(String((data && data.error) || "erp_ar_void_payment_phase4_tx failed"));
+  }
+
+  return ok({
+    message: data.idempotent ? "PAYMENT_VOIDED_IDEMPOTENT" : "PAYMENT_VOIDED",
+    ar_id: String(data.ar_id || "").trim().toUpperCase(),
+    payment_id: String(data.payment_id || paymentId).trim().toUpperCase(),
+    voided_amount: Number(data.voided_amount || 0),
+    amount_received: Number(data.amount_received || 0),
+    amount_due: Number(data.amount_due || 0),
+    status: String(data.status || ""),
+    reopened: data.reopened === true,
+    payment_status: String(data.payment_status || "VOID"),
+    void_rpc: data.void_rpc === true,
+    gap_restored: data.gap_restored === true,
+    idempotent: data.idempotent === true
+  });
 }
 
 function buildArSyncPatch_(ar, amountDue, totalReceived, actor, ts) {
@@ -1017,6 +1349,76 @@ async function registerArPaymentBatchBundle(p) {
   const ts = nowIso();
   const results = [];
 
+  const rpcAllocations = allocations.map(function (item) {
+    const ar = item.ar;
+    const arId = normArId_(ar.ar_id);
+    const amount = roundMoney_(item.amount);
+    const paymentId = buildId_("ARP");
+    return {
+      payment_id: paymentId,
+      ar_id: arId,
+      amount: amount,
+      remark: remarkPrefix,
+      outstanding_before: roundMoney_(item.outstanding_before)
+    };
+  });
+
+  const rpcRes = await tryRegisterArPaymentBatchPhase4TxRpc_(sb, {
+    batchId,
+    paymentDate,
+    allocations: rpcAllocations.map(function (row) {
+      return {
+        payment_id: row.payment_id,
+        ar_id: row.ar_id,
+        amount: row.amount,
+        remark: row.remark
+      };
+    }),
+    remarkPrefix,
+    actor,
+    ts
+  });
+  if (rpcRes && rpcRes.rpcMissing) {
+    // RPC 未部署：fallback Node 多步
+  } else if (rpcRes && rpcRes.success === false) {
+    return rpcRes;
+  } else if (rpcRes && rpcRes.success !== false) {
+    (rpcRes.allocations || []).forEach(function (row, idx) {
+      const meta = rpcAllocations[idx] || {};
+      results.push({
+        ar_id: row.ar_id,
+        payment_id: row.payment_id,
+        amount: row.amount,
+        outstanding_before: meta.outstanding_before,
+        outstanding_after: roundMoney_(Math.max(0, meta.outstanding_before - row.amount)),
+        status: row.status
+      });
+    });
+    await writeAuditLog_(
+      "ar_receivable",
+      batchId,
+      "BUNDLE_REGISTER_AR_PAYMENT_BATCH",
+      actor,
+      JSON.stringify({
+        batch_id: batchId,
+        total_amount: totalAmount,
+        path: "rpc_phase4_batch_tx",
+        allocations: results
+      })
+    );
+    return ok({
+      message: "BATCH_PAYMENT_REGISTERED",
+      batch_id: batchId,
+      customer_id: customerId,
+      currency: currency,
+      total_amount: totalAmount,
+      total_outstanding_before: totalOutstanding,
+      remaining_unallocated: roundMoney_(allocPack.remaining),
+      batch_rpc: rpcRes.batch_rpc === true,
+      allocations: results
+    });
+  }
+
   for (let i = 0; i < allocations.length; i++) {
     const item = allocations[i];
     const ar = item.ar;
@@ -1029,6 +1431,7 @@ async function registerArPaymentBatchBundle(p) {
       ar_id: arId,
       payment_date: paymentDate,
       amount: amount,
+      status: "POSTED",
       remark: remarkPrefix,
       created_by: actor,
       created_at: ts,
@@ -1114,12 +1517,59 @@ async function registerArPaymentBundle(p) {
   const paymentId = String(p.payment_id || "").trim() || buildId_("ARP");
   const remark = String(p.remark || "");
   const ts = nowIso();
+  const gapAdjustId = writeoffPlan ? buildId_("ARA") : "";
+  const gapWriteoff = writeoffPlan
+    ? {
+        amount_before: writeoffPlan.dueBefore,
+        amount_after: writeoffPlan.newDue,
+        reason: "登記收款沖銷差額：" + writeoffPlan.label,
+        adjust_id: gapAdjustId
+      }
+    : null;
+
+  const rpcRes = await tryRegisterArPaymentPhase4TxRpc_(sb, {
+    paymentId,
+    arId,
+    paymentDate,
+    amount,
+    remark,
+    actor,
+    ts,
+    gapWriteoff
+  });
+  if (rpcRes && rpcRes.rpcMissing) {
+    // RPC 未部署：fallback Node 多步
+  } else if (rpcRes && rpcRes.success === false) {
+    return rpcRes;
+  } else if (rpcRes && rpcRes.success !== false) {
+    await writeAuditLog_(
+      "ar_receivable",
+      arId,
+      "BUNDLE_REGISTER_AR_PAYMENT",
+      actor,
+      JSON.stringify({
+        payment_id: paymentId,
+        amount: amount,
+        amount_received: rpcRes.amount_received,
+        status: rpcRes.status,
+        gap_writeoff: writeoffPlan
+          ? { code: writeoffPlan.code, gap: writeoffPlan.gap, amount_due_after: rpcRes.amount_due }
+          : null,
+        path: "rpc_phase4_tx"
+      })
+    );
+    if (writeoffPlan && !rpcRes.gap_writeoff) {
+      rpcRes.gap_writeoff = { gap: writeoffPlan.gap, label: writeoffPlan.label };
+    }
+    return rpcRes;
+  }
 
   const { error: insErr } = await sb.from("ar_payment").insert({
     payment_id: paymentId,
     ar_id: arId,
     payment_date: paymentDate,
     amount: amount,
+    status: "POSTED",
     remark: remark,
     created_by: actor,
     created_at: nowIso(),
@@ -1354,7 +1804,10 @@ async function applyVoidArPayment_(sb, pay, actor, voidReason) {
   const { error: updPayErr } = await sb
     .from("ar_payment")
     .update({
-      amount: 0,
+      status: "VOID",
+      void_reason: voidReason,
+      voided_by: actor,
+      voided_at: ts,
       remark: voidRemark,
       updated_by: actor,
       updated_at: ts,
@@ -1438,6 +1891,50 @@ async function voidArPaymentBundle(p) {
   if (!pay) return fail("Payment not found: " + paymentId);
 
   const voidReason = String(p.void_reason || p.reason || "").trim();
+  const ts = nowIso();
+  const voidAmount = roundMoney_(pay.amount);
+  const arRemarkAppend =
+    "[" +
+    ts +
+    "] " +
+    actor +
+    " 作廢收款 " +
+    voidAmount +
+    "（" +
+    paymentId +
+    "）" +
+    (voidReason ? "：" + voidReason : "");
+
+  const rpcRes = await tryVoidArPaymentPhase4TxRpc_(sb, {
+    paymentId,
+    voidReason,
+    actor,
+    ts,
+    arRemarkAppend
+  });
+  if (rpcRes && rpcRes.rpcMissing) {
+    // RPC 未部署：fallback Node 多步
+  } else if (rpcRes && rpcRes.success === false) {
+    return rpcRes;
+  } else if (rpcRes && rpcRes.success !== false) {
+    await writeAuditLog_(
+      "ar_receivable",
+      rpcRes.ar_id || normArId_(pay.ar_id),
+      "BUNDLE_VOID_AR_PAYMENT",
+      actor,
+      JSON.stringify({
+        voided_payment_id: paymentId,
+        void_reason: voidReason,
+        amount_received: rpcRes.amount_received,
+        status: rpcRes.status,
+        reopened: rpcRes.reopened,
+        gap_restored: rpcRes.gap_restored === true,
+        path: "rpc_phase4_tx"
+      })
+    );
+    return rpcRes;
+  }
+
   const result = await applyVoidArPayment_(sb, pay, actor, voidReason);
   if (!result.ok) return fail(result.err);
 
@@ -1448,7 +1945,8 @@ async function voidArPaymentBundle(p) {
     voided_amount: result.voided_amount,
     amount_received: result.amount_received,
     status: result.status,
-    reopened: result.reopened
+    reopened: result.reopened,
+    payment_status: "VOID"
   });
 }
 
@@ -1479,6 +1977,35 @@ async function voidArPaymentBatchBundle(p) {
   if (!active.length) return fail("此批次收款已全部作廢");
 
   const voidReason = String(p.void_reason || p.reason || "").trim();
+  const ts = nowIso();
+
+  const rpcRes = await tryVoidArPaymentBatchPhase4TxRpc_(sb, {
+    batchId,
+    voidReason,
+    actor,
+    ts
+  });
+  if (rpcRes && rpcRes.rpcMissing) {
+    // RPC 未部署：fallback Node 多步
+  } else if (rpcRes && rpcRes.success === false) {
+    return rpcRes;
+  } else if (rpcRes && rpcRes.success !== false) {
+    await writeAuditLog_(
+      "ar_receivable",
+      batchId,
+      "BUNDLE_VOID_AR_PAYMENT_BATCH",
+      actor,
+      JSON.stringify({
+        batch_id: batchId,
+        void_reason: voidReason,
+        voided_count: rpcRes.voided_count,
+        path: "rpc_phase4_batch_tx",
+        allocations: rpcRes.allocations
+      })
+    );
+    return rpcRes;
+  }
+
   const results = [];
   for (let i = 0; i < active.length; i++) {
     const result = await applyVoidArPayment_(sb, active[i], actor, voidReason);
@@ -1565,16 +2092,23 @@ async function adjustArAmountBundle(p) {
 
   const ts = nowIso();
   const adjustId = buildId_("ARA");
-  const { error: logErr } = await sb.from("ar_amount_adjustment_log").insert({
-    adjust_id: adjustId,
-    ar_id: arId,
-    amount_before: before,
-    amount_after: newDue,
+  const src = resolveAdjustSource_(p, adjustId);
+  const ins = await insertArAdjustmentLog_(sb, {
+    adjustId: adjustId,
+    arId: arId,
+    amountBefore: before,
+    amountAfter: newDue,
     reason: reason,
-    adjusted_by: actor,
-    adjusted_at: ts
+    actor: actor,
+    ts: ts,
+    sourceType: src.sourceType,
+    sourceId: src.sourceId
   });
-  if (logErr) return fail(logErr.message || String(logErr));
+  if (ins.err) return fail(ins.err);
+  if (ins.idempotent && Math.abs(roundMoney_(ins.amount_after) - newDue) > 1e-9) {
+    return fail("同來源調整已存在且金額不一致");
+  }
+  const finalAdjustId = ins.adjustId || adjustId;
 
   const sync = buildArSyncPatch_(ar, newDue, received, actor, ts);
   let sysRemark = appendSystemRemark_(ar.system_remark, "[" + ts + "] " + actor + " 調整應收 " + before + " → " + newDue + "：" + reason);
@@ -1592,10 +2126,12 @@ async function adjustArAmountBundle(p) {
     "BUNDLE_ADJUST_AR_AMOUNT",
     actor,
     JSON.stringify({
-      adjust_id: adjustId,
+      adjust_id: finalAdjustId,
       amount_before: before,
       amount_after: newDue,
       reason: reason,
+      source_type: src.sourceType,
+      source_id: src.sourceId,
       reopened: sync.reopened
     })
   );
@@ -1677,16 +2213,18 @@ async function forceCloseArBundle(p) {
     finalDue = received;
     const adjustId = buildId_("ARA");
     const adjReason = "強制結案沖銷：" + reason;
-    const { error: logErr } = await sb.from("ar_amount_adjustment_log").insert({
-      adjust_id: adjustId,
-      ar_id: arId,
-      amount_before: due,
-      amount_after: finalDue,
+    const ins = await insertArAdjustmentLog_(sb, {
+      adjustId: adjustId,
+      arId: arId,
+      amountBefore: due,
+      amountAfter: finalDue,
       reason: adjReason,
-      adjusted_by: actor,
-      adjusted_at: nowIso()
+      actor: actor,
+      ts: nowIso(),
+      sourceType: AR_ADJ_SOURCE_.AR_FORCE_CLOSE,
+      sourceId: arId
     });
-    if (logErr) return fail(logErr.message || String(logErr));
+    if (ins.err) return fail(ins.err);
   }
 
   const sysRemark = appendSystemRemark_(
@@ -1752,18 +2290,21 @@ async function voidArForCancelledCaseSettlement_(sb, arId, reason, actor, ts) {
 
   const voidReason = String(reason || "").trim() || "作廢寄賣結算";
   const due = roundMoney_(ar.amount_due);
+  const settlementId = normArId_(ar.settlement_id || ar.source_id);
   if (due > 1e-9) {
     const adjustId = buildId_("ARA");
-    const { error: logErr } = await sb.from("ar_amount_adjustment_log").insert({
-      adjust_id: adjustId,
-      ar_id: aid,
-      amount_before: due,
-      amount_after: 0,
+    const ins = await insertArAdjustmentLog_(sb, {
+      adjustId: adjustId,
+      arId: aid,
+      amountBefore: due,
+      amountAfter: 0,
       reason: "作廢寄賣結算：" + voidReason,
-      adjusted_by: actor,
-      adjusted_at: ts || nowIso()
+      actor: actor,
+      ts: ts || nowIso(),
+      sourceType: AR_ADJ_SOURCE_.CONSIGNMENT_SETTLEMENT_VOID,
+      sourceId: settlementId || aid
     });
-    if (logErr) return fail(logErr.message || String(logErr));
+    if (ins.err) return fail(ins.err);
   }
 
   const sysRemark = appendSystemRemark_(
@@ -1825,16 +2366,18 @@ async function voidArForCancelledShipment_(sb, shipmentId, reason, actor, ts) {
   const due = roundMoney_(ar.amount_due);
   if (due > 1e-9) {
     const adjustId = buildId_("ARA");
-    const { error: logErr } = await sb.from("ar_amount_adjustment_log").insert({
-      adjust_id: adjustId,
-      ar_id: arId,
-      amount_before: due,
-      amount_after: 0,
+    const ins = await insertArAdjustmentLog_(sb, {
+      adjustId: adjustId,
+      arId: arId,
+      amountBefore: due,
+      amountAfter: 0,
       reason: "作廢出貨：" + voidReason,
-      adjusted_by: actor,
-      adjusted_at: ts || nowIso()
+      actor: actor,
+      ts: ts || nowIso(),
+      sourceType: AR_ADJ_SOURCE_.SHIPMENT_VOID,
+      sourceId: sid
     });
-    if (logErr) return fail(logErr.message || String(logErr));
+    if (ins.err) return fail(ins.err);
   }
 
   const sysRemark = appendSystemRemark_(

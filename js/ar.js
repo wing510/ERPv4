@@ -168,12 +168,15 @@ function arFormatPaymentDateCell_(p) {
 }
 
 function arIsPaymentVoided_(p) {
+  const st = String(p?.status || "").trim().toUpperCase();
+  if (st === "VOID") return true;
   const sm = String(p?.system_remark || "");
   if (sm.indexOf("VOIDED|") >= 0) return true;
   return roundMoney_(p?.amount) <= 1e-9 && String(p?.remark || "").indexOf("[已作廢]") === 0;
 }
 
 function arPaymentVoidOriginalAmount_(p) {
+  if (arIsPaymentVoided_(p)) return roundMoney_(p?.amount);
   const sm = String(p?.system_remark || "");
   const m = sm.match(/VOIDED\|amount=([0-9.]+)/);
   if (m) return roundMoney_(m[1]);
@@ -664,6 +667,15 @@ function arGetBatchSelectedRows_() {
   });
 }
 
+function arBatchDistinctCustomerIds_(rows) {
+  const map = {};
+  (rows || []).forEach(function (row) {
+    const cid = String(row.customer_id || "").trim().toUpperCase();
+    if (cid) map[cid] = true;
+  });
+  return Object.keys(map);
+}
+
 function arBatchEligibleRow_(row) {
   const st = String(row?.status || "").trim().toUpperCase();
   return st === "OPEN" || st === "PARTIAL";
@@ -715,11 +727,16 @@ function arSyncBatchToolbar_() {
     return arIsRowInArDateRange_(row, bounds.from, bounds.to);
   });
   const canSelectMonth = arCanOperate_() && monthEligible.length > 0;
+  const allCids = arBatchDistinctCustomerIds_(eligible);
   const btn = document.getElementById("ar_batch_select_all_btn");
   const monthBtn = document.getElementById("ar_batch_select_month_btn");
   if (btn) {
     btn.disabled = !canSelectAll;
-    btn.title = canSelectAll ? "全選列表上所有未結清 AR" : "本頁無可勾選的未結清 AR";
+    btn.title = !canSelectAll
+      ? "本頁無可勾選的未結清 AR"
+      : allCids.length > 1
+        ? "列表含多個客戶，請先篩選單一客戶"
+        : "全選列表上所有未結清 AR";
   }
   if (monthBtn) {
     monthBtn.disabled = !canSelectMonth;
@@ -1396,6 +1413,10 @@ function arSyncBatchCheckboxes_() {
 function arBatchSelectAllOpen_() {
   const eligible = (arRows_ || []).filter(arBatchEligibleRow_);
   if (!eligible.length) return showToast("本頁無可勾選的未結清 AR", "warning");
+  const cids = arBatchDistinctCustomerIds_(eligible);
+  if (cids.length > 1) {
+    return showToast("列表含多個客戶，請先篩選單一客戶，或改勾選同一客戶群組", "warning");
+  }
   arBatchSelectedIds_ = {};
   eligible.forEach(function (row) {
     arBatchSelectedIds_[String(row.ar_id || "").trim().toUpperCase()] = true;
@@ -1443,13 +1464,22 @@ function arUpdateBatchUi_() {
   const show = arCanOperate_() && rows.length > 0;
   if (show) arCloseDetail_();
   if (card) card.style.display = show ? "" : "none";
+  const batchCids = arBatchDistinctCustomerIds_(rows);
   if (label && rows.length) {
-    const cid = String(rows[0].customer_id || "").trim().toUpperCase();
-    label.textContent = arCustomerName_(rows[0]) + "（" + rows.length + " 筆）";
+    if (batchCids.length > 1) {
+      label.textContent = "錯誤：勾選含 " + batchCids.length + " 個客戶";
+    } else {
+      label.textContent = arCustomerName_(rows[0]) + "（" + rows.length + " 筆）";
+    }
   }
   if (submitBtn) {
-    submitBtn.disabled = !show;
-    submitBtn.title = show ? "確認批次收款" : "請勾選 AR 並填匯款總額";
+    const multiCustomer = batchCids.length > 1;
+    submitBtn.disabled = !show || multiCustomer;
+    submitBtn.title = multiCustomer
+      ? "批次收款僅限同一客戶"
+      : show
+        ? "確認批次收款"
+        : "請勾選 AR 並填匯款總額";
   }
   arUpdateBatchPreview_();
   if (show && card) {
@@ -1472,6 +1502,20 @@ function arUpdateBatchPreview_() {
     if (submitBtn) {
       submitBtn.disabled = true;
       submitBtn.title = "請勾選 AR 並填匯款總額";
+    }
+    return;
+  }
+
+  if (arBatchDistinctCustomerIds_(rows).length > 1) {
+    body.innerHTML =
+      '<tr><td colspan="6" style="color:#b42318;">批次收款僅限同一客戶，請清除勾選後重選</td></tr>';
+    if (summary) {
+      summary.innerHTML =
+        '<div style="color:#b42318;"><strong>已勾選多個客戶</strong>，請只保留同一客戶的 AR（可用「清除勾選」後重選）</div>';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.title = "批次收款僅限同一客戶";
     }
     return;
   }
@@ -1579,6 +1623,9 @@ async function arSubmitBatchPayment_(triggerEl) {
   if (!arCanOperate_()) return showToast("僅會計／CEO／GA／ADMIN 可操作", "error");
   const rows = arGetBatchSelectedRows_();
   if (!rows.length) return showToast("請先勾選 AR", "error");
+  if (arBatchDistinctCustomerIds_(rows).length > 1) {
+    return showToast("批次收款僅限同一客戶，請清除勾選後重選", "error");
+  }
   const paymentDate = String(document.getElementById("ar_batch_pay_date")?.value || "").trim();
   const totalAmount = roundMoney_(document.getElementById("ar_batch_pay_amount")?.value || 0);
   const remark = arBuildBatchPaymentRemark_();

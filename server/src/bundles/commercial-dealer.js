@@ -46,6 +46,221 @@ function periodYmFromDate_(dateStr) {
   return null;
 }
 
+function periodYmFromDate_(dateStr) {
+  const s = String(dateStr || "").trim();
+  if (s.length >= 7 && /^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
+  return null;
+}
+
+function isRpcMissingErr_(msg) {
+  const s = String(msg || "");
+  return /could not find the function|schema cache|42883|function .* does not exist|column.*does not exist|Could not find the '.*' column/i.test(
+    s
+  );
+}
+
+async function tryPostLevelPhase3TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_post_level_phase3_tx", {
+    p_level_post_id: normId_(o.levelPostId),
+    p_stat_id: normId_(o.statId),
+    p_customer_id: normId_(o.customerId),
+    p_period_ym: String(o.periodYm || "").trim(),
+    p_cumulative_scheme_id: normId_(o.cumulativeSchemeId),
+    p_billing_net_consignment: Number(o.billingNetConsignment || 0),
+    p_billing_net_general: Number(o.billingNetGeneral || 0),
+    p_billing_net_total: Number(o.billingNetTotal || 0),
+    p_cumulative_add_consignment: Number(o.cumulativeAddConsignment || 0),
+    p_cumulative_add_general: Number(o.cumulativeAddGeneral || 0),
+    p_cumulative_before: o.cumulativeBefore != null ? Number(o.cumulativeBefore) : null,
+    p_cumulative_after: o.cumulativeAfter != null ? Number(o.cumulativeAfter) : null,
+    p_pending_tier_label: String(o.pendingTierLabel || ""),
+    p_pending_price_rate: o.pendingPriceRate != null ? Number(o.pendingPriceRate) : null,
+    p_pending_from_ym: String(o.pendingFromYm || ""),
+    p_expected_cumulative_before: Number(o.expectedCumulativeBefore || 0),
+    p_remark: String(o.remark || ""),
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+  if (error) {
+    if (isRpcMissingErr_(error.message || error)) return { rpcMissing: true };
+    return fail(error.message || String(error));
+  }
+  if (!data || data.ok !== true) return fail(String((data && data.error) || "erp_cc_post_level_phase3_tx failed"));
+  return ok(
+    Object.assign({}, data, {
+      level_post_id: normId_(data.level_post_id || o.levelPostId),
+      level_rpc: data.level_rpc === true,
+      idempotent: !!data.idempotent
+    })
+  );
+}
+
+async function tryVoidLevelPhase3TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_void_level_phase3_tx", {
+    p_level_post_id: normId_(o.levelPostId),
+    p_void_reason: String(o.voidReason || "").trim(),
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+  if (error) {
+    if (isRpcMissingErr_(error.message || error)) return { rpcMissing: true };
+    return fail(error.message || String(error));
+  }
+  if (!data || data.ok !== true) return fail(String((data && data.error) || "erp_cc_void_level_phase3_tx failed"));
+  return ok(
+    Object.assign({}, data, {
+      level_post_id: normId_(data.level_post_id || o.levelPostId),
+      level_rpc: data.level_rpc === true,
+      idempotent: !!data.idempotent
+    })
+  );
+}
+
+async function tryPostRebateCfPhase3TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_post_rebate_cf_phase3_tx", {
+    p_rebate_json: o.rebateJson || {},
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+  if (error) {
+    if (isRpcMissingErr_(error.message || error)) return { rpcMissing: true };
+    return fail(error.message || String(error));
+  }
+  if (!data || data.ok !== true) return fail(String((data && data.error) || "erp_cc_post_rebate_cf_phase3_tx failed"));
+  return ok(
+    Object.assign({}, data, {
+      rebate_id: normId_(data.rebate_id || o.rebateJson?.rebate_id),
+      rebate_rpc: data.rebate_rpc === true,
+      idempotent: !!data.idempotent
+    })
+  );
+}
+
+async function tryVoidRebateCfPhase3TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_void_rebate_cf_phase3_tx", {
+    p_rebate_id: normId_(o.rebateId),
+    p_void_reason: String(o.voidReason || "").trim(),
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+  if (error) {
+    if (isRpcMissingErr_(error.message || error)) return { rpcMissing: true };
+    return fail(error.message || String(error));
+  }
+  if (!data || data.ok !== true) return fail(String((data && data.error) || "erp_cc_void_rebate_cf_phase3_tx failed"));
+  return ok(
+    Object.assign({}, data, {
+      rebate_id: normId_(data.rebate_id || o.rebateId),
+      rebate_rpc: data.rebate_rpc === true,
+      idempotent: !!data.idempotent
+    })
+  );
+}
+
+async function tryPostRebateCnPhase3TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_post_rebate_cn_phase3_tx", {
+    p_rebate_json: o.rebateJson || {},
+    p_ar_cuts: o.arCuts || [],
+    p_period_ym: String(o.periodYm || "").trim(),
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+  if (error) {
+    if (isRpcMissingErr_(error.message || error)) return { rpcMissing: true };
+    return fail(error.message || String(error));
+  }
+  if (!data || data.ok !== true) return fail(String((data && data.error) || "erp_cc_post_rebate_cn_phase3_tx failed"));
+  return ok(
+    Object.assign({}, data, {
+      rebate_id: normId_(data.rebate_id || o.rebateJson?.rebate_id),
+      rebate_rpc: data.rebate_rpc === true,
+      idempotent: !!data.idempotent
+    })
+  );
+}
+
+async function tryVoidRebateCnPhase3TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_void_rebate_cn_phase3_tx", {
+    p_rebate_id: normId_(o.rebateId),
+    p_void_reason: String(o.voidReason || "").trim(),
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+  if (error) {
+    if (isRpcMissingErr_(error.message || error)) return { rpcMissing: true };
+    return fail(error.message || String(error));
+  }
+  if (!data || data.ok !== true) return fail(String((data && data.error) || "erp_cc_void_rebate_cn_phase3_tx failed"));
+  return ok(
+    Object.assign({}, data, {
+      rebate_id: normId_(data.rebate_id || o.rebateId),
+      rebate_rpc: data.rebate_rpc === true,
+      idempotent: !!data.idempotent
+    })
+  );
+}
+
+async function tryVoidMonthlyClosePhase3TxRpc_(sb, opts) {
+  const o = opts || {};
+  const { data, error } = await sb.rpc("erp_cc_void_monthly_close_phase3_tx", {
+    p_customer_id: normId_(o.customerId),
+    p_period_ym: String(o.periodYm || "").trim(),
+    p_void_reason: String(o.voidReason || "").trim(),
+    p_actor: String(o.actor || "").trim(),
+    p_ts: o.ts || nowIso()
+  });
+  if (error) {
+    if (isRpcMissingErr_(error.message || error)) return { rpcMissing: true };
+    return fail(error.message || String(error));
+  }
+  if (!data || data.ok !== true) {
+    return fail(String((data && data.error) || "erp_cc_void_monthly_close_phase3_tx failed"));
+  }
+  return ok(
+    Object.assign({}, data, {
+      stat_id: String(data.stat_id || ""),
+      close_rpc: data.close_rpc === true,
+      steps: data.steps || []
+    })
+  );
+}
+
+async function trySyncDealerLedgerCustomerRpc_(sb, customerId, actor, ts) {
+  const { data, error } = await sb.rpc("erp_dealer_ledger_sync_customer_", {
+    p_customer_id: normId_(customerId),
+    p_actor: String(actor || "").trim(),
+    p_ts: ts || nowIso()
+  });
+  if (error) {
+    if (isRpcMissingErr_(error.message || error)) return { rpcMissing: true };
+    throw new Error(error.message || String(error));
+  }
+  return { synced: true, cumulative_amount: roundMoney_(data) };
+}
+
+async function customerHasDealerLedgerRows_(sb, customerId) {
+  const custId = normId_(customerId);
+  if (!custId) return false;
+  const { data, error } = await sb
+    .from("dealer_cumulative_ledger")
+    .select("ledger_id")
+    .eq("customer_id", custId)
+    .limit(1);
+  if (error) {
+    if (/does not exist|could not find the table|schema cache/i.test(error.message || String(error))) {
+      return false;
+    }
+    throw new Error(error.message || String(error));
+  }
+  return !!(data && data.length);
+}
+
 /** 作廢寄賣結算前：該客戶該月已有月結回饋（未作廢）則阻擋 */
 async function assertNoLockedDealerRebateForSettlementVoid_(sb, opts) {
   const o = opts && typeof opts === "object" ? opts : {};
@@ -264,10 +479,6 @@ function resolveBillingNetForCumulativeOnRebate_(billingPack, rebateStatSource) 
   return roundMoney_(billingPack?.billing_net);
 }
 
-/**
- * 次月結算折抵：僅 period_ym 嚴格小於結算日所在月份的 POSTED CARRY_FORWARD 回饋可套用。
- * 已消耗額度依回饋月份 FIFO 分配（舊回饋先扣）。
- */
 function computeEligibleDealerCreditForSettlement_(opts) {
   const settlementYm = periodYmFromDate_(opts && opts.settlementDate);
   const balance = roundMoney_(Number((opts && opts.creditBalance) || 0));
@@ -302,6 +513,19 @@ function computeEligibleDealerCreditForSettlement_(opts) {
   });
 
   return roundMoney_(Math.min(balance, eligibleRemaining));
+}
+
+/** 月結列表：所選月份結算可套用之次月折抵（同結算口徑） */
+function resolveEligibleRebateCreditForPeriodYm_(customerRow, carryRebates, periodYm) {
+  const rebateScheme = normId_(customerRow?.dealer_rebate_scheme_id) || normId_(customerRow?.dealer_scheme_id);
+  if (!rebateScheme) return 0;
+  const balance = roundMoney_(Number(customerRow?.dealer_rebate_credit_balance || 0));
+  if (balance <= 1e-9) return 0;
+  return computeEligibleDealerCreditForSettlement_({
+    settlementDate: String(periodYm || "").trim() + "-01",
+    creditBalance: balance,
+    postedCarryForwardRebates: Array.isArray(carryRebates) ? carryRebates : []
+  });
 }
 
 async function applyDealerCreditAtSettlement_(opts) {
@@ -382,7 +606,8 @@ async function applyDealerCreditAtSettlement_(opts) {
     updated_by: actor,
     created_by: actor,
     _session: session,
-    _from_settlement_dealer_credit: true
+    _from_settlement_dealer_credit: true,
+    settlement_id: sid
   });
   if (adjRes && adjRes.success === false) {
     return { err: (adjRes.errors && adjRes.errors[0]) || "經銷折抵套用失敗" };
@@ -491,7 +716,8 @@ async function applyDealerCreditAtShipment_(opts) {
     updated_by: actor,
     created_by: actor,
     _session: session,
-    _from_settlement_dealer_credit: true
+    _from_shipment_dealer_credit: true,
+    shipment_id: sid
   });
   if (adjRes && adjRes.success === false) {
     return { err: (adjRes.errors && adjRes.errors[0]) || "經銷折抵套用失敗" };
@@ -529,12 +755,23 @@ async function restoreDealerCreditOnSettlementVoid_(opts) {
   if (!sid || !aid || !custId) return { skipped: true, credit_restored: 0 };
 
   const reason = dealerCreditSettlementReason_(sid);
-  const { data: logs, error } = await sb
+  let logs = [];
+  const { data: logsBySrc, error: srcErr } = await sb
     .from("ar_amount_adjustment_log")
     .select("amount_before, amount_after")
-    .eq("ar_id", aid)
-    .eq("reason", reason);
-  if (error) throw new Error(error.message || String(error));
+    .eq("source_type", "SETTLEMENT_CREDIT")
+    .eq("source_id", sid);
+  if (srcErr) throw new Error(srcErr.message || String(srcErr));
+  logs = logsBySrc || [];
+  if (!logs.length) {
+    const { data: logsByReason, error } = await sb
+      .from("ar_amount_adjustment_log")
+      .select("amount_before, amount_after")
+      .eq("ar_id", aid)
+      .eq("reason", reason);
+    if (error) throw new Error(error.message || String(error));
+    logs = logsByReason || [];
+  }
 
   let cut = 0;
   (logs || []).forEach((log) => {
@@ -1002,6 +1239,18 @@ async function applyCustomerCumulativeAmountAdd_(sb, opts) {
     if (upgradeFromYm) patch.dealer_cumulative_pending_from_ym = upgradeFromYm;
   }
 
+  if (opts && opts.dryRun) {
+    return {
+      cumulative_before: before,
+      cumulative_after: after,
+      cumulative_added: billingNet,
+      upgrade,
+      pending_tier_label: pendingTierLabel,
+      pending_price_rate: pendingPriceRate,
+      dry_run: true
+    };
+  }
+
   const { error: updErr } = await sb.from("customer").update(patch).eq("customer_id", customerId);
   if (updErr) throw new Error(updErr.message || String(updErr));
 
@@ -1209,6 +1458,16 @@ async function syncCustomerCumulativeFromSources_(sb, customerId, actor, ts) {
   const who = String(actor || "").trim();
   const when = ts || nowIso();
   try {
+    if (await customerHasDealerLedgerRows_(sb, custId)) {
+      const ledgerSync = await trySyncDealerLedgerCustomerRpc_(sb, custId, who, when);
+      if (!ledgerSync.rpcMissing) {
+        return {
+          cumulative_after: ledgerSync.cumulative_amount,
+          recalculated: true,
+          source: "dealer_cumulative_ledger"
+        };
+      }
+    }
     return await recalculateCustomerCumulativeFromPostedRebates_(sb, custId, who, when);
   } catch (e) {
     return { err: e?.message || String(e) };
@@ -1450,6 +1709,10 @@ function isDealerRebateArAdjustmentReason_(reason) {
   return false;
 }
 
+function isArAdjustmentExcludedFromBillingNet_(reason) {
+  return isDealerRebateArAdjustmentReason_(reason);
+}
+
 async function sumArDiscountAdjustments_(sb, arIds) {
   const ids = (arIds || []).map(normId_).filter(Boolean);
   if (!ids.length) return 0;
@@ -1460,7 +1723,7 @@ async function sumArDiscountAdjustments_(sb, arIds) {
   if (error) throw new Error(error.message || String(error));
   let net = 0;
   (data || []).forEach((row) => {
-    if (isDealerRebateArAdjustmentReason_(row.reason)) return;
+    if (isArAdjustmentExcludedFromBillingNet_(row.reason)) return;
     const before = Number(row.amount_before || 0);
     const after = Number(row.amount_after || 0);
     net += before - after;
@@ -1501,7 +1764,7 @@ async function computeConsignmentBillingNet_(sb, customerId, periodYm) {
     customer_id: cust,
     settlement_count: rows.length,
     gross_settlement: gross,
-    /** 結算應收上的非回饋調降（已售退貨等）；不含月結回饋折讓／作廢還原 */
+    /** 結算應收上的商業調降（已售退貨等）；不含月結回饋折讓、收款沖銷、強制結案尾數 */
     ar_discount_total: discountAdj,
     billing_net,
     settlements: rows.map((s) => ({
@@ -1694,7 +1957,8 @@ async function repairArDueIfAboveSystem_(arRow, actor, session) {
     reason_code: "AMOUNT_FIX",
     updated_by: actor,
     created_by: actor,
-    _session: session
+    _session: session,
+    _system_repair: true
   });
   if (adjRes && adjRes.success === false) {
     return { err: (adjRes.errors && adjRes.errors[0]) || "AR 修復失敗: " + arId };
@@ -1702,7 +1966,7 @@ async function repairArDueIfAboveSystem_(arRow, actor, session) {
   return { ar_id: arId, amount_due: sys, repaired: roundMoney_(due - sys) };
 }
 
-async function applyRebateCreditNote_(sb, arIds, rebateAmount, periodYm, actor, session) {
+async function planRebateCreditNote_(sb, arIds, rebateAmount, periodYm, actor, session, opts) {
   const ids = (arIds || []).map(normId_).filter(Boolean);
   if (!ids.length) return { err: "本月無可折讓的應收單" };
 
@@ -1724,29 +1988,30 @@ async function applyRebateCreditNote_(sb, arIds, rebateAmount, periodYm, actor, 
   let remaining = roundMoney_(rebateAmount);
   let primaryArId = "";
   let applied = 0;
-  const reason = dealerRebateDiscountReason_(periodYm);
+  const cuts = [];
+  const allowRepair = !!(opts && opts.allowRepair);
 
   for (const ar of open) {
     if (remaining <= 1e-9) break;
     const arId = normId_(ar.ar_id);
-    const repairRes = await repairArDueIfAboveSystem_(ar, actor, session);
-    if (repairRes.err) return { err: repairRes.err };
-    let due = roundMoney_(repairRes.amount_due);
+    let due = roundMoney_(ar.amount_due);
+    if (allowRepair) {
+      const repairRes = await repairArDueIfAboveSystem_(ar, actor, session);
+      if (repairRes.err) return { err: repairRes.err };
+      due = roundMoney_(repairRes.amount_due);
+    } else {
+      const sys = roundMoney_(ar.amount_system);
+      if (due > sys + 1e-9) due = sys;
+    }
     const cut = roundMoney_(Math.min(remaining, due));
     if (cut <= 1e-9) continue;
     const newDue = roundMoney_(due - cut);
-    const adjRes = await adjustArAmountBundle({
+    cuts.push({
       ar_id: arId,
-      amount_due: newDue,
-      reason,
-      reason_code: "DISCOUNT",
-      updated_by: actor,
-      created_by: actor,
-      _session: session
+      amount_before: due,
+      amount_after: newDue,
+      cut
     });
-    if (adjRes && adjRes.success === false) {
-      return { err: (adjRes.errors && adjRes.errors[0]) || "AR 折讓失敗" };
-    }
     if (!primaryArId) primaryArId = arId;
     applied = roundMoney_(applied + cut);
     remaining = roundMoney_(remaining - cut);
@@ -1756,7 +2021,35 @@ async function applyRebateCreditNote_(sb, arIds, rebateAmount, periodYm, actor, 
     return { err: "應收餘額不足套用全部回饋（尚差 " + remaining + "），請改用下期折抵或調整後重試" };
   }
 
-  return { ar_id: primaryArId, credit_applied: applied };
+  return { ar_id: primaryArId, credit_applied: applied, cuts };
+}
+
+async function applyRebateCreditNote_(sb, arIds, rebateAmount, periodYm, actor, session, opts) {
+  const plan = await planRebateCreditNote_(sb, arIds, rebateAmount, periodYm, actor, session, {
+    allowRepair: true
+  });
+  if (plan.err) return plan;
+
+  const reason = dealerRebateDiscountReason_(periodYm);
+  const rebateId = normId_(opts && opts.rebate_id);
+  for (const cut of plan.cuts || []) {
+    const adjRes = await adjustArAmountBundle({
+      ar_id: cut.ar_id,
+      amount_due: cut.amount_after,
+      reason,
+      reason_code: "DISCOUNT",
+      updated_by: actor,
+      created_by: actor,
+      _session: session,
+      _rebate_cn: true,
+      rebate_id: rebateId || periodYm + ":" + normId_(cut.ar_id)
+    });
+    if (adjRes && adjRes.success === false) {
+      return { err: (adjRes.errors && adjRes.errors[0]) || "AR 折讓失敗" };
+    }
+  }
+
+  return { ar_id: plan.ar_id, credit_applied: plan.credit_applied, cuts: plan.cuts };
 }
 
 async function reverseRebateCreditNote_(sb, customerId, periodYm, rebateRow, actor, session) {
@@ -1784,7 +2077,9 @@ async function reverseRebateCreditNote_(sb, customerId, periodYm, rebateRow, act
     reason_code: "AMOUNT_FIX",
     updated_by: actor,
     created_by: actor,
-    _session: session
+    _session: session,
+    _rebate_cn_void: true,
+    rebate_id: normId_(rebateRow && rebateRow.rebate_id)
   });
   if (adjRes && adjRes.success === false) {
     return { err: (adjRes.errors && adjRes.errors[0]) || "還原應收失敗: " + primaryAr };
@@ -2374,7 +2669,7 @@ async function assertMonthlyStatPostedForRebate_(sb, customerId, periodYm) {
   const drift = buildMonthlyStatBillingDrift_(statRow, liveAll);
   if (drift.has_new_billing) {
     return {
-      err: "本月月結統計已過帳，但過帳後又有新請款；請先作廢本月月結再重新過帳"
+      err: "本月月結統計已過帳，但過帳後 AR 有變動；請先作廢本月月結再重新過帳"
     };
   }
   return { statRow };
@@ -2456,7 +2751,7 @@ async function listCommercialDealerMonthlyStatPeriodSummary_(p) {
   const { data: customers, error: custErr } = await sb
     .from("customer")
     .select(
-      "customer_id, dealer_cumulative_scheme_id, dealer_rebate_scheme_id, dealer_scheme_id"
+      "customer_id, dealer_cumulative_scheme_id, dealer_rebate_scheme_id, dealer_scheme_id, dealer_rebate_credit_balance"
     )
     .in("customer_id", uniqueIds);
   if (custErr) return fail(custErr.message || String(custErr));
@@ -2464,6 +2759,21 @@ async function listCommercialDealerMonthlyStatPeriodSummary_(p) {
   const customerMap = {};
   (customers || []).forEach((c) => {
     customerMap[normId_(c.customer_id)] = c;
+  });
+
+  const carryByCustomer = {};
+  const { data: carryRows, error: carryErr } = await sb
+    .from("commercial_dealer_rebate")
+    .select("customer_id, period_ym, rebate_amount, status, settle_mode")
+    .in("customer_id", uniqueIds)
+    .eq("status", "POSTED")
+    .eq("settle_mode", "CARRY_FORWARD");
+  if (carryErr) return fail(carryErr.message || String(carryErr));
+  (carryRows || []).forEach((r) => {
+    const cid = normId_(r.customer_id);
+    if (!cid) return;
+    if (!carryByCustomer[cid]) carryByCustomer[cid] = [];
+    carryByCustomer[cid].push(r);
   });
 
   const { data: postedRows, error: statErr } = await sb
@@ -2594,6 +2904,15 @@ async function listCommercialDealerMonthlyStatPeriodSummary_(p) {
       });
     }
   }
+
+  out.forEach(function (row) {
+    const cid = normId_(row.customer_id);
+    row.eligible_rebate_credit = resolveEligibleRebateCreditForPeriodYm_(
+      customerMap[cid],
+      carryByCustomer[cid] || [],
+      periodYm
+    );
+  });
 
   return ok({ data: out, period_ym: periodYm, source: "supabase" });
 }
@@ -3066,7 +3385,7 @@ async function postCommercialDealerLevelBundle(p) {
 
   const drift = buildMonthlyStatBillingDrift_(statRow, ctx.billing);
   if (drift.has_new_billing) {
-    return fail("本月月結統計已過帳，但過帳後又有新請款；請先作廢本月月結再重新過帳");
+    return fail("本月月結統計已過帳，但過帳後 AR 有變動；請先作廢本月月結再重新過帳");
   }
 
   const billingForAdds = {
@@ -3107,10 +3426,87 @@ async function postCommercialDealerLevelBundle(p) {
     system_remark: ""
   };
 
+  let cumulativeRes = { skipped: true, cumulative_before: null, cumulative_after: null, pending_tier_label: "", pending_price_rate: null };
+  let expectedBefore = 0;
+  if (cumulativeAddTotal > 1e-9) {
+    try {
+      cumulativeRes = await applyCustomerCumulativeAmountAdd_(sb, {
+        customerId,
+        billingNet: cumulativeAddTotal,
+        actor,
+        ts,
+        upgradeFromYm: periodYm,
+        dryRun: true
+      });
+    } catch (e) {
+      return fail("累積預覽失敗：" + (e?.message || String(e)));
+    }
+    if (cumulativeRes.err) return fail(cumulativeRes.err);
+    expectedBefore = roundMoney_(cumulativeRes.cumulative_before);
+  } else {
+    const customer = await reloadCustomer_(sb, customerId);
+    expectedBefore = roundMoney_(customer?.dealer_cumulative_amount || 0);
+    cumulativeRes = {
+      cumulative_before: expectedBefore,
+      cumulative_after: expectedBefore,
+      pending_tier_label: "",
+      pending_price_rate: null
+    };
+  }
+
+  const rpcRes = await tryPostLevelPhase3TxRpc_(sb, {
+    levelPostId,
+    statId: row.stat_id,
+    customerId,
+    periodYm,
+    cumulativeSchemeId: cumSchemeId,
+    billingNetConsignment: row.billing_net_consignment,
+    billingNetGeneral: row.billing_net_general,
+    billingNetTotal: row.billing_net_total,
+    cumulativeAddConsignment,
+    cumulativeAddGeneral,
+    cumulativeBefore: cumulativeRes.cumulative_before,
+    cumulativeAfter: cumulativeRes.cumulative_after,
+    pendingTierLabel: cumulativeRes.pending_tier_label || "",
+    pendingPriceRate: cumulativeRes.pending_price_rate,
+    pendingFromYm: cumulativeRes.pending_tier_label ? periodYm : "",
+    expectedCumulativeBefore: expectedBefore,
+    remark: row.remark,
+    actor,
+    ts
+  });
+  if (!rpcRes.rpcMissing) {
+    if (rpcRes.success === false) return rpcRes;
+    if (!rpcRes.idempotent) {
+      await writeAuditLog_(
+        "commercial_dealer_level_post",
+        levelPostId,
+        "BUNDLE_POST_COMMERCIAL_DEALER_LEVEL",
+        actor,
+        JSON.stringify({
+          level_post_id: levelPostId,
+          stat_id: row.stat_id,
+          customer_id: customerId,
+          period_ym: periodYm,
+          cumulative_add_total: cumulativeAddTotal,
+          rpc: "erp_cc_post_level_phase3_tx"
+        })
+      );
+    }
+    return ok({
+      level_post_id: levelPostId,
+      stat_id: row.stat_id,
+      cumulative_add_total: cumulativeAddTotal,
+      cumulative: cumulativeRes.skipped ? null : cumulativeRes,
+      level_rpc: rpcRes.level_rpc === true,
+      idempotent: !!rpcRes.idempotent
+    });
+  }
+
   const { error: insErr } = await sb.from("commercial_dealer_level_post").insert(row);
   if (insErr) return fail(insErr.message || String(insErr));
 
-  let cumulativeRes = { skipped: true };
+  cumulativeRes = { skipped: true };
   if (cumulativeAddTotal > 1e-9) {
     try {
       cumulativeRes = await applyCustomerCumulativeAmountAdd_(sb, {
@@ -3208,7 +3604,8 @@ async function postCommercialDealerLevelBundle(p) {
     level_post_id: levelPostId,
     stat_id: row.stat_id,
     cumulative_add_total: cumulativeAddTotal,
-    cumulative: cumulativeRes.skipped ? null : cumulativeRes
+    cumulative: cumulativeRes.skipped ? null : cumulativeRes,
+    level_rpc: false
   });
 }
 
@@ -3240,6 +3637,37 @@ async function voidCommercialDealerLevelPostBundle(p) {
   const customerId = normId_(row.customer_id);
   const ts = nowIso();
   const removed = roundMoney_((row.cumulative_add_consignment || 0) + (row.cumulative_add_general || 0));
+
+  const rpcRes = await tryVoidLevelPhase3TxRpc_(sb, {
+    levelPostId,
+    voidReason,
+    actor,
+    ts
+  });
+  if (!rpcRes.rpcMissing) {
+    if (rpcRes.success === false) return rpcRes;
+    if (!rpcRes.idempotent) {
+      await writeAuditLog_(
+        "commercial_dealer_level_post",
+        levelPostId,
+        "BUNDLE_VOID_COMMERCIAL_DEALER_LEVEL",
+        actor,
+        JSON.stringify({
+          level_post_id: levelPostId,
+          void_reason: voidReason,
+          cumulative_removed: removed,
+          rpc: "erp_cc_void_level_phase3_tx"
+        })
+      );
+    }
+    return ok({
+      level_post_id: levelPostId,
+      message: rpcRes.message || "VOIDED",
+      cumulative_removed: roundMoney_(Number(rpcRes.cumulative_removed != null ? rpcRes.cumulative_removed : removed)),
+      level_rpc: rpcRes.level_rpc === true,
+      idempotent: !!rpcRes.idempotent
+    });
+  }
 
   if (removed > 1e-9) {
     const customer = await reloadCustomer_(sb, customerId);
@@ -3290,7 +3718,7 @@ async function voidCommercialDealerLevelPostBundle(p) {
     JSON.stringify({ level_post_id: levelPostId, void_reason: voidReason, cumulative_removed: removed })
   );
 
-  return ok({ level_post_id: levelPostId, message: "VOIDED", cumulative_removed: removed });
+  return ok({ level_post_id: levelPostId, message: "VOIDED", cumulative_removed: removed, level_rpc: false });
 }
 
 async function voidLegacyLevelInStatRow_(sb, statRow, actor, voidReason, ts) {
@@ -3368,6 +3796,49 @@ async function voidCommercialDealerMonthlyCloseBundle(p) {
 
   const sb = getSupabase();
   const ts = nowIso();
+
+  const rpcRes = await tryVoidMonthlyClosePhase3TxRpc_(sb, {
+    customerId,
+    periodYm,
+    voidReason,
+    actor,
+    ts
+  });
+  if (!rpcRes.rpcMissing) {
+    if (rpcRes.success === false) return rpcRes;
+    try {
+      await recalculateCustomerCumulativeFromPostedRebates_(sb, customerId, actor, ts);
+    } catch (e) {
+      return fail(
+        "累積重算失敗：" +
+          (e?.message || String(e)) +
+          "（單據已作廢，請聯絡管理員校正累積）"
+      );
+    }
+    const steps = Array.isArray(rpcRes.steps) ? rpcRes.steps : [];
+    await writeAuditLog_(
+      "commercial_dealer_monthly_stat",
+      rpcRes.stat_id || "",
+      "BUNDLE_VOID_COMMERCIAL_DEALER_MONTHLY_CLOSE",
+      actor,
+      JSON.stringify({
+        customer_id: customerId,
+        period_ym: periodYm,
+        void_reason: voidReason,
+        steps,
+        rpc: "erp_cc_void_monthly_close_phase3_tx"
+      })
+    );
+    return ok({
+      message: rpcRes.message || "VOIDED",
+      customer_id: customerId,
+      period_ym: periodYm,
+      stat_id: rpcRes.stat_id,
+      steps,
+      close_rpc: rpcRes.close_rpc === true
+    });
+  }
+
   const steps = [];
 
   const { data: rebate } = await sb
@@ -3530,7 +4001,7 @@ async function batchPostCommercialDealerMonthlyStatBundle(p) {
       if (existing && normId_(existing.status) === "POSTED") {
         const drift = buildMonthlyStatBillingDrift_(existing, billing);
         if (drift.has_new_billing) {
-          skipped.push({ customer_id: customerId, reason: "已過帳・有新單" });
+          skipped.push({ customer_id: customerId, reason: "已過帳・AR有變動" });
         } else {
           skipped.push({ customer_id: customerId, reason: "本月統計已過帳" });
         }
@@ -3788,6 +4259,111 @@ async function postCommercialDealerRebateBundle(p) {
     system_remark: ""
   };
 
+  if (settleMode === "CARRY_FORWARD") {
+    const rpcRes = await tryPostRebateCfPhase3TxRpc_(sb, {
+      rebateJson: row,
+      actor,
+      ts
+    });
+    if (!rpcRes.rpcMissing) {
+      if (rpcRes.success === false) return rpcRes;
+      creditApplied = roundMoney_(Number(rpcRes.credit_applied != null ? rpcRes.credit_applied : rebateAmountFinal));
+      if (creditApplied > 1e-9) {
+        const { data: custAfter } = await sb
+          .from("customer")
+          .select("dealer_rebate_credit_balance")
+          .eq("customer_id", customerId)
+          .maybeSingle();
+        creditBalanceAfter = roundMoney_(custAfter?.dealer_rebate_credit_balance || 0);
+      }
+      if (!rpcRes.idempotent) {
+        await writeAuditLog_(
+          "commercial_dealer_rebate",
+          rebateId,
+          "BUNDLE_POST_COMMERCIAL_DEALER_REBATE",
+          actor,
+          JSON.stringify({
+            rebate_id: rebateId,
+            customer_id: customerId,
+            period_ym: periodYm,
+            rebate_amount: rebateAmount,
+            settle_mode: settleMode,
+            credit_applied: creditApplied,
+            credit_balance_after: creditBalanceAfter,
+            rpc: "erp_cc_post_rebate_cf_phase3_tx"
+          })
+        );
+      }
+      return ok({
+        rebate_id: rebateId,
+        rebate_amount: rebateAmount,
+        settle_mode: settleMode,
+        ar_id: "",
+        credit_applied: creditApplied,
+        credit_balance_after: creditBalanceAfter,
+        billing_net: billingNet,
+        cumulative: null,
+        rebate_rpc: rpcRes.rebate_rpc === true,
+        idempotent: !!rpcRes.idempotent
+      });
+    }
+  }
+
+  if (settleMode === "CREDIT_NOTE" && rebateAmountFinal > 1e-9) {
+    let cnPlan;
+    try {
+      cnPlan = await planRebateCreditNote_(sb, ctx.billing.ar_ids, rebateAmountFinal, periodYm, actor, p._session, {
+        allowRepair: false
+      });
+    } catch (e) {
+      return fail(e?.message || String(e));
+    }
+    if (cnPlan.err) return fail(cnPlan.err);
+
+    const rpcRes = await tryPostRebateCnPhase3TxRpc_(sb, {
+      rebateJson: row,
+      arCuts: cnPlan.cuts || [],
+      periodYm,
+      actor,
+      ts
+    });
+    if (!rpcRes.rpcMissing) {
+      if (rpcRes.success === false) return rpcRes;
+      arId = normId_(rpcRes.ar_id || cnPlan.ar_id);
+      creditApplied = roundMoney_(Number(rpcRes.credit_applied != null ? rpcRes.credit_applied : cnPlan.credit_applied));
+      if (!rpcRes.idempotent) {
+        await writeAuditLog_(
+          "commercial_dealer_rebate",
+          rebateId,
+          "BUNDLE_POST_COMMERCIAL_DEALER_REBATE",
+          actor,
+          JSON.stringify({
+            rebate_id: rebateId,
+            customer_id: customerId,
+            period_ym: periodYm,
+            rebate_amount: rebateAmount,
+            settle_mode: settleMode,
+            ar_id: arId,
+            credit_applied: creditApplied,
+            rpc: "erp_cc_post_rebate_cn_phase3_tx"
+          })
+        );
+      }
+      return ok({
+        rebate_id: rebateId,
+        rebate_amount: rebateAmount,
+        settle_mode: settleMode,
+        ar_id: arId,
+        credit_applied: creditApplied,
+        credit_balance_after: creditBalanceAfter,
+        billing_net: billingNet,
+        cumulative: null,
+        rebate_rpc: rpcRes.rebate_rpc === true,
+        idempotent: !!rpcRes.idempotent
+      });
+    }
+  }
+
   const { error: insErr } = await sb.from("commercial_dealer_rebate").insert(row);
   if (insErr) return fail(insErr.message || String(insErr));
 
@@ -3879,7 +4455,8 @@ async function postCommercialDealerRebateBundle(p) {
     credit_applied: creditApplied,
     credit_balance_after: creditBalanceAfter,
     billing_net: billingNet,
-    cumulative: null
+    cumulative: null,
+    rebate_rpc: false
   });
 }
 
@@ -3917,8 +4494,33 @@ async function voidCommercialDealerRebateBundle(p) {
 
   const skipCumulativeRecalc = !!(p._skipCumulativeRecalc || p._monthly_close_cascade);
   const ts = nowIso();
+  let rebateVoidedByRpc = false;
 
-  if (rebateAmount > 1e-9) {
+  if (settleMode === "CARRY_FORWARD") {
+    const rpcRes = await tryVoidRebateCfPhase3TxRpc_(sb, {
+      rebateId,
+      voidReason,
+      actor,
+      ts
+    });
+    if (!rpcRes.rpcMissing) {
+      if (rpcRes.success === false) return rpcRes;
+      rebateVoidedByRpc = true;
+    }
+  } else if (settleMode === "CREDIT_NOTE") {
+    const rpcRes = await tryVoidRebateCnPhase3TxRpc_(sb, {
+      rebateId,
+      voidReason,
+      actor,
+      ts
+    });
+    if (!rpcRes.rpcMissing) {
+      if (rpcRes.success === false) return rpcRes;
+      rebateVoidedByRpc = true;
+    }
+  }
+
+  if (rebateAmount > 1e-9 && !rebateVoidedByRpc) {
     if (settleMode === "CREDIT_NOTE") {
       let revRes;
       try {
@@ -3966,16 +4568,18 @@ async function voidCommercialDealerRebateBundle(p) {
     "[" + ts + "] " + actor + " 作廢月結回饋：" + voidReason
   );
 
-  const { error: updErr } = await sb
-    .from("commercial_dealer_rebate")
-    .update({
-      status: "VOID",
-      updated_by: actor,
-      updated_at: ts,
-      system_remark: sysRemark
-    })
-    .eq("rebate_id", rebateId);
-  if (updErr) return fail(updErr.message || String(updErr));
+  if (!rebateVoidedByRpc) {
+    const { error: updErr } = await sb
+      .from("commercial_dealer_rebate")
+      .update({
+        status: "VOID",
+        updated_by: actor,
+        updated_at: ts,
+        system_remark: sysRemark
+      })
+      .eq("rebate_id", rebateId);
+    if (updErr) return fail(updErr.message || String(updErr));
+  }
 
   let cumulativeRecalc = {};
   if (!skipCumulativeRecalc) {
@@ -3997,7 +4601,12 @@ async function voidCommercialDealerRebateBundle(p) {
       period_ym: periodYm,
       void_reason: voidReason,
       settle_mode: settleMode,
-      rebate_amount: rebateAmount
+      rebate_amount: rebateAmount,
+      rpc: rebateVoidedByRpc
+        ? settleMode === "CREDIT_NOTE"
+          ? "erp_cc_void_rebate_cn_phase3_tx"
+          : "erp_cc_void_rebate_cf_phase3_tx"
+        : false
     })
   );
 
@@ -4007,7 +4616,8 @@ async function voidCommercialDealerRebateBundle(p) {
     customer_id: customerId,
     period_ym: periodYm,
     cumulative: cumulativeReverse.skipped ? null : cumulativeReverse,
-    cumulative_recalc: cumulativeRecalc.skipped ? null : cumulativeRecalc
+    cumulative_recalc: cumulativeRecalc.skipped ? null : cumulativeRecalc,
+    rebate_rpc: rebateVoidedByRpc
   });
 }
 
